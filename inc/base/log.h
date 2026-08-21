@@ -94,10 +94,12 @@ enum {
 
 #define log_ratelimited(level, fmt, ...)		\
 ({							\
-	static uint64_t __last_us = 0;			\
-	static uint64_t __suppressed = 0;		\
+	static uint64_t __last_us;			\
+	static uint64_t __suppressed;			\
 	uint64_t __cur_us = microtime();		\
-	if (__cur_us - __last_us >= ONE_SECOND) {	\
+	/* microtime() starts near 0, so treat "never logged" explicitly \
+	 * rather than swallowing the first second of the process */ \
+	if (!__last_us || __cur_us - __last_us >= ONE_SECOND) {	\
 		if (__suppressed) {			\
 			logk(level, "%s:%d %s() suppressed %ld times", \
 			     __FILE__, __LINE__, __func__, __suppressed); \
