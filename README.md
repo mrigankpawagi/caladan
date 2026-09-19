@@ -91,18 +91,61 @@ MTU to the value you'd like, up to the size of the MTU set for the interface.
 #### Directpath
 Directpath allows runtime cores to directly send packets to/receive packets
 from the NIC, enabling higher throughput than when the IOKernel handles all
-packets. Directpath is currently only supported with Mellanox ConnectX-4
-using Mellanox OFED v4.6 or newer. For best performance, NIC firmware
-must include support for User Context Objects (DEVX) and Software Managed
-Steering Tables. For the ConnectX-5, the firmware version must be at least
-16.26.1040. Additionally, directpath requires Linux kernel version 5.0.0 or
-newer.
+packets. Directpath is currently only supported with Mellanox ConnectX-4 and
+newer NICs. Standard and VFIO directpath differ in who owns the NIC:
 
-To enable directpath, add `enable_directpath` to the config file for all
-runtimes that should use directpath, and inform the IOKernel of the NIC's
-PCI address by starting it with the extra arguments `nicpci <pci address>`.
-Each runtime launched with directpath must currently run as root and have a
-unique IP address.
+| | Standard directpath | VFIO directpath |
+|---|---|---|
+| NIC driver | Kernel `mlx5_core`; Linux interface stays up | `vfio-pci`; no Linux interface |
+| Queue and steering setup | Each runtime sets up its own | IOKernel |
+| Runtime config | `enable_directpath 1` | _None_ |
+| Runtimes need root | Yes | No |
+| IOKernel arguments | `nicpci <pci address>` | `vfio nicpci <pci address>` |
+
+##### Standard directpath
+The NIC stays bound to the kernel's `mlx5_core` driver. Each runtime opens
+the NIC through rdma-core and creates its own queues and steering rules.
+Runtimes use flow steering (software-managed steering tables) when the NIC
+supports it and fall back to queue steering (RSS) otherwise. For best
+performance, NIC firmware must include support for User Context Objects
+(DEVX) and Software Managed Steering Tables. For the ConnectX-5, the firmware
+version must be at least 16.26.1040. Additionally, directpath requires Linux
+kernel version 5.0.0 or newer. Mellanox OFED is no longer required: Caladan
+builds its own rdma-core and uses the kernel's in-tree `mlx5_core` and
+`mlx5_ib` drivers.
+
+To enable directpath, add `enable_directpath 1` to the config file for all
+runtimes that should use directpath (`enable_directpath fs` or
+`enable_directpath qs` forces flow steering or queue steering), and inform the
+IOKernel of the NIC's PCI address by starting it with the extra arguments
+`nicpci <pci address>`. Each runtime launched with directpath must currently
+run as root and have a unique IP address.
+
+##### VFIO directpath
+The IOKernel owns the whole NIC and manages it from user space through
+rdma-core's mlx5 VFIO provider, which issues firmware commands directly. It
+creates each runtime's queues, RSS table and steering rules, and passes the
+runtime its queue memory and a doorbell page. It also wakes runtimes on NIC
+completion events and forwards ARP requests. All runtimes acquire directpath
+queues when the IOKernel is in VFIO mode and do not need to be started with
+root.
+
+NIC firmware must report the `umem_uid_0` capability, which rdma-core's VFIO
+provider checks when it opens the device, and must support receive queues
+backed by a shared receive pool (RMP). Support for both features was added to
+firmware in early 2022. For the ConnectX-5, this was in the 16.32.x firmware
+release. You can check the version before binding the NIC to `vfio-pci` with `ethtool -i <ifname>`
+or `ibv_devinfo`.
+
+VFIO directpath also requires an enabled IOMMU (for Intel CPUs, add
+`intel_iommu=on` to the kernel boot parameters). Bring down the NIC's Linux
+interface, bind the NIC to `vfio-pci`, and start the IOKernel with `vfio`:
+```
+sudo ip link set down <ifname>
+sudo modprobe vfio-pci
+sudo ./dpdk/usertools/dpdk-devbind.py -b vfio-pci <pci address>
+sudo ./iokerneld vfio nicpci <pci address>
+```
 
 ### Storage
 This code has been tested with an Intel Optane SSD 900P Series NVMe device.

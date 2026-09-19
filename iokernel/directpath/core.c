@@ -605,6 +605,9 @@ static int create_rq(struct directpath_ctx *dp, struct qp *qp, uint32_t log_nr_w
 	qp->rx_wq.obj = mlx5dv_devx_obj_create(vfcontext, in, sizeof(in), out, sizeof(out));
 	if (unlikely(!qp->rx_wq.obj)) {
 		LOG_CMD_FAIL("rq", create_rq_out, out);
+		/* ConnectX-5 firmware before 16.32 rejects RMP-backed RQs with this syndrome */
+		if (DEVX_GET(create_rq_out, out, syndrome) == 0x71ce3f)
+			log_err("check NIC firmware version: vfio directpath needs recent firmware (see README)");
 		return -1;
 	}
 
@@ -1265,8 +1268,12 @@ int directpath_init(void)
 
 	vfcontext = ibv_open_device(dev_list[0]);
 	if (!vfcontext) {
-		log_err("enable to initialize vfio context: %d", errno);
-		return errno ? -errno : -1;
+		ret = errno;
+		log_err("unable to initialize vfio context: %d", ret);
+		/* rdma-core's VFIO provider returns EOPNOTSUPP if firmware lacks umem_uid_0 */
+		if (ret == EOPNOTSUPP)
+			log_err("check NIC firmware version: vfio directpath needs recent firmware (see README)");
+		return ret ? -ret : -1;
 	}
 
 	admin_uar = mlx5dv_devx_alloc_uar(vfcontext, MLX5_IB_UAPI_UAR_ALLOC_TYPE_NC);

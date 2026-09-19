@@ -17,12 +17,22 @@ DEFINE_PERTHREAD(struct tcache_perthread, directpath_buf_pt);
 
 int directpath_parse_arg(const char *name, const char *val)
 {
+	if (strncmp(val, "ext", strlen("ext")) == 0) {
+		netcfg.directpath_mode = DIRECTPATH_MODE_EXTERNAL;
+		return 0;
+	}
+
+	/* the iokernel's vfio mode is read before the config file is parsed */
+	if (netcfg.directpath_mode == DIRECTPATH_MODE_EXTERNAL) {
+		log_warn("cfg: ignoring %s %s, the IOKernel is running with vfio",
+			 name, val);
+		return 0;
+	}
+
 	if (strncmp(val, "fs", strlen("fs")) == 0)
 		netcfg.directpath_mode = DIRECTPATH_MODE_FLOW_STEERING;
 	else if (strncmp(val, "qs", strlen("qs")) == 0)
 		netcfg.directpath_mode = DIRECTPATH_MODE_QUEUE_STEERING;
-	else if (strncmp(val, "ext", strlen("ext")) == 0)
-		netcfg.directpath_mode = DIRECTPATH_MODE_EXTERNAL;
 	else
 		netcfg.directpath_mode = DIRECTPATH_MODE_ALLOW_ANY;
 
