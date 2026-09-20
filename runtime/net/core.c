@@ -441,6 +441,9 @@ struct mbuf *net_tx_alloc_mbuf(size_t header_len)
 	mbuf_init(m, buf, net_get_mtu() + eth_headroom() + extra_headroom,
 		  extra_headroom + header_len);
 	m->txflags = 0;
+	/* The iokernel steers a looped-back packet by this hint, so a stale one
+	 * from the mbuf's last user sends ARP to the wrong runtime. */
+	m->tx_dst_ip = 0;
 	m->release = net_tx_release_mbuf;
 	return m;
 }
@@ -472,6 +475,7 @@ struct mbuf *net_tx_alloc_mbuf_small(size_t header_len)
 	mbuf_init(m, buf, SMALL_BUF_SIZE + extra_headroom,
 		  header_len + extra_headroom);
 	m->txflags = 0;
+	m->tx_dst_ip = 0;
 	m->release = net_tx_release_mbuf;
 	return m;
 }

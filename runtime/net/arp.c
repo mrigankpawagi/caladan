@@ -333,6 +333,7 @@ int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m, bool 
 	struct arp_entry *e, *newe = NULL;
 	int idx = hash_ip(daddr);
 
+again:
 	/* hot-path: @daddr hits in ARP cache */
 	rcu_read_lock();
 	e = lookup_entry(idx, daddr);
@@ -361,6 +362,7 @@ int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m, bool 
 			sfree(newe);
 		if (e->state != ARP_STATE_PROBING) {
 			*dhost_out = e->eth;
+			*is_local = e->local;
 			spin_unlock_np(&arp_lock);
 			return 0;
 		}
@@ -368,16 +370,16 @@ int arp_lookup(uint32_t daddr, struct eth_addr *dhost_out, struct mbuf *m, bool 
 		/* insert new entry */
 		e = newe;
 		insert_entry(e, idx);
+	} else {
+		/* the worker deleted the entry after the rcu lookup */
+		spin_unlock_np(&arp_lock);
+		goto again;
 	}
 
 	/* enqueue the mbuf for later transmission */
-	if (m && e)
+	if (m)
 		mbufq_push_tail(&e->q, m);
 	spin_unlock_np(&arp_lock);
-
-	/* if the entry was removed, assume unreachable and free */
-	if (m && !e)
-		mbuf_free(m);
 
 	return -EINPROGRESS;
 }
