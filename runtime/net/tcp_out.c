@@ -356,8 +356,7 @@ ssize_t tcp_tx_send(tcpconn_t *c, const void *buf, size_t len, bool push)
 		pos += seglen;
 
 		/* if not pushing, keep the last buffer for later */
-		if (!push && pos == end && mbuf_length(m) -
-		    sizeof(struct tcp_hdr) < mss) {
+		if (!push && pos == end && mbuf_length(m) < mss) {
 			c->tx_pending = m;
 			break;
 		}
