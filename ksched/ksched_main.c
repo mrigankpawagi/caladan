@@ -161,6 +161,9 @@ static void ksched_next_tid(struct ksched_percpu *kp, int cpu, pid_t tid)
 }
 
 static bool has_mwait;
+static int use_halt;
+module_param_named(halt, use_halt, int, 0444);
+MODULE_PARM_DESC(halt, "halt idle cores instead of mwait; the iokernel must IPI on every run");
 
 static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int hint,
 				unsigned int val)
@@ -169,6 +172,16 @@ static int ksched_mwait_on_addr(const unsigned int *addr, unsigned int hint,
 	size_t i;
 
 	lockdep_assert_irqs_disabled();
+
+	if (use_halt) {
+		cur = smp_load_acquire(addr);
+		if (cur != val)
+			return cur;
+		/* an IPI that lands after the check stays pending and breaks the halt */
+		arch_safe_halt();
+		raw_local_irq_disable();
+		return smp_load_acquire(addr);
+	}
 
 	if (!has_mwait) {
 		for (i = 0; i < 10; i++) {
@@ -567,6 +580,12 @@ static int __init ksched_init(void)
 	ret = uintr_init();
 	if (ret)
 		goto fail_uintr;
+
+	if (use_halt && uintr_enabled) {
+		printk(KERN_ERR "ksched: halt mode requires nouintr=1");
+		ret = -EINVAL;
+		goto fail_hijack;
+	}
 
 	ret = ksched_cpuidle_hijack();
 	if (ret)

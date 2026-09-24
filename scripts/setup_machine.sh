@@ -23,11 +23,15 @@ fi
 rmmod ksched
 rm /dev/ksched
 
+KSCHED_ARGS=""
 if [[ "$1x" = "nouintrx" ]]; then
-  insmod $(dirname $0)/../ksched/ksched.ko nouintr=1
-else
-  insmod $(dirname $0)/../ksched/ksched.ko
+  KSCHED_ARGS="nouintr=1"
 fi
+# halt idle cores in a VM; polling them burns host cores
+if [[ "$1x" = "haltx" ]] || grep -q '^flags.*\<hypervisor\>' /proc/cpuinfo; then
+  KSCHED_ARGS="nouintr=1 halt=1"
+fi
+insmod $(dirname $0)/../ksched/ksched.ko $KSCHED_ARGS
 
 mknod /dev/ksched c 280 0
 chmod uga+rwx /dev/ksched
