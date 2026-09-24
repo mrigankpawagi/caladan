@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "defs.h"
+#include "ksched.h"
 #include "sched.h"
 
 #define LOG_INTERVAL_US		(1000 * 1000)
@@ -113,6 +114,10 @@ static void dataplane_loop_vfio(void)
 		if (!work_done)
 			dp_clients_rx_control_lrpcs();
 
+		/* halt mode means cpu is scarce; don't spin without runtimes */
+		if (ksched_halt && !dp.nr_clients)
+			usleep(IOKERNEL_IDLE_SLEEP_US);
+
 		STAT_INC(LOOPS, 1);
 	}
 }
@@ -164,6 +169,10 @@ void dataplane_loop(void)
 		/* handle control messages */
 		if (!work_done)
 			dp_clients_rx_control_lrpcs();
+
+		/* halt mode means cpu is scarce; don't spin without runtimes */
+		if (ksched_halt && !dp.nr_clients)
+			usleep(IOKERNEL_IDLE_SLEEP_US);
 
 		STAT_INC(LOOPS, 1);
 
