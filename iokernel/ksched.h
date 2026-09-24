@@ -17,6 +17,7 @@
 
 extern int ksched_fd, ksched_count, ksched_pmc_count, last_intr_core;
 extern bool ksched_has_uintr;
+extern bool ksched_halt;
 extern struct ksched_shm_cpu *ksched_shm;
 extern cpu_set_t ksched_set;
 extern unsigned int ksched_gens[NCPU];
@@ -32,6 +33,12 @@ static inline void ksched_run(unsigned int core, pid_t tid)
 
 	ksched_shm[core].tid = tid;
 	store_release(&ksched_shm[core].gen, gen);
+
+	/* a halted core needs an IPI to see the new generation */
+	if (ksched_halt) {
+		CPU_SET(core, &ksched_set);
+		ksched_count++;
+	}
 }
 
 /**

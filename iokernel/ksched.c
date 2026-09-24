@@ -2,6 +2,7 @@
  * ksched.c - an interface to the ksched kernel module
  */
 
+#include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -21,6 +22,8 @@ int ksched_count;
 int ksched_pmc_count;
 /* whether UINTR is enabled */
 bool ksched_has_uintr;
+/* whether ksched was loaded with halt=1 */
+bool ksched_halt;
 /* most recent core with an enqueued interrupt */
 int last_intr_core;
 /* the shared memory region with the kernel module */
@@ -53,7 +56,8 @@ void ksched_uintr_init(void)
 int ksched_init(void)
 {
 	char *ksched_addr;
-	int i;
+	int i, val;
+	FILE *f;
 
 	/* first open the file descriptor */
 	ksched_fd = open("/dev/ksched", O_RDWR);
@@ -74,6 +78,16 @@ int ksched_init(void)
 		    PROT_READ | PROT_WRITE, MAP_SHARED, ksched_fd, 0);
 	if (ksched_addr == MAP_FAILED)
 		return -errno;
+
+	/* halt mode is set on the kernel module; follow it */
+	f = fopen("/sys/module/ksched/parameters/halt", "r");
+	if (f) {
+		ksched_halt = fscanf(f, "%d", &val) == 1 && val != 0;
+		fclose(f);
+	}
+	if (ksched_halt)
+		log_warn("ksched: halt mode enabled, cores wake with an IPI.\n\t"
+			 "Context switch performance will be worse.");
 
 	/* then initialize the generation numbers */
 	ksched_shm = (struct ksched_shm_cpu *)ksched_addr;
