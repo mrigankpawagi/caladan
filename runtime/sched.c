@@ -28,6 +28,9 @@ DEFINE_PERTHREAD(void *, runtime_stack);
 DEFINE_PERTHREAD(uint64_t, runtime_fsbase);
 /* Flag to prevent watchdog from running */
 bool disable_watchdog;
+/* time constants, converted once at init */
+static uint64_t watchdog_cycles;
+static uint64_t min_poll_cycles;
 
 /* real-time compute congestion signals (shared with the iokernel) */
 struct runtime_info *runtime_info;
@@ -363,7 +366,7 @@ static __noinline void schedule(void)
 	/* if it's been too long, run the softirq handler */
 	if (!disable_watchdog &&
 	    unlikely(start_tsc - l->last_softirq_tsc >=
-	             cycles_per_us * RUNTIME_WATCHDOG_US)) {
+	             watchdog_cycles)) {
 		l->last_softirq_tsc = start_tsc;
 		if (do_watchdog(l))
 			goto done;
@@ -412,7 +415,7 @@ again:
 	perthread_get_stable(last_tsc) = rdtsc();
 	if (!preempt_cede_needed(l) &&
 	    (++iters < RUNTIME_SCHED_POLL_ITERS ||
-	     perthread_get_stable(last_tsc) - start_tsc < cycles_per_us * RUNTIME_SCHED_MIN_POLL_US ||
+	     perthread_get_stable(last_tsc) - start_tsc < min_poll_cycles ||
 	     storage_pending_completions(l) ||
 	     !mbufq_empty(&l->txpktq_overflow))) {
 		goto again;
@@ -487,7 +490,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 	    preempt_cede_needed(k) ||
 	    (!disable_watchdog &&
 	     unlikely(now_tsc - k->last_softirq_tsc >
-		      cycles_per_us * RUNTIME_WATCHDOG_US))) {
+		      watchdog_cycles))) {
 		jmp_runtime(schedule);
 		return;
 	}
@@ -1038,6 +1041,9 @@ int sched_init_thread(void)
 int sched_init(void)
 {
 	int ret, i, j, siblings;
+
+	watchdog_cycles = us_to_cycles(RUNTIME_WATCHDOG_US);
+	min_poll_cycles = us_to_cycles(RUNTIME_SCHED_MIN_POLL_US);
 
 	/*
 	 * set up allocation routines for threads

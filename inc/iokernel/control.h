@@ -170,7 +170,7 @@ struct iokernel_info {
 	unsigned char		rss_key[52];
 	size_t			rss_key_len;
 	struct pci_addr		directpath_pci;
-	int			cycles_per_us;
+	uint64_t		tsc_mult;
 	int			managed_numa_node;
 	struct eth_addr		host_mac;
 	bool			external_directpath_enabled;

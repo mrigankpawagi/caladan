@@ -122,7 +122,7 @@ static void proc_timer_collapse(uint64_t pos)
 
 void proc_timer_add(struct proc *p, uint64_t next_poll_tsc)
 {
-	p->timer_pos_us = (next_poll_tsc - start_tsc) / cycles_per_us;
+	p->timer_pos_us = cycles_to_us(next_poll_tsc - timebase.start_tsc);
 
 	if (unlikely(p->timer_pos_us <= timer_pos)) {
 		proc_enable_sched_poll_nocheck(p);

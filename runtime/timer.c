@@ -100,7 +100,7 @@ static void update_q_ptrs(struct kthread *k)
 	uint64_t next_tsc = UINT64_MAX;
 
 	if (k->timern)
-		next_tsc = k->timers[0].deadline_us * cycles_per_us + start_tsc;
+		next_tsc = us_to_cycles(k->timers[0].deadline_us) + timebase.start_tsc;
 	ACCESS_ONCE(k->next_timer_tsc) = ACCESS_ONCE(k->q_ptrs->next_timer_tsc) = next_tsc;
 }
 

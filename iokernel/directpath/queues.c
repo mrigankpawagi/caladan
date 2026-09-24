@@ -14,6 +14,15 @@
 #define QUEUE_DEMOTION_US 1500
 #define QUEUE_PROMOTION_US 300
 
+static uint64_t queue_demotion_cycles;
+static uint64_t queue_promotion_cycles;
+
+void directpath_queues_init(void)
+{
+	queue_demotion_cycles = us_to_cycles(QUEUE_DEMOTION_US);
+	queue_promotion_cycles = us_to_cycles(QUEUE_PROMOTION_US);
+}
+
 static void directpath_arm_queue(struct directpath_ctx *ctx, struct cq *cq, uint32_t cons_idx)
 {
 	uint64_t doorbell;
@@ -77,12 +86,12 @@ static void directpath_queue_update_state(struct directpath_ctx *ctx,
 
 	if (th->active) {
 		if (cq->state != RXQ_STATE_ACTIVE &&
-		    cur_tsc - th->change_tsc > QUEUE_PROMOTION_US * cycles_per_us)
+		    cur_tsc - th->change_tsc > queue_promotion_cycles)
 			directpath_enable_queue(ctx, idx);
 	} else {
 		if (ctx->active_rx_count > 1 &&
 		    cq->state == RXQ_STATE_ACTIVE &&
-		    cur_tsc - th->change_tsc > QUEUE_DEMOTION_US * cycles_per_us)
+		    cur_tsc - th->change_tsc > queue_demotion_cycles)
 			directpath_disable_queue(ctx, idx);
 	}
 }
@@ -165,7 +174,7 @@ bool directpath_poll_proc(struct proc *p, uint64_t *delay_cycles,
 	}
 
 
-	delay *= cycles_per_us;
+	delay = us_to_cycles(delay);
 	*delay_cycles = MAX(*delay_cycles, delay);
 
 	if (ctx->hw_rss_gen < ctx->sw_rss_gen && !directpath_command_queued(ctx))

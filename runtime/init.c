@@ -166,7 +166,7 @@ int runtime_init(const char *cfgpath, thread_fn_t main_fn, void *arg)
 	if (unlikely(ret))
 		return ret;
 
-	cycles_per_us = iok.iok_info->cycles_per_us;
+	timebase.tsc_mult = iok.iok_info->tsc_mult;
 
 	/*
 	 * If the IOKernel is constraining scheduling to a single NUMA node,

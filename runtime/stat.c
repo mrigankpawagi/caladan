@@ -119,7 +119,7 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 	}
 
 	/* report the clock rate */
-	ret = append_stat(&pos, end, "cycles_per_us", cycles_per_us);
+	ret = append_stat(&pos, end, "cycles_per_us", timebase.cycles_per_us);
 	if (ret)
 		return ret;
 

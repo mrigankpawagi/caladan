@@ -65,7 +65,15 @@ pub fn delay_us(microseconds: u64) {
 
 #[inline]
 pub fn microtime() -> u64 {
-    unsafe { (rdtsc() - ffi::start_tsc as u64) / ffi::cycles_per_us as u64 }
+    nanotime() / 1000
+}
+
+#[inline]
+pub fn nanotime() -> u64 {
+    unsafe {
+        (((rdtsc() - ffi::timebase.start_tsc) as u128 * ffi::timebase.tsc_mult as u128) >> 64)
+            as u64
+    }
 }
 
 pub fn sleep(duration: Duration) {

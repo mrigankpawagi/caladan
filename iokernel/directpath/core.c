@@ -1253,6 +1253,8 @@ int directpath_init(void)
 	if (!cfg.vfio_directpath)
 		return 0;
 
+	directpath_queues_init();
+
 	if (!nic_pci_addr_str) {
 		log_err("please supply the pci address for the nic");
 		return -EINVAL;

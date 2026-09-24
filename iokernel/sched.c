@@ -63,6 +63,10 @@ const struct sched_ops *sched_ops;
 
 /* current hardware timestamp */
 static uint64_t cur_tsc;
+/* time constants, converted once at init */
+static uint64_t poll_interval_cycles;
+static uint64_t timer_wheel_thresh_cycles;
+static double us_per_cycle;
 
 static void proc_disable_sched_poll(struct proc *p)
 {
@@ -83,7 +87,7 @@ static void proc_set_next_poll(struct proc *p, uint64_t tsc)
 	tsc = MAX(tsc, cur_tsc);
 	p->next_poll_tsc = tsc;
 
-	if (tsc - cur_tsc > PROC_TIMER_WHEEL_THRESH_US * cycles_per_us) {
+	if (tsc - cur_tsc > timer_wheel_thresh_cycles) {
 		list_del_from(&poll_list, &p->link);
 		if (tsc != UINT64_MAX)
 			proc_timer_add(p, tsc);
@@ -374,7 +378,7 @@ static uint64_t sched_measure_mlx5_delay(struct cq_mon *m, uint32_t cur_tail)
 
 	cur_tail &= m->nr_descriptors - 1;
 	cqe = m->ring + ((size_t)cur_tail << m->log_slot_size);
-	return hw_timestamp_delay_us(cqe) * cycles_per_us;
+	return us_to_cycles(hw_timestamp_delay_us(cqe));
 }
 
 static bool sched_cq_has_hw_timestamp(struct cq_mon *m)
@@ -400,14 +404,14 @@ sched_measure_cq_delay(struct cq_mon *m, uint32_t cur_tail, bool *has_work,
 
 		*has_work = true;
 		/* quickly approximate standing queue signal */
-		*standing_queue |= delay >= IOKERNEL_POLL_INTERVAL * cycles_per_us;
+		*standing_queue |= delay >= poll_interval_cycles;
 		*delay_cycles = delay;
 		return;
 	}
 
 	/* generic detection logic - see cq_mon.h */
 	cq_measure_delay(m, cur_tail, cur_tsc,
-			 IOKERNEL_POLL_INTERVAL * cycles_per_us, has_work,
+			 poll_interval_cycles, has_work,
 			 standing_queue, delay_cycles);
 }
 
@@ -509,10 +513,10 @@ sched_update_kthread_metrics(struct thread *th, bool work_pending)
 		uthread_elapsed_tsc = cur_tsc - MIN(tsc, cur_tsc);
 	}
 
-	th->metrics.uthread_elapsed_us = uthread_elapsed_tsc / cycles_per_us;
+	th->metrics.uthread_elapsed_us = cycles_to_us(uthread_elapsed_tsc);
 	th->metrics.rcu_gen = rcu_gen;
 	th->metrics.work_pending = work_pending;
-	th->metrics.kthread_elapsed_us = (cur_tsc - th->change_tsc) / cycles_per_us;
+	th->metrics.kthread_elapsed_us = cycles_to_us(cur_tsc - th->change_tsc);
 }
 
 static void
@@ -565,7 +569,7 @@ sched_measure_kthread_delay(struct proc *p, struct thread *th, uint64_t *thread_
 	tmp = *next_timer = ACCESS_ONCE(th->q_ptrs->next_timer_tsc);
 	if (tmp <= cur_tsc) {
 		*has_work = true;
-		*standing_queue |= tmp + IOKERNEL_POLL_INTERVAL * cycles_per_us < cur_tsc;
+		*standing_queue |= tmp + poll_interval_cycles < cur_tsc;
 	}
 	*thread_delay += calc_delay_tsc(tmp);
 
@@ -697,7 +701,7 @@ static void sched_measure_delay(struct proc *p)
 		dl.min_delay_us += rxq_delay;
 
 		dl.has_work = true;
-		dl.standing_queue |= rxq_delay >= IOKERNEL_POLL_INTERVAL * cycles_per_us;
+		dl.standing_queue |= rxq_delay >= poll_interval_cycles;
 		dl.parked_thread_busy |= sched_threads_active(p) == 0;
 	}
 
@@ -706,9 +710,9 @@ static void sched_measure_delay(struct proc *p)
 		dl.parked_thread_busy = false;
 
 	/* convert the delays to us */
-	dl.max_delay_us /= (double)cycles_per_us;
-	dl.min_delay_us /= (double)cycles_per_us;
-	dl.avg_delay_us /= (double)(cycles_per_us * sched_threads_active(p));
+	dl.max_delay_us *= us_per_cycle;
+	dl.min_delay_us *= us_per_cycle;
+	dl.avg_delay_us *= us_per_cycle / sched_threads_active(p);
 
 	/* report delay back to runtime */
 	sched_report_metrics(p, dl.max_delay_us);
@@ -798,8 +802,8 @@ void sched_poll(void)
 	 */
 
 	cur_tsc = rdtsc();
-	now = (cur_tsc - start_tsc) / cycles_per_us;
-	if (cur_tsc - last_time >= IOKERNEL_POLL_INTERVAL * cycles_per_us) {
+	now = cycles_to_us(cur_tsc - timebase.start_tsc);
+	if (cur_tsc - last_time >= poll_interval_cycles) {
 
 		STAT_INC(SCHED_RUN, 1);
 
@@ -991,6 +995,10 @@ int sched_init(void)
 {
 	int i;
 	bool valid = true;
+
+	poll_interval_cycles = us_to_cycles(IOKERNEL_POLL_INTERVAL);
+	timer_wheel_thresh_cycles = us_to_cycles(PROC_TIMER_WHEEL_THRESH_US);
+	us_per_cycle = timebase.tsc_mult * 0x1p-64 / 1000;
 
 	bitmap_init(sched_allowed_cores, cpu_count, false);
 

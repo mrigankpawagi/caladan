@@ -67,6 +67,7 @@ struct eq {
 
 extern bool directpath_arp_poll(void);
 extern int directpath_arp_server_init(void);
+extern void directpath_queues_init(void);
 
 
 enum {

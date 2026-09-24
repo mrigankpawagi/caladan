@@ -316,7 +316,7 @@ int main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
-	iok_info->cycles_per_us = cycles_per_us;
+	iok_info->tsc_mult = timebase.tsc_mult;
 	iok_info->managed_numa_node = managed_numa_node;
 	iok_info->external_directpath_enabled = cfg.vfio_directpath;
 	iok_info->external_directpath_rmp = vfio_prealloc_rmp;

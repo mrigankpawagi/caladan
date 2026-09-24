@@ -295,7 +295,7 @@ int ias_bw_init(void)
 		cfg.ias_bw_limit = IAS_BW_LIMIT;
 
 	/* Compute the multiplier to convert cache lines/cycle to bytes/us (= MB/s) */
-	ias_bw_estimate_multiplier = cycles_per_us * nr_channels * CACHE_LINE_SIZE;
+	ias_bw_estimate_multiplier = 1000 * 0x1p64 / timebase.tsc_mult * nr_channels * CACHE_LINE_SIZE;
 
 	/* convert from MB/s to per channel cache line/cycle */
 	ias_bw_thresh = cfg.ias_bw_limit / ias_bw_estimate_multiplier;
