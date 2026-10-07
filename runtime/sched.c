@@ -834,6 +834,15 @@ static __always_inline thread_t *__thread_create(void)
 		return NULL;
 	}
 	th->last_cpu = myk()->curr_cpu;
+
+	/*
+	 * Priority class is inherited from the creating thread, but only if it
+	 * is a class an application could have set (never SOFTIRQ). Deadlines
+	 * and service times are not inherited.
+	 */
+	th->prio_class = THREAD_PRIO_NORMAL;
+	if (thread_self() && thread_self()->prio_class < THREAD_PRIO_NR_USER)
+		th->prio_class = thread_self()->prio_class;
 	preempt_enable();
 
 	th->stack = s;
@@ -847,9 +856,71 @@ static __always_inline thread_t *__thread_create(void)
 	// Can be used to detect newly created thread.
 	th->ready_tsc = 0;
 	th->total_cycles = 0;
+	th->deadline_tsc = 0;
+	th->service_tsc = 0;
+	th->hinted = (th->prio_class != THREAD_PRIO_NORMAL &&
+		      th->prio_class < THREAD_PRIO_NR_USER);
 	atomic8_write(&th->interrupt_state, 0);
 
 	return th;
+}
+
+/**
+ * thread_set_hints - attaches scheduling hints to a thread
+ * @th: the thread to modify
+ * @h: the hints; a zeroed struct clears all hints
+ *
+ * Must only be called on the running thread (thread_self()) or on a thread
+ * that has been created but not yet readied. Hints take effect the next time
+ * the thread is made runnable.
+ *
+ * Returns 0 if successful, otherwise -EINVAL if the class is invalid.
+ */
+int thread_set_hints(thread_t *th, const struct thread_hints *h)
+{
+	if (h->prio_class >= THREAD_PRIO_NR_USER)
+		return -EINVAL;
+
+	/* the thread must not be sitting in a runqueue right now */
+	assert(!th->thread_ready);
+	assert(th == thread_self() || th->ready_tsc == 0);
+
+	th->prio_class = h->prio_class;
+	th->deadline_tsc = h->deadline_us ?
+		start_tsc + h->deadline_us * cycles_per_us : 0;
+	th->service_tsc = h->service_us * cycles_per_us;
+	th->hinted = (th->prio_class != THREAD_PRIO_NORMAL ||
+		      th->deadline_tsc != 0);
+	return 0;
+}
+
+/**
+ * thread_get_hints - reads back a thread's scheduling hints
+ * @th: the thread to inspect
+ * @out: filled with the hints (deadline converted back to microtime() units)
+ */
+void thread_get_hints(const thread_t *th, struct thread_hints *out)
+{
+	out->prio_class = th->prio_class < THREAD_PRIO_NR_USER ?
+			  th->prio_class : THREAD_PRIO_NORMAL;
+	out->deadline_us = th->deadline_tsc ?
+		(th->deadline_tsc - start_tsc) / cycles_per_us : 0;
+	out->service_us = th->service_tsc / cycles_per_us;
+}
+
+/**
+ * thread_mark_softirq - marks a runtime helper thread (internal use only)
+ * @th: the thread to mark
+ *
+ * Softirq threads always run ahead of application threads. They are kept in
+ * the plain ring (head slot), so they are never counted as "hinted".
+ */
+void thread_mark_softirq(thread_t *th)
+{
+	th->prio_class = THREAD_PRIO_SOFTIRQ;
+	th->deadline_tsc = 0;
+	th->service_tsc = 0;
+	th->hinted = false;
 }
 
 /**
@@ -909,6 +980,32 @@ int thread_spawn(thread_fn_t fn, void *arg)
 	thread_t *th = thread_create(fn, arg);
 	if (unlikely(!th))
 		return -ENOMEM;
+	thread_ready(th);
+	return 0;
+}
+
+/**
+ * thread_spawn_with_hints - creates and launches a new thread with hints
+ * @fn: a function pointer to the starting method of the thread
+ * @arg: an argument passed to @fn
+ * @h: scheduling hints to attach before the thread first runs
+ *
+ * Returns 0 if successful, otherwise -ENOMEM if out of memory or -EINVAL if
+ * the hints are invalid.
+ */
+int thread_spawn_with_hints(thread_fn_t fn, void *arg,
+			    const struct thread_hints *h)
+{
+	thread_t *th = thread_create(fn, arg);
+	int ret;
+
+	if (unlikely(!th))
+		return -ENOMEM;
+	ret = thread_set_hints(th, h);
+	if (unlikely(ret)) {
+		thread_free(th);
+		return ret;
+	}
 	thread_ready(th);
 	return 0;
 }
