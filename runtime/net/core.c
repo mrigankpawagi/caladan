@@ -775,6 +775,7 @@ int net_init_thread(void)
 	th = thread_create(iokernel_softirq, k);
 	if (!th)
 		return -ENOMEM;
+	thread_mark_softirq(th);
 
 	k->iokernel_softirq = th;
 

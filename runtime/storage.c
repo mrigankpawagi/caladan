@@ -269,6 +269,7 @@ int storage_init_thread(void)
 	th = thread_create(storage_softirq, k);
 	if (!th)
 		return -ENOMEM;
+	thread_mark_softirq(th);
 
 	k->storage_softirq = th;
 	spdk_nvme_ctrlr_get_default_io_qpair_opts(controller, &opts, sizeof(opts));
