@@ -738,6 +738,20 @@ extern int thread_spawn_main(thread_fn_t fn, void *arg);
 extern void thread_cede(void);
 extern void thread_ready_locked(thread_t *th);
 extern void thread_ready_head_locked(thread_t *th);
+extern void thread_mark_softirq(thread_t *th);
+
+/**
+ * thread_is_hinted - true if @th carries scheduling hints. Compiles to false
+ * when hints are disabled at build time so every hint branch folds away.
+ */
+static inline bool thread_is_hinted(const thread_t *th)
+{
+#ifdef CONFIG_THREAD_HINTS
+	return th->hinted;
+#else
+	return false;
+#endif
+}
 extern void join_kthread(struct kthread *k);
 extern void thread_finish_cede(void);
 extern void thread_finish_yield(void);

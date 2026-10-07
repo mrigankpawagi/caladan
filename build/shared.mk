@@ -15,6 +15,10 @@ ifeq ($(CONFIG_NO_UINTR),n)
 FLAGS += -muintr -DCONFIG_UINTR
 endif
 
+ifeq ($(CONFIG_THREAD_HINTS),y)
+FLAGS += -DCONFIG_THREAD_HINTS
+endif
+
 LDFLAGS = -T $(ROOT_PATH)/base/base.ld
 CC      ?= gcc
 LD      = $(CC)
