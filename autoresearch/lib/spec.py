@@ -17,8 +17,10 @@ _NAME = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
 _TOP_FIELDS = {
     "id", "slug", "generation", "title", "description", "changed_from_previous",
     "difficulty", "server", "client", "kinds", "load_rps", "score",
-    "antagonist", "repeats", "notes", "status",
+    "antagonist", "repeats", "notes", "status", "burst",
 }
+# highest instantaneous send rate the client is trusted with (req/s)
+CLIENT_PEAK_RPS = 700000
 
 
 class SpecError(ValueError):
@@ -89,10 +91,35 @@ def validate(spec):
     _need(score.get("percentile") in PERCENTILES, "score.percentile must be one of %s"
           % list(PERCENTILES))
 
+    b = spec.get("burst")
+    if b:
+        for key in ("period_us", "duty", "factor"):
+            _need(key in b, "burst.%s missing" % key)
+        _need(b["period_us"] >= 10, "burst.period_us must be >= 10")
+        _need(0 < b["duty"] < 1, "burst.duty must be between 0 and 1")
+        _need(b["factor"] >= 1, "burst.factor must be >= 1")
+        peak = max(loads) * burst_peak_multiplier(spec)
+        _need(peak <= CLIENT_PEAK_RPS, "busy-phase rate at the top load would be %d req/s, "
+              "above the client's %d; lower factor, duty, or load_rps" % (peak, CLIENT_PEAK_RPS))
+
     ant = spec.get("antagonist")
     if ant:
         for key in ("threads", "n", "spec", "kthreads"):
             _need(key in ant, "antagonist.%s missing" % key)
+
+
+def burst_peak_multiplier(spec):
+    """Busy-phase rate relative to the average rate (1.0 without bursts)."""
+    b = spec.get("burst")
+    if not b:
+        return 1.0
+    return b["factor"] / (b["duty"] * b["factor"] + 1 - b["duty"])
+
+
+def burst_arg(spec):
+    """The client's --burst value, or None."""
+    b = spec.get("burst")
+    return "%d:%s:%s" % (b["period_us"], b["duty"], b["factor"]) if b else None
 
 
 def kinds_arg(spec):

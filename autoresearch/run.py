@@ -163,10 +163,11 @@ def run_level(cfg, client, spec, rps):
     cmd = ("cd %s && timeout %d ./%s %s:%d --config /tmp/ar_client.config "
            "--mode runtime-client --transport udp --mpps %s --start_mpps %s --samples 1 "
            "--runtime %d --rampup %d --conns %d --discard_pct %s --kinds '%s' "
-           "--groups both --runtime_stat 2>&1; echo \"CLIENT_EXIT=$?\""
+           "--groups both --runtime_stat %s 2>&1; echo \"CLIENT_EXIT=$?\""
            % (cfg["repo"], timeout, CLIENT_BIN, cfg["server"]["ip"], cfg["port"], mpps,
               mpps, cli["duration_s"], cli["rampup_s"], cli["conns"], cli["discard_pct"],
-              specs.kinds_arg(spec)))
+              specs.kinds_arg(spec),
+              "--burst %s" % specs.burst_arg(spec) if spec.get("burst") else ""))
     return client.run(cmd, timeout=timeout + 30, check=False)
 
 

@@ -22,6 +22,7 @@ that, say, cache lookups are latency-critical and scans are not.
 | `kinds[].hint` | what the server tells the scheduler: `class` (normal/high/low), `deadline_us` (relative), `service_us` (expected run time) |
 | `load_rps` | ascending offered loads to sweep, requests per second |
 | `score.kind`, `score.percentile` | the request kind whose tail latency the policies compete on, and which percentile |
+| `burst` | optional bursty arrivals: `{"period_us", "duty", "factor"}`. In every period the first `duty` fraction of the time runs at `factor` times the rate of the rest; the average rate is still the level's `load_rps`, and all connections burst together. The busy-phase rate (`load_rps × factor / (duty × factor + 1 − duty)`) must stay at or below 700k req/s |
 | `antagonist` | optional best-effort interfering process on the server: `{"threads", "n", "spec", "kthreads"}` for apps/netbench/stress (e.g. `cacheantagonist:4090880`) |
 | `repeats` | how many times each experiment is repeated (medians are reported) |
 | `notes` | anything else, e.g. how the capacity estimate was computed |
