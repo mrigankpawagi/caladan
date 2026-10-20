@@ -73,6 +73,12 @@ IOKernel, which decides how many cores each application gets, is untouched.
 | 6. Measure it on every workload, plus the overhead check on w0 | `run.py` | more rows in `results/genN/` | `autoresearch gen N: results for pM` |
 | 7. Leaderboard, prompt lessons, notes | orchestrator, `summarize.py` | `LEADERBOARD.md`, prompt "Lessons" lines, `results/genN/notes.md` | `autoresearch gen N: leaderboard and lessons` |
 
+The gate and the acceptance decision are computed by `judge.py` (`./judge.py
+gate --workload wN`, `./judge.py accept --policy <name>`), which prints the
+numbers behind each verdict; the orchestrator records its output in the
+generation's notes. The policy to beat is the **champion**: the most recently
+accepted policy, or `prio` until one is accepted (`./judge.py champion`).
+
 Acceptance rules for a new policy (also in the policy agent's prompt): the new
 workload's score improves by at least 10% or 10 µs over the current best; no
 earlier workload gets more than 10% worse; NORMAL p99 at the headline load
@@ -92,6 +98,7 @@ LEADERBOARD.md       generated summary: policies, scores per workload, curves
 calibration.json     gen 0 measurements: fake-work speed, noise band, timings, budget
 run.py               runs experiments on the two nodes (see ./run.py --help)
 summarize.py         builds LEADERBOARD.md and results/genN/tables.md
+judge.py             gate and acceptance decisions, and the current champion
 lib/                 spec validation, ssh helpers, output parsing
 nodes.json.example   node settings; copy to nodes.json (ignored by git)
 workloads/           one JSON file per workload, plus README.md (format)
