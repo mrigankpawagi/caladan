@@ -11,6 +11,7 @@ Mode `ignore` means the server did not apply hints; build `stock` is Caladan wit
 | [p0](policies/p0-fifo.md) | `fifo` | 0 | baseline | Stock Caladan order: always run the thread that became ready first; hints are ignored. |
 | [p1](policies/p1-prio.md) | `prio` | 0 | baseline | Look through the whole queue and run the highest priority class first (helpers, HIGH, NORMAL, LOW); oldest first within a class. |
 | [p2](policies/p2-edf_high.md) | `edf_high` | 1 | accepted | p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready) |
+| [p3](policies/p3-sjf_guard.md) | `sjf_guard` | 2 | candidate | p2 plus: among HIGH threads, one that must start within 20 µs to finish by its deadline runs first (most urgent first; a thread that can no longer finish in time is not urgent), and the others run in order of deadline plus 8 times their expected run time instead of deadline alone |
 
 ## w0: One request kind, no hints: overhead check
 
@@ -23,11 +24,12 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p2 edf_high | hints | hints | 188.5 (181.0–196.0) | +3% | - | 348554 | - | 9.95 | 2 | 1 |
 | p0 fifo | hints | hints | 182.5 (173.0–184.0) | +0% | - | 348572 | - | 9.72 | 4 | 0 |
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
+| p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
 | p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 | p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
-Best with hints applied: **prio** (178.5 µs).
+Best with hints applied: **sjf_guard** (163.0 µs).
 
 req p99 by offered load (req/s):
 
@@ -36,6 +38,7 @@ req p99 by offered load (req/s):
 | edf_high | hints | hints | 32.5 | 39.5 | 71.5 | 188.5 | inf | inf |
 | fifo | hints | hints | 33.0 | 40.0 | 72.0 | 182.5 | inf | inf |
 | prio | hints | hints | 33.0 | 39.0 | 72.0 | 178.5 | inf | inf |
+| sjf_guard | hints | hints | 33.0 | 39.0 | 69.5 | 163.0 | inf | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
 | fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 | fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
@@ -51,10 +54,11 @@ Score: `short` p99. Headline load: 400,000 req/s.
 | p2 edf_high | hints | hints | 52.0 (52.0–52.0) | -46% | 99.43 | 115.0 | 398907 | 0.52 | 4.64 | 2 | 1 |
 | p0 fifo | hints | hints | 95.5 (90.0–101.0) | +0% | 97.34 | 116.0 | 399039 | 4.52 | 4.49 | 2 | 0 |
 | p1 prio | hints | hints | 52.5 (52.0–53.0) | -45% | 99.40 | 116.5 | 399079 | 0.51 | 4.66 | 2 | 0 |
+| p3 sjf_guard | hints | hints | 51.0 (51.0–51.0) | -47% | 99.47 | 111.0 | 398797 | 0.50 | 4.27 | 2 | 2 |
 | p0 fifo | ignore | hints | 91.0 (90.0–92.0) | -5% | 97.48 | 109.5 | 399132 | - | 4.32 | 2 | 0 |
 | p1 prio | ignore | hints | 95.0 (90.0–100.0) | -1% | 97.40 | 114.5 | 398462 | - | 4.41 | 2 | 0 |
 
-Best with hints applied: **edf_high** (52.0 µs).
+Best with hints applied: **sjf_guard** (51.0 µs).
 
 short p99 by offered load (req/s):
 
@@ -63,6 +67,7 @@ short p99 by offered load (req/s):
 | edf_high | hints | hints | 13.0 | 16.0 | 25.0 | 31.0 | 52.0 | 449.5 |
 | fifo | hints | hints | 14.0 | 17.0 | 29.5 | 43.5 | 95.5 | 680.5 |
 | prio | hints | hints | 14.0 | 16.0 | 25.0 | 31.0 | 52.5 | 303.0 |
+| sjf_guard | hints | hints | 13.5 | 16.0 | 24.5 | 30.0 | 51.0 | 157.5 |
 | fifo | ignore | hints | 13.5 | 16.0 | 29.5 | 43.5 | 91.0 | 554.5 |
 | prio | ignore | hints | 13.5 | 16.5 | 29.0 | 43.5 | 95.0 | 984.0 |
 
@@ -77,9 +82,10 @@ Score: `get` p99. Headline load: 400,000 req/s.
 | p2 edf_high | hints | hints | 53.0 (53.0–53.0) | -47% | 99.34 | 111.5 | 160.0 | 397876 | 3.12 | 7.30 | 2 | 1 |
 | p0 fifo | hints | hints | 100.5 (99.0–102.0) | +0% | 97.28 | 120.0 | 119.5 | 398318 | 4.61 | 4.59 | 2 | 1 |
 | p1 prio | hints | hints | 84.5 (80.0–89.0) | -16% | 97.82 | 103.5 | 144.5 | 398061 | 3.64 | 7.06 | 2 | 1 |
+| p3 sjf_guard | hints | hints | 51.0 (51.0–51.0) | -49% | 99.48 | 101.0 | 140.0 | 398542 | 2.82 | 6.60 | 2 | 2 |
 | p0 fifo | ignore | hints | 92.0 (91.0–93.0) | -8% | 97.45 | 114.0 | 114.5 | 398961 | - | 4.35 | 2 | 1 |
 
-Best with hints applied: **edf_high** (53.0 µs).
+Best with hints applied: **sjf_guard** (51.0 µs).
 
 get p99 by offered load (req/s):
 
@@ -88,6 +94,7 @@ get p99 by offered load (req/s):
 | edf_high | hints | hints | 13.5 | 16.0 | 25.0 | 31.0 | 53.0 | 98.0 |
 | fifo | hints | hints | 14.0 | 16.5 | 29.0 | 44.5 | 100.5 | 272.0 |
 | prio | hints | hints | 13.5 | 16.5 | 28.5 | 41.5 | 84.5 | 252.0 |
+| sjf_guard | hints | hints | 13.5 | 16.0 | 25.0 | 31.0 | 51.0 | 76.0 |
 | fifo | ignore | hints | 13.5 | 16.5 | 29.0 | 45.0 | 92.0 | 302.0 |
 
 ## w3: Lookups and queries share one deadline, plus a LOW kind
@@ -101,9 +108,10 @@ Score: `get` p99. Headline load: 400,000 req/s.
 | p2 edf_high | hints | hints | 87.5 (87.0–88.0) | -7% | 99.22 | 107.0 | 147.0 | 158.5 | 398082 | 3.81 | 6.96 | 2 | 2 |
 | p0 fifo | hints | hints | 94.5 (93.0–96.0) | +0% | 99.10 | 114.5 | 113.5 | 114.0 | 398628 | 4.59 | 4.62 | 2 | 2 |
 | p1 prio | hints | hints | 84.0 (81.0–87.0) | -11% | 99.31 | 103.0 | 139.5 | 154.5 | 398618 | 3.66 | 6.66 | 2 | 2 |
+| p3 sjf_guard | hints | hints | 55.0 (55.0–55.0) | -42% | 99.78 | 103.0 | 143.0 | 148.5 | 398778 | 2.91 | 6.45 | 2 | 2 |
 | p0 fifo | ignore | hints | 89.5 (88.0–91.0) | -5% | 99.20 | 109.5 | 108.5 | 111.0 | 398781 | - | 4.28 | 2 | 2 |
 
-Best with hints applied: **prio** (84.0 µs).
+Best with hints applied: **sjf_guard** (55.0 µs).
 
 get p99 by offered load (req/s):
 
@@ -112,5 +120,6 @@ get p99 by offered load (req/s):
 | edf_high | hints | hints | 14.0 | 16.0 | 28.5 | 43.0 | 87.5 | 288.5 |
 | fifo | hints | hints | 13.5 | 16.5 | 29.0 | 45.5 | 94.5 | 329.0 |
 | prio | hints | hints | 13.5 | 16.0 | 28.0 | 43.0 | 84.0 | 247.0 |
+| sjf_guard | hints | hints | 13.0 | 16.0 | 24.5 | 30.5 | 55.0 | 135.0 |
 | fifo | ignore | hints | 13.0 | 16.5 | 28.0 | 43.5 | 89.5 | 254.5 |
 
