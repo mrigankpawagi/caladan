@@ -10,7 +10,7 @@ Mode `ignore` means the server did not apply hints; build `stock` is Caladan wit
 |---|---|---|---|---|
 | [p0](policies/p0-fifo.md) | `fifo` | 0 | baseline | Stock Caladan order: always run the thread that became ready first; hints are ignored. |
 | [p1](policies/p1-prio.md) | `prio` | 0 | baseline | Look through the whole queue and run the highest priority class first (helpers, HIGH, NORMAL, LOW); oldest first within a class. |
-| [p2](policies/p2-edf_high.md) | `edf_high` | 1 | candidate | p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready) |
+| [p2](policies/p2-edf_high.md) | `edf_high` | 1 | accepted | p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready) |
 
 ## w0: One request kind, no hints: overhead check
 
@@ -24,8 +24,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p0 fifo | hints | hints | 182.5 (173.0–184.0) | +0% | - | 348572 | - | 9.72 | 4 | 0 |
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 | p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
+| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
 Best with hints applied: **prio** (178.5 µs).
 
@@ -37,8 +37,8 @@ req p99 by offered load (req/s):
 | fifo | hints | hints | 33.0 | 40.0 | 72.0 | 182.5 | inf | inf |
 | prio | hints | hints | 33.0 | 39.0 | 72.0 | 178.5 | inf | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 | fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
+| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 

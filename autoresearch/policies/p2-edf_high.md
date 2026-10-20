@@ -3,7 +3,7 @@
 - id: p2
 - config: edf_high
 - generation: 1
-- status: candidate
+- status: accepted
 - builds_on: p1
 - changed_from_previous: p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready)
 - commit: 7281afd
@@ -39,4 +39,15 @@ These two limits are outside the policy region and are for the owner to decide:
 | w0 | req p99 and throughput at 350k | flat | 178.5 µs within 6%; throughput within 0.2% |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 1 (judge.py, results/gen1/, commit 2f1080c), against
+the champion p1 prio, two repeats each at each workload's headline load:
+
+| Workload | Score (prio) | Score (edf_high) | Change | Other kinds |
+|---|---|---|---|---|
+| w2 | get p99 84.5 µs | 53.0 µs | −37% | query p99 +7.7%, batch p99 +10.7% |
+| w1 | short p99 52.5 µs | 52.0 µs | −1% (unchanged, as predicted) | long p99 −1.3% |
+| w0 | req p99 178.5 µs | 188.5 µs | +5.6% (inside the 6% band; repeats 181, 196) | throughput equal |
+
+The prediction (55–65 µs on w2) held, slightly better. At 440k, past the
+headline load, get p99 is 98 µs against prio's 252. The HIGH queue wait barely
+moved (3.12 vs 3.64 µs mean): the gain is in *which* HIGH thread waits.

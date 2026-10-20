@@ -13,3 +13,7 @@ the prompt version in its title and get their own commit.
   other (different deadlines or service times, bursts, or a LOW kind)";
   policy_agent +"the remaining short tail is not queue wait: order HIGH by deadline
   or service hint, or propose a hook against waiting behind a running long request".
+- gen 1 lessons: workload_agent +"stress what deadline order cannot fix (a LOW kind,
+  bursts, or wrong service hints); keep the top load near the headline";
+  policy_agent +"order HIGH by earliest deadline; expect about 52 us at best on w2"
+  (with its outcome noted).

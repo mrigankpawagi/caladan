@@ -117,3 +117,4 @@ gate fails you get one revision, with the numbers attached.
 ## Lessons (append-only; one line per generation, newest last)
 
 - gen0: prio already removes w1's queueing penalty (HIGH wait 0.51 µs, short p99 95.5 to 52.5 µs), so the next workload should make latency-critical requests compete with each other at the headline load, via kinds with different deadlines or service times, bursts, or a LOW kind.
+- gen1: w2 works as intended (under prio, get and query p99 are both 73.5 µs above their light-load medians, with zero inversions), so next stress what deadline order cannot fix (a LOW kind, bursts, or wrong service hints), and keep the top load near the headline, where repeats agree.
