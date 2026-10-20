@@ -99,6 +99,9 @@ that the current best policy handles best. Record the new values in
 
 ## Output format (exactly this, nothing else)
 
+Reply with these parts as text; do not write files. The orchestrator saves the
+workload file and commits it.
+
 1. The complete JSON file, in a ```json fenced block, with
    `"generation": <N>` and `"id": "w<next number>"`.
 2. The file name, `w<k>-<slug>.json`.
@@ -113,4 +116,4 @@ gate fails you get one revision, with the numbers attached.
 
 ## Lessons (append-only; one line per generation, newest last)
 
-- gen0: (none yet)
+- gen0: prio already removes w1's queueing penalty (HIGH wait 0.51 µs, short p99 95.5 to 52.5 µs), so the next workload should make latency-critical requests compete with each other at the headline load, via kinds with different deadlines or service times, bursts, or a LOW kind.

@@ -40,7 +40,11 @@ reader who is not a systems expert can follow.
   threads pushed beyond the 32-slot queue, where policies cannot see them.
 - Headline load and score: defined in `autoresearch/README.md`.
 
-## Report template (write `results/gen<N>/report.md`, at most about 600 words)
+## Report template (at most about 600 words)
+
+Return the full report as Markdown text in your reply; do not write files. The
+orchestrator saves it to `results/gen<N>/report.md` after checking a few of its
+numbers against the raw data.
 
 1. **Headline.** One table: workload, policy, score at the headline load, vs
    fifo, other kinds' p99, throughput. One sentence on what changed this

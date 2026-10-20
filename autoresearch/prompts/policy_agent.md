@@ -70,6 +70,9 @@ A policy is `static uint32_t choose_<name>(struct kthread *k, uint32_t n)`:
 
 ## Output format (exactly these three parts)
 
+Reply with these parts as text; do not edit files. The orchestrator applies the
+code, saves the card, reviews, builds, and commits.
+
 1. **Code**: one ```c block containing the new function(s) and the new table
    row, ready to paste into the region.
 2. **Card**: one ```markdown block with the full contents of
@@ -99,4 +102,4 @@ tree as evidence.
 
 ## Lessons (append-only; one line per generation, newest last)
 
-- gen0: (none yet)
+- gen0: On w1 the remaining short tail is not queue wait (0.51 µs mean vs 52.5 µs p99, zero late at pick), so target ordering among HIGH threads by deadline or service hint, or propose a hook outside the policy region that stops HIGH work waiting behind a running long request.
