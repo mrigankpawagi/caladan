@@ -40,8 +40,8 @@ IOKernel, which decides how many cores each application gets, is untouched.
   (`run.py --sched-stats off`); experiments normally keep them on.
 - **Headline load**: the busiest load level at which the baseline (fifo,
   hints mode, hints build) answers at least 99% of requests, keeps client
-  schedule adherence at least 99%, and keeps overall median latency within 2x
-  of its value at the lightest load. In other words, as busy as the server gets
+  schedule adherence at least 99%, and keeps overall median latency within
+  1.5x of its value at the lightest load. In other words, as busy as the server gets
   before it is overloaded.
 - **Score**: the workload's chosen kind and percentile (e.g. `short` p99) at
   the headline load, median over repeats. Lower is better.

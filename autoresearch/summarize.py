@@ -9,7 +9,7 @@ Definitions (also in README.md):
   headline load  highest load level at which the baseline (fifo, hints
                  applied, hint-enabled build) answers >= 99% of requests,
                  keeps client schedule adherence >= 99%, and keeps the overall
-                 median latency within 2x of its value at the lightest load,
+                 median latency within 1.5x of its value at the lightest load,
                  i.e. the busiest level that is not in overload
   score          the workload's score kind and percentile (e.g. short p99) at
                  the headline load, median over repeats; lower is better
@@ -29,6 +29,8 @@ sys.path.insert(0, HERE)
 from lib import spec as specs  # noqa: E402
 
 BASELINE = ("fifo", "hints", "hints")
+# headline load: overall median at most this multiple of its lightest-load value
+MEDIAN_LIMIT = 1.5
 
 
 def fnum(v):
@@ -115,7 +117,7 @@ def headline_load(idx, wid, loads):
     for l, rs in base:
         ok = (med([fnum(r["resp_rps"]) / max(fnum(r["sent_rps"]), 1) for r in rs]) >= 0.99
               and med([fnum(r["adherence"]) for r in rs]) >= 99.0
-              and med([fnum(r["p50"]) for r in rs]) <= 2 * p50_low)
+              and med([fnum(r["p50"]) for r in rs]) <= MEDIAN_LIMIT * p50_low)
         if ok:
             best = l
     return best
