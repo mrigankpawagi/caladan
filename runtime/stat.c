@@ -36,6 +36,22 @@ static const char *stat_names[] = {
 	"remote_wakes",
 	"rq_overflow",
 
+	/* thread-hint scheduler counters */
+	"pick_normal",
+	"pick_high",
+	"pick_low",
+	"pick_softirq",
+	"wait_cycles_normal",
+	"wait_cycles_high",
+	"wait_cycles_low",
+	"wait_cycles_softirq",
+	"pick_scanned",
+	"pick_inversions",
+	"pick_deadline",
+	"deadline_miss_at_pick",
+	"hinted_stolen",
+	"hinted_overflow",
+
 	/* network stack counters */
 	"rx_bytes",
 	"rx_packets",

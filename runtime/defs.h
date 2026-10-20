@@ -300,6 +300,26 @@ enum {
 	STAT_REMOTE_WAKES,
 	STAT_RQ_OVERFLOW,
 
+	/*
+	 * thread-hint scheduler counters (only counted with CONFIG_THREAD_HINTS).
+	 * The four PICK_ and four WAIT_CYCLES_ entries are indexed by prio_class
+	 * and must stay in THREAD_PRIO_* order: NORMAL, HIGH, LOW, SOFTIRQ.
+	 */
+	STAT_PICK_NORMAL,		/* threads run, by class */
+	STAT_PICK_HIGH,
+	STAT_PICK_LOW,
+	STAT_PICK_SOFTIRQ,
+	STAT_WAIT_CYCLES_NORMAL,	/* cycles spent in the runqueue, by class */
+	STAT_WAIT_CYCLES_HIGH,
+	STAT_WAIT_CYCLES_LOW,
+	STAT_WAIT_CYCLES_SOFTIRQ,
+	STAT_PICK_SCANNED,		/* sum of runqueue depth at each pick */
+	STAT_PICK_INVERSIONS,		/* picks that left a higher class waiting */
+	STAT_PICK_DEADLINE,		/* picked threads that had a deadline */
+	STAT_DEADLINE_MISS_AT_PICK,	/* ... and were already past it */
+	STAT_HINTED_STOLEN,		/* hinted threads taken by work stealing */
+	STAT_HINTED_OVERFLOW,		/* hinted threads sent to the overflow list */
+
 	/* network stack counters */
 	STAT_RX_BYTES,
 	STAT_RX_PACKETS,

@@ -277,6 +277,45 @@ const char *sched_policy_name(void)
 	return sched_choose_name;
 }
 
+/* per-class counters are indexed by prio_class */
+BUILD_ASSERT(STAT_PICK_HIGH == STAT_PICK_NORMAL + THREAD_PRIO_HIGH);
+BUILD_ASSERT(STAT_PICK_LOW == STAT_PICK_NORMAL + THREAD_PRIO_LOW);
+BUILD_ASSERT(STAT_PICK_SOFTIRQ == STAT_PICK_NORMAL + THREAD_PRIO_SOFTIRQ);
+BUILD_ASSERT(STAT_WAIT_CYCLES_SOFTIRQ ==
+	     STAT_WAIT_CYCLES_NORMAL + THREAD_PRIO_SOFTIRQ);
+
+/*
+ * Records what a pick looked like, for hint-aware measurement: the class of
+ * the chosen thread and how long it waited, the runqueue depth, whether a
+ * thread of a higher class was left waiting, and deadline misses.
+ */
+static void sched_count_pick(struct kthread *k, uint32_t n, uint32_t best,
+			     thread_t *th)
+{
+	uint64_t now = rdtsc();
+	uint8_t rank = prio_rank[th->prio_class];
+	uint32_t i;
+
+	k->stats[STAT_PICK_NORMAL + th->prio_class]++;
+	k->stats[STAT_WAIT_CYCLES_NORMAL + th->prio_class] +=
+		now - MIN(th->ready_tsc, now);
+	k->stats[STAT_PICK_SCANNED] += n;
+
+	for (i = 0; i < n; i++) {
+		if (i != best &&
+		    prio_rank[sched_rq_at(k, i)->prio_class] > rank) {
+			k->stats[STAT_PICK_INVERSIONS]++;
+			break;
+		}
+	}
+
+	if (th->deadline_tsc) {
+		k->stats[STAT_PICK_DEADLINE]++;
+		if (now > th->deadline_tsc)
+			k->stats[STAT_DEADLINE_MISS_AT_PICK]++;
+	}
+}
+
 /**
  * sched_pop_next - removes and returns the next thread to run
  * @k: the kthread (its lock must be held and its runqueue non-empty)
@@ -298,6 +337,7 @@ static thread_t *sched_pop_next(struct kthread *k)
 	best = n > 1 ? sched_choose(k, n) : 0;
 	BUG_ON(best >= n);
 	th = k->rq[(tail + best) % RUNTIME_RQ_SIZE];
+	sched_count_pick(k, n, best, th);
 
 	/* close the gap: slide the threads queued before @th back by one slot */
 	for (i = best; i > 0; i--)
@@ -361,6 +401,8 @@ static uint32_t drain_threads(struct kthread *k, struct list_head *l, uint32_t n
 			if (!th)
 				break;
 		}
+		if (update_tail && thread_is_hinted(th))
+			STAT(HINTED_STOLEN)++;
 		list_add_tail(l, &th->link);
 	}
 
@@ -753,6 +795,8 @@ void thread_ready_locked(thread_t *th)
 		list_add_tail(&k->rq_overflow, &th->link);
 		ACCESS_ONCE(k->q_ptrs->rq_head)++;
 		STAT(RQ_OVERFLOW)++;
+		if (thread_is_hinted(th))
+			STAT(HINTED_OVERFLOW)++;
 		return;
 	}
 
@@ -788,6 +832,8 @@ void thread_ready_head_locked(thread_t *th)
 		list_add(&k->rq_overflow, &oldestth->link);
 		k->rq_head--;
 		STAT(RQ_OVERFLOW)++;
+		if (thread_is_hinted(oldestth))
+			STAT(HINTED_OVERFLOW)++;
 	}
 	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
 	ACCESS_ONCE(k->q_ptrs->rq_head)++;
@@ -815,8 +861,10 @@ void thread_ready(thread_t *th)
 		drain_overflow(k);
 		spin_unlock(&k->lock);
 		ACCESS_ONCE(k->q_ptrs->rq_head)++;
-		putk();
 		STAT(RQ_OVERFLOW)++;
+		if (thread_is_hinted(th))
+			STAT(HINTED_OVERFLOW)++;
+		putk();
 		return;
 	}
 
@@ -850,6 +898,8 @@ void thread_ready_head(thread_t *th)
 		list_add(&k->rq_overflow, &oldestth->link);
 		k->rq_head--;
 		STAT(RQ_OVERFLOW)++;
+		if (thread_is_hinted(oldestth))
+			STAT(HINTED_OVERFLOW)++;
 	}
 	spin_unlock(&k->lock);
 	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
