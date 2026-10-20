@@ -89,6 +89,12 @@ and any
 other kind with a deadline loses at most 1 percentage point of its
 deadline-met rate. A rejected policy stays in the tree with `status: rejected`.
 
+To save node time, a new policy is judged on *older* workloads at their
+headline load only (`run.py --levels <load>`); w0 runs the level below its
+headline and its top level; the newest workload, and any workload with a LOW
+kind (rule 4 checks every level up to the headline), get the full sweep.
+Headline loads come from fifo's full sweeps, which every workload has.
+
 Nothing is ever overwritten. Workloads, policies, and results only accumulate;
 a broken workload gets a new revised file. The only regenerated file is
 `LEADERBOARD.md`, and its history is in git.

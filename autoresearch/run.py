@@ -171,6 +171,18 @@ def run_level(cfg, client, spec, rps):
     return client.run(cmd, timeout=timeout + 30, check=False)
 
 
+def levels_for(args, spec):
+    """The workload's load levels, or the subset given with --levels (values
+    not in the workload are rejected, so results stay comparable)."""
+    if not args.levels:
+        return spec["load_rps"]
+    want = [int(x) for x in args.levels.split(",")]
+    bad = [x for x in want if x not in spec["load_rps"]]
+    if bad:
+        sys.exit("--levels %s not in %s's load_rps %s" % (bad, spec["id"], spec["load_rps"]))
+    return [x for x in spec["load_rps"] if x in want]
+
+
 def keep_lines(text):
     """Drops the runtime's log noise, keeping result rows and warnings."""
     keep = ("Group,", "all,", "class:", "kind:", "RtStats:", "WARNING", "Aborting",
@@ -206,7 +218,7 @@ def experiment(args, cfg, server, client, spec, spec_path, policy, mode, repeat,
     try:
         setup(cfg, server, client, spec, policy, mode, args.sched_stats == "on")
         meta["setup_s"] = round(time.time() - t0, 1)
-        for rps in spec["load_rps"]:
+        for rps in levels_for(args, spec):
             t1 = time.time()
             out = run_level(cfg, client, spec, rps)
             with open(os.path.join(raw_dir, "rps%d.out" % rps), "w") as f:
@@ -268,6 +280,9 @@ def main():
                     help="per-pick runtime statistics (default on); with off, results "
                          "are labelled build 'hints-nostats'")
     ap.add_argument("--repeats", type=int, help="override the workload's repeat count")
+    ap.add_argument("--levels", help="comma-separated subset of the workload's load_rps "
+                    "to run (e.g. only the headline load when judging a policy on an "
+                    "older workload)")
     ap.add_argument("--nodes", default=os.path.join(HERE, "nodes.json"))
     ap.add_argument("--dry-run", action="store_true", help="validate and print the plan")
     args = ap.parse_args()
@@ -298,7 +313,8 @@ def main():
                 n = args.repeats or s.get("repeats", 1)
                 plan += [(path, s, pol, mode, r) for r in range(r0, r0 + n)]
     for path, s, pol, mode, r in plan:
-        log("plan: %s %s %s r%d (%d levels)" % (s["id"], pol, mode, r, len(s["load_rps"])))
+        log("plan: %s %s %s r%d (%d levels)" % (s["id"], pol, mode, r,
+                                                 len(levels_for(args, s))))
     if args.dry_run:
         for _, s, *_ in plan[:1]:
             print("kinds:  ", specs.kinds_arg(s))
