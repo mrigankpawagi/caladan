@@ -105,3 +105,4 @@ tree as evidence.
 
 - gen0: On w1 the remaining short tail is not queue wait (0.51 µs mean vs 52.5 µs p99, zero late at pick), so target ordering among HIGH threads by deadline or service hint, or propose a hook outside the policy region that stops HIGH work waiting behind a running long request.
 - gen1: On w2 the get tail is queueing behind older HIGH queries (inversions 0, HIGH wait 3.64 µs), so order HIGH by earliest deadline, watch batch p99 (already +21% under prio), and expect about 52 µs at best, w1's floor that only a hook outside the policy region can beat. (Outcome: p2 edf_high did exactly this and reached 53 µs.)
+- gen2: On w3 gets queue behind older queries with the same deadline (inversions 0, HIGH wait 3.81 µs), so let the run-time hint order HIGH work but guard each query's slack, keeping query deadline met at or above edf_high's 98.84% while aiming for w2's 53 µs. (Outcome: p3 sjf_guard did this: 55 µs, query deadline-met 98.94%.)

@@ -3,7 +3,7 @@
 - id: p3
 - config: sjf_guard
 - generation: 2
-- status: candidate
+- status: accepted
 - builds_on: p2
 - changed_from_previous: p2 plus: among HIGH threads, one that must start within 20 µs to finish by its deadline runs first (most urgent first; a thread that can no longer finish in time is not urgent), and the others run in order of deadline plus 8 times their expected run time instead of deadline alone
 - commit: 31c94fd
@@ -56,4 +56,16 @@ These limits are outside the policy region, for the owner to decide (as in p2):
 | w0 | req p99 and throughput at 350k | flat | 188.5 within 6% (limit 199.8); throughput within 0.2% |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 2 (judge.py, results/gen2/), against the champion
+p2 edf_high, two repeats each at each workload's headline load:
+
+| Workload | Score (edf_high) | Score (sjf_guard) | Change | Other kinds |
+|---|---|---|---|---|
+| w3 | get p99 87.5 µs | 55.0 µs | −37% | query p99 −3.7%, query deadline met 98.94% vs 98.84%, batch −2.7%, scan −6.3% |
+| w2 | get p99 53.0 µs | 51.0 µs | −4% | query p99 101 vs 111.5, batch 140 vs 160 |
+| w1 | short p99 52.0 µs | 51.0 µs | −2% | long p99 −3.5% |
+| w0 | req p99 188.5 µs | 163.0 µs | −13.5% (drift: no hints on w0) | throughput equal |
+
+The prediction (53–65 µs on w3) held. All three hinted workloads now sit at
+51–55 µs, the floor that the policy agents attribute to waiting behind an
+already-running long request (no preemption).

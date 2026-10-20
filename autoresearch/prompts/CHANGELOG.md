@@ -21,3 +21,5 @@ the prompt version in its title and get their own commit.
   learns that bursts are supported (the `burst` field) and gets a burst ladder.
 - gen 2 (before the policy proposal): policy_agent's acceptance section adds rule 6,
   other kinds with a deadline may lose at most 1 point of deadline-met.
+- gen 2 lessons: workload_agent +"make the LOW rule or inaccurate run-time hints bind";
+  policy_agent +"let the run-time hint order HIGH work with a slack guard" (with outcomes).
