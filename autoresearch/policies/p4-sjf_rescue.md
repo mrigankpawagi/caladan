@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p3
 - changed_from_previous: p3 with two changes among HIGH threads: one with less than 13 µs to spare before it must start (p3: less than 0) counts as too late to save, so it is never urgent and waits for any shorter HIGH thread; and p3's fixed 20 µs urgency guard is replaced by a check against the thread p3's order would run: the savable HIGH thread with the least time to spare runs first only if waiting for that thread (its expected run time plus 4 µs) would leave it less than 13 µs
-- commit: (filled by orchestrator)
+- commit: 3eed138
 
 ## What it does
 Like sjf_guard, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads a short request normally goes ahead of a long one. What changes is how the core treats a HIGH request that is close to its deadline. A request with less than 13 µs to spare is treated as already lost, because about that much of every request's time is spent outside the queue (network and runtime), so the client will see it miss anyway; it now waits for any shorter request instead of holding one up. A request that can still make it goes ahead of the core's normal choice only if waiting for that choice would make it too late, so a lookup still slips in front of a query with a few microseconds to spare, but not in front of one it would push past its deadline.
