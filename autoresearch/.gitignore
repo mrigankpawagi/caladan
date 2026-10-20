@@ -1,0 +1,6 @@
+# local node settings (hostnames change with every CloudLab experiment)
+nodes.json
+# bulky or noisy run artifacts; the parsed csv/json/md and filtered .out files are kept
+results/**/*.log
+results/**/*.err
+__pycache__/
