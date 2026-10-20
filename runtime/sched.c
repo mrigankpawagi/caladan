@@ -3,6 +3,7 @@
  */
 
 #include <sched.h>
+#include <string.h>
 #include <immintrin.h>
 
 #include <base/stddef.h>
@@ -175,6 +176,40 @@ static void drain_overflow(struct kthread *l)
 }
 
 #ifdef CONFIG_THREAD_HINTS
+/* ===== BEGIN SCHEDULING POLICY REGION ======================================
+ *
+ * An intra-process scheduling policy decides which ready thread in this
+ * kthread's runqueue runs next. Policies are described in
+ * autoresearch/policies/ and selected at startup with the runtime config
+ * option "runtime_sched_policy <name>"; all of them are compiled in.
+ *
+ * A policy is a choose function. Contract:
+ *  - it is called with k->lock held and preemption disabled
+ *  - the ring holds n ready threads, 1 <= n <= RUNTIME_RQ_SIZE, oldest first:
+ *    the i-th one (0 <= i < n) is sched_rq_at(k, i)
+ *  - it returns the index i of the thread to run; sched_pop_next() removes
+ *    that thread and keeps the order of the others
+ *  - it must not block, allocate memory, take locks, or modify the ring or
+ *    the overflow list, and must run in O(n) time
+ *  - it may read any thread field (prio_class, ready_tsc, deadline_tsc,
+ *    service_tsc, ...), call rdtsc(), and use k->policy_state[]
+ *  - runtime helper threads (prio_class THREAD_PRIO_SOFTIRQ) carry packet,
+ *    timer, and storage processing; a policy should run them first
+ */
+typedef uint32_t (*sched_choose_fn_t)(struct kthread *k, uint32_t n);
+
+/* the i-th oldest ready thread in @k's ring */
+static inline thread_t *sched_rq_at(struct kthread *k, uint32_t i)
+{
+	return k->rq[(k->rq_tail + i) % RUNTIME_RQ_SIZE];
+}
+
+/* p0 "fifo": run the oldest ready thread, ignoring hints (stock Caladan) */
+static uint32_t choose_fifo(struct kthread *k, uint32_t n)
+{
+	return 0;
+}
+
 /* run order by priority class: higher rank runs first */
 static const uint8_t prio_rank[THREAD_PRIO_NR] = {
 	[THREAD_PRIO_LOW] = 0,
@@ -183,36 +218,86 @@ static const uint8_t prio_rank[THREAD_PRIO_NR] = {
 	[THREAD_PRIO_SOFTIRQ] = 3,
 };
 
+/*
+ * p1 "prio": strict priority by class (helper threads, then HIGH, NORMAL,
+ * LOW), oldest first within a class.
+ */
+static uint32_t choose_prio(struct kthread *k, uint32_t n)
+{
+	uint32_t i, best = 0;
+	uint8_t rank = prio_rank[sched_rq_at(k, 0)->prio_class];
+
+	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
+		uint8_t r = prio_rank[sched_rq_at(k, i)->prio_class];
+
+		if (r > rank) {
+			rank = r;
+			best = i;
+		}
+	}
+	return best;
+}
+
+static const struct {
+	const char		*name;
+	sched_choose_fn_t	choose;
+} sched_policies[] = {
+	{ "fifo",	choose_fifo },
+	{ "prio",	choose_prio },
+};
+
+/* ===== END SCHEDULING POLICY REGION ======================================== */
+
+/* the active policy (default: strict priority) */
+static sched_choose_fn_t sched_choose = choose_prio;
+static const char *sched_choose_name = "prio";
+
+/**
+ * sched_policy_select - selects the scheduling policy by name
+ * @name: a policy name from sched_policies[]
+ *
+ * Returns 0 if successful, or -EINVAL if there is no such policy.
+ */
+int sched_policy_select(const char *name)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(sched_policies); i++) {
+		if (!strcmp(name, sched_policies[i].name)) {
+			sched_choose = sched_policies[i].choose;
+			sched_choose_name = sched_policies[i].name;
+			return 0;
+		}
+	}
+	return -EINVAL;
+}
+
+const char *sched_policy_name(void)
+{
+	return sched_choose_name;
+}
+
 /**
  * sched_pop_next - removes and returns the next thread to run
  * @k: the kthread (its lock must be held and its runqueue non-empty)
  *
- * Policy: strict priority by class, FIFO within a class. Scans the runqueue
- * ring for the highest-ranked thread (the earliest one among equals), then
- * closes the gap it leaves by shifting the entries ahead of it, so the order
- * of the remaining threads is preserved. Threads in the overflow list are not
+ * Asks the active policy which ready thread to run, removes it from the ring,
+ * and slides the threads queued before it back by one slot so the order of
+ * the remaining threads is preserved. Threads in the overflow list are not
  * considered until they move into the ring.
  */
 static thread_t *sched_pop_next(struct kthread *k)
 {
-	uint32_t tail = k->rq_tail, i, best = 0;
+	uint32_t tail = k->rq_tail, i, best;
 	uint32_t n = load_acquire(&k->rq_head) - tail;
-	thread_t *th, *t;
-	uint8_t rank;
+	thread_t *th;
 
 	assert_spin_lock_held(&k->lock);
 	assert(n > 0 && n <= RUNTIME_RQ_SIZE);
 
-	th = k->rq[tail % RUNTIME_RQ_SIZE];
-	rank = prio_rank[th->prio_class];
-	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
-		t = k->rq[(tail + i) % RUNTIME_RQ_SIZE];
-		if (prio_rank[t->prio_class] > rank) {
-			rank = prio_rank[t->prio_class];
-			best = i;
-			th = t;
-		}
-	}
+	best = n > 1 ? sched_choose(k, n) : 0;
+	BUG_ON(best >= n);
+	th = k->rq[(tail + best) % RUNTIME_RQ_SIZE];
 
 	/* close the gap: slide the threads queued before @th back by one slot */
 	for (i = best; i > 0; i--)
@@ -226,6 +311,17 @@ static thread_t *sched_pop_next(struct kthread *k)
 static inline thread_t *sched_pop_next(struct kthread *k)
 {
 	return k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
+}
+
+/* without hint support only the stock FIFO order exists */
+int sched_policy_select(const char *name)
+{
+	return strcmp(name, "fifo") ? -EINVAL : 0;
+}
+
+const char *sched_policy_name(void)
+{
+	return "fifo";
 }
 #endif
 

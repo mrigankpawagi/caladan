@@ -225,6 +225,16 @@ static int parse_runtime_quantum_us(const char *name, const char *val)
 	return 0;
 }
 
+static int parse_runtime_sched_policy(const char *name, const char *val)
+{
+	if (sched_policy_select(val)) {
+		log_err("unknown runtime_sched_policy '%s'", val);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int parse_mac_address(const char *name, const char *val)
 {
 	log_warn("specifying mac address is deprecated.");
@@ -380,6 +390,7 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "runtime_ht_punish_us", parse_runtime_ht_punish_us, false },
 	{ "runtime_qdelay_us", parse_runtime_qdelay_us, false },
 	{ "runtime_quantum_us", parse_runtime_quantum_us, false },
+	{ "runtime_sched_policy", parse_runtime_sched_policy, false },
 	{ "static_arp", parse_static_arp_entry, false },
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },
@@ -498,6 +509,7 @@ int cfg_load(const char *path)
 		 cfg_prio_is_lc ? "latency critical (LC)" : "best effort (BE)");
 	log_info("cfg: THRESH_QD: %ld, THRESH_HT: %ld THRESH_QUANTUM: %ld",
 		 cfg_qdelay_us, cfg_ht_punish_us, cfg_quantum_us);
+	log_info("cfg: thread scheduling policy: %s", sched_policy_name());
 	log_info("cfg: storage %s, directpath %s, transparent hugepages %s",
 #ifdef DIRECT_STORAGE
 		 cfg_storage_enabled ? "enabled" : "disabled",
