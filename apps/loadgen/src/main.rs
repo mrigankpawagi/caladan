@@ -1073,11 +1073,11 @@ fn gen_packets_for_schedule(schedules: &Arc<Vec<RequestSchedule>>) -> (Vec<Packe
                 ..Default::default()
             });
 
-            let mut gap = sched.arrival.sample(&mut rng);
-            if let Some(b) = sched.burst {
-                gap = (gap as f64 / b.rate_multiplier(last)) as u64;
-            }
-            let nxt = last + gap;
+            let gap = sched.arrival.sample(&mut rng);
+            let nxt = match sched.burst {
+                Some(b) => b.advance(last, gap),
+                None => last + gap,
+            };
             if nxt >= end {
                 break;
             }
