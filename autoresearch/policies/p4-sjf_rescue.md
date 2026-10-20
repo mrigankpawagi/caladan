@@ -3,7 +3,7 @@
 - id: p4
 - config: sjf_rescue
 - generation: 3
-- status: candidate
+- status: rejected
 - builds_on: p3
 - changed_from_previous: p3 with two changes among HIGH threads: one with less than 13 µs to spare before it must start (p3: less than 0) counts as too late to save, so it is never urgent and waits for any shorter HIGH thread; and p3's fixed 20 µs urgency guard is replaced by a check against the thread p3's order would run: the savable HIGH thread with the least time to spare runs first only if waiting for that thread (its expected run time plus 4 µs) would leave it less than 13 µs
 - commit: 3eed138
@@ -57,4 +57,18 @@ These limits are outside the policy region, for the owner to decide:
 | w0 | req p99 at 300k, throughput at 450k | flat | same code path as p3 for unhinted threads |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 3 (judge.py, results/gen3/) against the champion p3
+sjf_guard, on rule 1 only: the newest workload must improve by at least 10%
+or 10 µs.
+
+| Workload | Score (sjf_guard) | Score (sjf_rescue) | Change | Other kinds |
+|---|---|---|---|---|
+| w4b | get p99 94.0 µs (94/94) | 86.5 µs (86/87) | −8.0% (−7.5 µs) | query deadline met 87.91% vs 87.15%; batch, scan −2% |
+| w3 | get p99 55.0 µs | 52.5 µs | −4.5% | query met 99.04% vs 98.94% |
+| w2 | get p99 51.0 µs | 52.5 µs | +2.9% (noise) | query met 99.62% vs 99.75% |
+| w1 | short p99 51.0 µs | 51.5 µs | +1.0% | |
+| w0 | p99 at 300k 69.5 µs | 69.0 µs | overhead ok | |
+
+The improvement on w4b is real (repeats do not overlap) and nothing got worse,
+but it is smaller than predicted (65–80 µs). The rule stands; a later policy
+may build on this one.

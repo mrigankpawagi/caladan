@@ -24,3 +24,6 @@ the prompt version in its title and get their own commit.
 - gen 2 lessons: workload_agent +"make the LOW rule or inaccurate run-time hints bind";
   policy_agent +"let the run-time hint order HIGH work with a slack guard" (with outcomes).
 - gen 2 (after): policy_agent's rule 5 now uses w0's p99 one level below the headline and its sustained throughput when overloaded.
+- gen 3 lessons: workload_agent +"size backlogs from measured depth and sent rate" (with the
+  client-bug note); policy_agent +"let gets pass urgent queries with slack / stop promoting
+  lost queries" (with p4's rejected outcome).
