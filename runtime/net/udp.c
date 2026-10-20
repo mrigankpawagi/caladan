@@ -802,6 +802,7 @@ void udp_poll_install_cb(udpconn_t *c, poll_notif_fn_t setfn,
 struct udpspawner {
 	struct trans_entry	e;
 	udpspawn_fn_t		fn;
+	udpspawn_classify_fn_t	classify;	/* optional, may be NULL */
 
 	struct kref ref;
 	struct flow_registration flow;
@@ -836,6 +837,24 @@ static void udp_par_recv(struct trans_entry *e, struct mbuf *m)
 	d->raddr.ip = ntoh32(iphdr->saddr);
 	d->raddr.port = ntoh16(udphdr->src_port);
 	d->release_data = m;
+
+	/*
+	 * Let the application classify the request before the handler thread
+	 * is queued, so its hints decide where it lands in the runqueue. The
+	 * thread has never been readied, which thread_set_hints() requires.
+	 * Invalid hints are dropped and the thread runs unhinted.
+	 */
+	if (s->classify) {
+		struct thread_hints h = {0};
+
+		s->classify(d->buf, d->len, &h);
+		if (unlikely(thread_set_hints(th, &h))) {
+			struct thread_hints none = {0};
+
+			thread_set_hints(th, &none);
+		}
+	}
+
 	thread_ready(th);
 }
 
@@ -868,6 +887,23 @@ static void udp_release_spawner_ref(struct kref *ref)
 int udp_create_spawner(struct netaddr laddr, udpspawn_fn_t fn,
 		       udpspawner_t **s_out)
 {
+	return udp_create_spawner_classified(laddr, fn, NULL, s_out);
+}
+
+/**
+ * udp_create_spawner_classified - creates a UDP spawner with a classifier
+ * @laddr: the local address to bind to
+ * @fn: the handler, run in a new thread for each datagram
+ * @classify: called on each datagram to set the handler thread's scheduling
+ *            hints before it is queued (may be NULL)
+ * @s_out: a pointer to store the spawner (if successful)
+ *
+ * Returns 0 if successful, otherwise fail.
+ */
+int udp_create_spawner_classified(struct netaddr laddr, udpspawn_fn_t fn,
+				  udpspawn_classify_fn_t classify,
+				  udpspawner_t **s_out)
+{
 	udpspawner_t *s;
 	int ret;
 
@@ -884,6 +920,7 @@ int udp_create_spawner(struct netaddr laddr, udpspawn_fn_t fn,
 	kref_init(&s->ref);
 	trans_init_3tuple(&s->e, IPPROTO_UDP, &udp_par_ops, laddr);
 	s->fn = fn;
+	s->classify = classify;
 	ret = trans_table_add(&s->e);
 	if (ret) {
 		sfree(s);

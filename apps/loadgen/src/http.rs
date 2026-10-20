@@ -185,7 +185,11 @@ impl LoadgenProtocol for HttpProtocol {
         buf.extend("\r\n\r\n".as_bytes());
     }
 
-    fn read_response(&self, mut sock: &Connection, buf: &mut Buffer) -> io::Result<(usize, u64)> {
+    fn read_response(
+        &self,
+        mut sock: &Connection,
+        buf: &mut Buffer,
+    ) -> io::Result<(usize, u64, u8)> {
         let mut pstate = ParseState::new();
 
         if buf.data_size() == 0 {
@@ -233,7 +237,7 @@ impl LoadgenProtocol for HttpProtocol {
                 }
             }
 
-            return Ok((0, 0));
+            return Ok((0, 0, 0));
         }
     }
 }
