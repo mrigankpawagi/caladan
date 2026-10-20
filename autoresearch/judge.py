@@ -21,8 +21,11 @@ accept: (1) the newest workload's score improves on the champion's by at
         (3) other kinds' p99 at the headline load rise at most 25%;
         (4) LOW-hinted kinds answer at least 90% of their requests at every
             level up to the headline load;
-        (5) on w0, p99 at the headline load is within the noise band of the
-            champion's and throughput within 1%;
+        (5) on w0 (no hints), p99 one level below the headline load is within
+            the noise band of the champion's, and the throughput sustained at
+            the top (overloaded) level is within 1% of the champion's; w0's
+            headline point itself drifts too much (150-196 us across runs) to
+            detect overhead;
         (6) other kinds that have a deadline lose at most 1 percentage point
             of deadline-met at the headline load (so a policy cannot win by
             sacrificing another kind's deadline).
@@ -112,12 +115,21 @@ def accept(args):
             continue
         rel = a / b - 1 if b else 0
         if wid == "w0":
-            ta, _ = S.metric(idx, wid, (new, "hints", "hints"), head, "all", "resp_rps")
-            tb, _ = S.metric(idx, wid, (champ, "hints", "hints"), head, "all", "resp_rps")
-            good = rel <= NOISE and ta >= 0.99 * tb
-            print("  %s (overhead): p99 %s vs %s (%+.1f%%), throughput %s vs %s -> %s" % (
-                wid, S.fmt(a), S.fmt(b), 100 * rel, S.fmt(ta), S.fmt(tb),
-                "ok" if good else "FAIL (5)"))
+            loads = s["load_rps"]
+            below = max([l for l in loads if l < head], default=head)
+            pa, _ = S.metric(idx, wid, (new, "hints", "hints"), below, "all", "p99")
+            pb, _ = S.metric(idx, wid, (champ, "hints", "hints"), below, "all", "p99")
+            ta, _ = S.metric(idx, wid, (new, "hints", "hints"), loads[-1], "all", "resp_rps")
+            tb, _ = S.metric(idx, wid, (champ, "hints", "hints"), loads[-1], "all", "resp_rps")
+            if None in (pa, pb, ta, tb):
+                print("  %s (overhead): missing data" % wid)
+                ok = False
+                continue
+            good = pa <= (1 + NOISE) * pb and ta >= 0.99 * tb
+            print("  %s (overhead): p99 at %d %s vs %s (%+.1f%%), sustained throughput at "
+                  "%d %s vs %s (%+.2f%%) -> %s" % (
+                      wid, below, S.fmt(pa), S.fmt(pb), 100 * (pa / pb - 1), loads[-1],
+                      S.fmt(ta), S.fmt(tb), 100 * (ta / tb - 1), "ok" if good else "FAIL (5)"))
         elif wid == newest:
             good = a <= 0.9 * b or b - a >= 10
             print("  %s (newest): score %s vs %s (%+.1f%%) -> %s" % (

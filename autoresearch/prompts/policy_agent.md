@@ -98,7 +98,8 @@ improves by at least 10% (or 10 µs); no earlier workload's score gets more than
 10% worse; other kinds' p99 at the headline load rises at most 25%; any other
 kind with a deadline loses at most 1 percentage point of its deadline-met rate;
 LOW still completes at least 90% of its requests below saturation; and on w0
-(no hints) latency and CPU use stay within the noise band. Rejected policies stay in the
+(no hints) p99 one level below the headline load stays within the noise band
+and the throughput sustained when overloaded stays within 1%. Rejected policies stay in the
 tree as evidence.
 
 ## Lessons (append-only; one line per generation, newest last)
