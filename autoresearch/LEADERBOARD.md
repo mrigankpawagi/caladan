@@ -10,6 +10,7 @@ Mode `ignore` means the server did not apply hints; build `stock` is Caladan wit
 |---|---|---|---|---|
 | [p0](policies/p0-fifo.md) | `fifo` | 0 | baseline | Stock Caladan order: always run the thread that became ready first; hints are ignored. |
 | [p1](policies/p1-prio.md) | `prio` | 0 | baseline | Look through the whole queue and run the highest priority class first (helpers, HIGH, NORMAL, LOW); oldest first within a class. |
+| [p2](policies/p2-edf_high.md) | `edf_high` | 1 | candidate | p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready) |
 
 ## w0: One request kind, no hints: overhead check
 
@@ -19,6 +20,7 @@ Score: `req` p99. Headline load: 350,000 req/s.
 
 | Policy | Mode | Build | Score (req p99) | vs fifo | req deadline met % | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 188.5 (181.0–196.0) | +3% | - | 348554 | - | 9.95 | 2 | 1 |
 | p0 fifo | hints | hints | 182.5 (173.0–184.0) | +0% | - | 348572 | - | 9.72 | 4 | 0 |
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
@@ -31,6 +33,7 @@ req p99 by offered load (req/s):
 
 | Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 350,000 | 400,000 | 450,000 |
 |---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 32.5 | 39.5 | 71.5 | 188.5 | inf | inf |
 | fifo | hints | hints | 33.0 | 40.0 | 72.0 | 182.5 | inf | inf |
 | prio | hints | hints | 33.0 | 39.0 | 72.0 | 178.5 | inf | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
@@ -45,17 +48,19 @@ Score: `short` p99. Headline load: 400,000 req/s.
 
 | Policy | Mode | Build | Score (short p99) | vs fifo | short deadline met % | long p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 52.0 (52.0–52.0) | -46% | 99.43 | 115.0 | 398907 | 0.52 | 4.64 | 2 | 1 |
 | p0 fifo | hints | hints | 95.5 (90.0–101.0) | +0% | 97.34 | 116.0 | 399039 | 4.52 | 4.49 | 2 | 0 |
 | p1 prio | hints | hints | 52.5 (52.0–53.0) | -45% | 99.40 | 116.5 | 399079 | 0.51 | 4.66 | 2 | 0 |
 | p0 fifo | ignore | hints | 91.0 (90.0–92.0) | -5% | 97.48 | 109.5 | 399132 | - | 4.32 | 2 | 0 |
 | p1 prio | ignore | hints | 95.0 (90.0–100.0) | -1% | 97.40 | 114.5 | 398462 | - | 4.41 | 2 | 0 |
 
-Best with hints applied: **prio** (52.5 µs).
+Best with hints applied: **edf_high** (52.0 µs).
 
 short p99 by offered load (req/s):
 
 | Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 350,000 | 400,000 | 450,000 |
 |---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 13.0 | 16.0 | 25.0 | 31.0 | 52.0 | 449.5 |
 | fifo | hints | hints | 14.0 | 17.0 | 29.5 | 43.5 | 95.5 | 680.5 |
 | prio | hints | hints | 14.0 | 16.0 | 25.0 | 31.0 | 52.5 | 303.0 |
 | fifo | ignore | hints | 13.5 | 16.0 | 29.5 | 43.5 | 91.0 | 554.5 |
@@ -69,16 +74,18 @@ Score: `get` p99. Headline load: 400,000 req/s.
 
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | query p99 | batch p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 53.0 (53.0–53.0) | -47% | 99.34 | 111.5 | 160.0 | 397876 | 3.12 | 7.30 | 2 | 1 |
 | p0 fifo | hints | hints | 100.5 (99.0–102.0) | +0% | 97.28 | 120.0 | 119.5 | 398318 | 4.61 | 4.59 | 2 | 1 |
 | p1 prio | hints | hints | 84.5 (80.0–89.0) | -16% | 97.82 | 103.5 | 144.5 | 398061 | 3.64 | 7.06 | 2 | 1 |
 | p0 fifo | ignore | hints | 92.0 (91.0–93.0) | -8% | 97.45 | 114.0 | 114.5 | 398961 | - | 4.35 | 2 | 1 |
 
-Best with hints applied: **prio** (84.5 µs).
+Best with hints applied: **edf_high** (53.0 µs).
 
 get p99 by offered load (req/s):
 
 | Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 350,000 | 400,000 | 440,000 |
 |---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 13.5 | 16.0 | 25.0 | 31.0 | 53.0 | 98.0 |
 | fifo | hints | hints | 14.0 | 16.5 | 29.0 | 44.5 | 100.5 | 272.0 |
 | prio | hints | hints | 13.5 | 16.5 | 28.5 | 41.5 | 84.5 | 252.0 |
 | fifo | ignore | hints | 13.5 | 16.5 | 29.0 | 45.0 | 92.0 | 302.0 |
