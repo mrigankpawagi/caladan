@@ -273,6 +273,89 @@ impl FromStr for OutputMode {
     }
 }
 
+/// Which grouped result rows to print in addition to the overall row.
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum GroupMode {
+    /// Only the overall row, in the original output format.
+    All,
+    /// Overall row plus one row per priority class the server reported.
+    Class,
+    /// Overall row plus one row per request kind.
+    Kind,
+    /// Overall, per-class, and per-kind rows.
+    Both,
+}
+
+impl GroupMode {
+    fn grouped(&self) -> bool {
+        *self != GroupMode::All
+    }
+    fn shows(&self, key: &str) -> bool {
+        match self {
+            GroupMode::All => false,
+            GroupMode::Class => key.starts_with("class:"),
+            GroupMode::Kind => key.starts_with("kind:"),
+            GroupMode::Both => key != "all",
+        }
+    }
+}
+
+/// Name of a priority class as reported by the server in the reply.
+fn class_name(class: u8) -> String {
+    match class {
+        0 => "normal".to_string(),
+        1 => "high".to_string(),
+        2 => "low".to_string(),
+        payload::HINT_CLASS_IGNORED => "ignored".to_string(),
+        c => format!("c{}", c),
+    }
+}
+
+/// Results for one group of requests (all, one class, or one kind).
+///
+/// Drops are attributable to a kind (the client knows what it sent) but not
+/// to a class (the class is only learned from the reply), so class groups
+/// count only answered requests.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct GroupResult {
+    sent: usize,
+    responses: usize,
+    drops: usize,
+    latencies: BTreeMap<u64, usize>,
+    deadline_total: usize,
+    deadline_met: usize,
+}
+
+impl GroupResult {
+    fn merge(&mut self, other: &GroupResult) {
+        self.sent += other.sent;
+        self.responses += other.responses;
+        self.drops += other.drops;
+        self.deadline_total += other.deadline_total;
+        self.deadline_met += other.deadline_met;
+        for (k, v) in &other.latencies {
+            *self.latencies.entry(*k).or_insert(0) += v;
+        }
+    }
+}
+
+/// Latency percentile `p` over `buckets`, where `sent` requests were issued
+/// and `responses` answered; unanswered requests count as infinitely slow.
+fn latency_percentile(buckets: &BTreeMap<u64, usize>, sent: usize, responses: usize, p: f32) -> f32 {
+    let idx = (sent as f32 * p / 100.0) as usize;
+    if idx >= responses {
+        return INFINITY;
+    }
+    let mut seen = 0;
+    for (k, v) in buckets {
+        seen += v;
+        if seen >= idx {
+            return *k as f32;
+        }
+    }
+    INFINITY
+}
+
 fn duration_to_ns(duration: Duration) -> u64 {
     duration.as_nanos() as u64
 }
@@ -286,6 +369,7 @@ pub struct AppConfig {
     pub start_packets_per_second: usize,
     pub distribution: Distribution,
     pub kinds: KindMix,
+    pub groups: GroupMode,
     pub transport: Transport,
     pub protocol: Protocol,
     pub output_mode: OutputMode,
@@ -332,6 +416,7 @@ impl AppConfig {
 struct RequestSchedule {
     arrival: Distribution,
     kinds: KindMix,
+    groups: GroupMode,
     output: OutputMode,
     runtime: Duration,
     rps: usize,
@@ -369,6 +454,8 @@ struct ScheduleResult {
     latencies: BTreeMap<u64, usize>,
     first_tsc: Option<u64>,
     trace: Option<Vec<TraceResult>>,
+    /// Per-group results keyed "all", "class:<name>", "kind:<name>".
+    groups: BTreeMap<String, GroupResult>,
 }
 
 fn memcached_preload_worker(
@@ -467,6 +554,7 @@ fn gen_classic_packet_schedule(
     packets_per_second: usize,
     output: OutputMode,
     kinds: &KindMix,
+    groups: GroupMode,
     ramp_up_seconds: usize,
     nthreads: usize,
     discard_pct: f32,
@@ -484,6 +572,7 @@ fn gen_classic_packet_schedule(
         sched.push(RequestSchedule {
             arrival: Distribution::Exponential((nthreads * NS_PER_SEC as usize / rate) as f64),
             kinds: kinds.clone(),
+            groups,
             output: OutputMode::Silent,
             runtime: Duration::from_micros(1_000_000 / RAMPUP_STEPS_PER_SECOND as u64),
             rps: rate,
@@ -496,6 +585,7 @@ fn gen_classic_packet_schedule(
     sched.push(RequestSchedule {
         arrival: Distribution::Exponential(ns_per_packet as f64),
         kinds: kinds.clone(),
+        groups,
         output: output,
         runtime: runtime,
         rps: packets_per_second,
@@ -523,6 +613,7 @@ fn gen_loadshift_experiment(config: &AppConfig) -> Vec<RequestSchedule> {
             RequestSchedule {
                 arrival: Distribution::Exponential(ns_per_packet as f64),
                 kinds: config.kinds.clone(),
+                groups: config.groups,
                 output: output,
                 runtime: Duration::from_micros(micros),
                 rps: packets_per_second as usize,
@@ -567,9 +658,19 @@ fn process_result_final(
 
     static HEADER_INIT: Once = Once::new();
 
+    let grouped = sched.groups.grouped();
+
     HEADER_INIT.call_once(|| {
-        println!("Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, Start, StartTsc{}", if rt_stats.is_some() {
-            ", ".to_owned() + &get_rt_stat_headers().join(",") } else { "".to_owned() });
+        let rt = if rt_stats.is_some() {
+            ", ".to_owned() + &get_rt_stat_headers().join(",")
+        } else {
+            "".to_owned()
+        };
+        if grouped {
+            println!("Group, Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, DeadlineMet, Start, StartTsc{}", rt);
+        } else {
+            println!("Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, Start, StartTsc{}", rt);
+        }
     });
 
     if let OutputMode::Silent = sched.output {
@@ -597,7 +698,8 @@ fn process_result_final(
     // TODO: better handling of this case.
     if response_count <= 1 {
         println!(
-            "{}, {}, 0, {}, {}, {}",
+            "{}{}, {}, 0, {}, {}, {}",
+            if grouped { "all, " } else { "" },
             sched.kinds.name(),
             sched.rps,
             drop_count + full_stream_count,
@@ -613,21 +715,7 @@ fn process_result_final(
         }
     });
 
-    let percentile = |p| {
-        let idx = (sent_count as f32 * p / 100.0) as usize;
-        if idx >= response_count {
-            return INFINITY;
-        }
-
-        let mut seen = 0;
-        for k in buckets.keys() {
-            seen += buckets[k];
-            if seen >= idx {
-                return *k as f32;
-            }
-        }
-        return INFINITY;
-    };
+    let percentile = |p| latency_percentile(&buckets, sent_count, response_count, p);
 
     let last_send = last_send.unwrap();
     let first_send = first_send.unwrap();
@@ -662,24 +750,89 @@ fn process_result_final(
         )
     };
 
-    println!(
-        "{}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}{}",
-        sched.kinds.name(),
-        sent_rps,
-        resp_rps,
-        drop_count + full_stream_count,
-        schedule_adherance,
-        percentile(0.0),
-        percentile(50.0),
-        percentile(90.0),
-        percentile(99.0),
-        percentile(99.9),
-        percentile(99.99),
-        *buckets.keys().max().unwrap() as f32,
-        start_unix.duration_since(UNIX_EPOCH).unwrap().as_secs(),
-        first_tsc,
-        rt_stat_values
-    );
+    let start_secs = start_unix.duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    if !grouped {
+        println!(
+            "{}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}{}",
+            sched.kinds.name(),
+            sent_rps,
+            resp_rps,
+            drop_count + full_stream_count,
+            schedule_adherance,
+            percentile(0.0),
+            percentile(50.0),
+            percentile(90.0),
+            percentile(99.0),
+            percentile(99.9),
+            percentile(99.99),
+            *buckets.keys().max().unwrap() as f32,
+            start_secs,
+            first_tsc,
+            rt_stat_values
+        );
+    } else {
+        let rps_of = |n: usize| {
+            if elapsed_micros == 0 {
+                0u64
+            } else {
+                (n as u64 * 1_000_000) / elapsed_micros as u64
+            }
+        };
+        let mut merged: BTreeMap<String, GroupResult> = BTreeMap::new();
+        for res in &results {
+            for (k, g) in &res.groups {
+                merged.entry(k.clone()).or_default().merge(g);
+            }
+        }
+        let deadline_cell = |g: Option<&GroupResult>| match g {
+            Some(g) if g.deadline_total > 0 => {
+                format!("{:.2}", 100.0 * g.deadline_met as f64 / g.deadline_total as f64)
+            }
+            _ => "-".to_string(),
+        };
+        println!(
+            "all, {}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}, {}{}",
+            sched.kinds.name(),
+            sent_rps,
+            resp_rps,
+            drop_count + full_stream_count,
+            schedule_adherance,
+            percentile(0.0),
+            percentile(50.0),
+            percentile(90.0),
+            percentile(99.0),
+            percentile(99.9),
+            percentile(99.99),
+            *buckets.keys().max().unwrap() as f32,
+            deadline_cell(merged.get("all")),
+            start_secs,
+            first_tsc,
+            rt_stat_values
+        );
+        for (key, g) in merged.iter().filter(|(k, _)| sched.groups.shows(k)) {
+            let pct = |p| latency_percentile(&g.latencies, g.sent, g.responses, p);
+            println!(
+                "{}, {}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}, {}",
+                key,
+                sched.kinds.name(),
+                rps_of(g.sent),
+                rps_of(g.responses),
+                g.drops,
+                schedule_adherance,
+                pct(0.0),
+                pct(50.0),
+                pct(90.0),
+                pct(99.0),
+                pct(99.9),
+                pct(99.99),
+                g.latencies.keys().max().map_or(0.0, |m| *m as f32),
+                deadline_cell(Some(g)),
+                start_secs,
+                first_tsc
+            );
+        }
+    }
 
     if let OutputMode::Buckets = sched.output {
         print!("Latencies: ");
@@ -754,7 +907,43 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<Sch
     let mut full_stream = 0;
     let mut dropped = 0;
     let mut latencies = BTreeMap::new();
+    let mut groups: BTreeMap<String, GroupResult> = BTreeMap::new();
     for p in packets.iter() {
+        if p.actual_start.is_some() {
+            let spec = &sched.kinds.kinds[p.kind as usize];
+            let mut keys = vec!["all".to_string(), format!("kind:{}", spec.name)];
+            let answered = match (p.actual_start, p.completion_time) {
+                (Some(start), Some(end)) if end != start => Some((end - start).as_micros() as u64),
+                _ => None,
+            };
+            if answered.is_some() {
+                if let Some(c) = p.class_seen {
+                    keys.push(format!("class:{}", class_name(c)));
+                }
+            }
+            for key in keys {
+                let is_class = key.starts_with("class:");
+                let g = groups.entry(key).or_default();
+                match answered {
+                    Some(lat) => {
+                        g.sent += 1;
+                        g.responses += 1;
+                        *g.latencies.entry(lat).or_insert(0) += 1;
+                        if spec.deadline_us > 0 {
+                            g.deadline_total += 1;
+                            g.deadline_met += (lat <= spec.deadline_us) as usize;
+                        }
+                    }
+                    None if !is_class => {
+                        g.sent += 1;
+                        g.drops += 1;
+                        g.deadline_total += (spec.deadline_us > 0) as usize;
+                    }
+                    None => {}
+                }
+            }
+        }
+
         match (p.actual_start, p.completion_time) {
             (None, _) => sched_miss += 1,
             (_, None) => dropped += 1,
@@ -814,6 +1003,7 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<Sch
         first_send: first_send,
         last_send: last_send,
         latencies: latencies,
+        groups: groups,
         first_tsc: first_tsc,
         trace: trace,
     })
@@ -1086,6 +1276,7 @@ fn run_live_client(config: AppConfig, barrier_group: &mut lockstep::Group) {
         config.packets_per_second,
         OutputMode::Live,
         &config.kinds,
+        config.groups,
         config.rampup,
         config.nthreads,
         config.discard_pct,
@@ -1634,6 +1825,15 @@ impl AppConfig {
 
         let distribution = Self::create_distribution(matches)?;
         let kinds = Self::create_kinds(matches, &distribution)?;
+        let groups = match matches.get_one::<String>("groups").map(|s| s.as_str()) {
+            Some("all") => GroupMode::All,
+            Some("class") => GroupMode::Class,
+            Some("kind") => GroupMode::Kind,
+            Some("both") => GroupMode::Both,
+            // auto: grouped rows only when there is more than one kind
+            _ if kinds.kinds.len() > 1 => GroupMode::Both,
+            _ => GroupMode::All,
+        };
         let protocol = Self::create_protocol(matches, transport, &distribution)?;
 
         Ok(AppConfig {
@@ -1644,6 +1844,7 @@ impl AppConfig {
             start_packets_per_second,
             distribution,
             kinds,
+            groups,
             transport,
             protocol,
             output_mode,
@@ -1773,6 +1974,7 @@ fn do_run_local(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
             config.packets_per_second,
             OutputMode::Silent,
             &config.kinds,
+            config.groups,
             WARMUP_RAMPUP_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -1786,6 +1988,7 @@ fn do_run_local(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
             config.start_packets_per_second + step_size * j,
             config.output_mode,
             &config.kinds,
+            config.groups,
             WARMUP_RAMPUP_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -1850,6 +2053,7 @@ fn run_multistep_client(
             config.packets_per_second,
             OutputMode::Silent,
             &config.kinds,
+            config.groups,
             WARMUP_DURATION_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -1864,6 +2068,7 @@ fn run_multistep_client(
             config.start_packets_per_second + step_size * j,
             config.output_mode,
             &config.kinds,
+            config.groups,
             config.rampup,
             config.nthreads,
             config.discard_pct,
@@ -1992,6 +2197,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("Distribution of request lengths to use, new format")
                 .conflicts_with("distribution")
                 .conflicts_with("mean"),
+        )
+        .arg(
+            Arg::new("groups")
+                .long("groups")
+                .num_args(1)
+                .value_parser(["auto", "all", "class", "kind", "both"])
+                .default_value("auto")
+                .help(
+                    "Extra result rows: per server-applied class, per request kind, \
+                     both, or none (all). auto = both when --kinds has several kinds.",
+                ),
         )
         .arg(
             Arg::new("kinds")
