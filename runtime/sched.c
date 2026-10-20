@@ -298,6 +298,106 @@ static uint32_t choose_edf_high(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/* p3: a HIGH thread is urgent when it must start within this many us to
+ * finish by its due time */
+#define POLICY_SJF_GUARD_US	20
+/* p3: each us of expected run time moves a HIGH thread's turn back this many us */
+#define POLICY_SJF_WEIGHT	8
+/* p3: run-time hints longer than this count as this (keeps the sums small) */
+#define POLICY_SJF_SVC_MAX_US	1000
+
+/* expected run time of @th in cycles, capped; 0 if unknown */
+static inline uint64_t sjf_service(const thread_t *th)
+{
+	return MIN(th->service_tsc,
+		   (uint64_t)POLICY_SJF_SVC_MAX_US * cycles_per_us);
+}
+
+/* the last moment @th can start and still finish by its due time */
+static inline uint64_t sjf_latest_start(const thread_t *th)
+{
+	return edf_due(th) - sjf_service(th);
+}
+
+/* turn of a HIGH thread that is not urgent (earlier runs first): its due
+ * time, pushed back by POLICY_SJF_WEIGHT times its expected run time */
+static inline uint64_t sjf_turn(const thread_t *th)
+{
+	return edf_due(th) + POLICY_SJF_WEIGHT * sjf_service(th);
+}
+
+/*
+ * true if @th can still finish by its due time, but only if it starts within
+ * POLICY_SJF_GUARD_US of @now; once its latest start has passed, the unsigned
+ * difference wraps to a huge value and the test fails
+ */
+static inline bool sjf_urgent(const thread_t *th, uint64_t now)
+{
+	return sjf_latest_start(th) - now <
+	       (uint64_t)POLICY_SJF_GUARD_US * cycles_per_us;
+}
+
+/* true if HIGH thread @a (urgent if @ua) should run before HIGH thread @b
+ * (urgent if @ub): urgent ones first, least slack first among them,
+ * otherwise the earlier turn */
+static inline bool sjf_before(const thread_t *a, bool ua,
+			      const thread_t *b, bool ub)
+{
+	if (ua != ub)
+		return ua;
+	if (ua)
+		return (int64_t)(sjf_latest_start(a) - sjf_latest_start(b)) < 0;
+	return (int64_t)(sjf_turn(a) - sjf_turn(b)) < 0;
+}
+
+/*
+ * p3 "sjf_guard": class order as in p2 (helper threads, then HIGH, NORMAL,
+ * LOW; NORMAL and LOW oldest first). Among HIGH threads, an urgent one (see
+ * sjf_urgent()) runs first, the one with the least slack first; otherwise
+ * the one with the earliest sjf_turn(), so a short thread passes a longer one
+ * due up to POLICY_SJF_WEIGHT times their difference in run time earlier.
+ * Ties keep the oldest. The clock is read at most once, and only when two
+ * HIGH threads are queued.
+ */
+static uint32_t choose_sjf_guard(struct kthread *k, uint32_t n)
+{
+	thread_t *th = sched_rq_at(k, 0), *bth = th;
+	uint8_t r, rank = prio_rank[th->prio_class];
+	bool have_now = false, bu = false, u;
+	uint32_t i, best = 0;
+	uint64_t now = 0;
+
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!have_now) {
+				/* a second HIGH thread: read the clock once */
+				now = rdtsc();
+				have_now = true;
+				bu = sjf_urgent(bth, now);
+			}
+			u = sjf_urgent(th, now);
+			if (sjf_before(th, u, bth, bu)) {
+				best = i;
+				bth = th;
+				bu = u;
+			}
+		}
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -305,6 +405,7 @@ static const struct {
 	{ "fifo",	choose_fifo },
 	{ "prio",	choose_prio },
 	{ "edf_high",	choose_edf_high },
+	{ "sjf_guard",	choose_sjf_guard },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
