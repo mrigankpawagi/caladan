@@ -176,11 +176,35 @@ impl Drop for UdpConnection {
 unsafe impl Send for UdpConnection {}
 unsafe impl Sync for UdpConnection {}
 
+/// Classifier for a UDP spawner: inspects a datagram and fills in the
+/// scheduling hints of the thread that will handle it (see
+/// `udp_create_spawner_classified` in runtime/udp.h). Must be short and must
+/// not block; `thread::Hints::write_to` fills the output.
+pub type UdpClassifier = extern "C" fn(*const c_void, usize, *mut ffi::thread_hints);
+
 pub struct UdpSpawner(*mut ffi::udpspawner_t);
 impl UdpSpawner {
     pub unsafe fn new(
         local_addr: SocketAddrV4,
         f: extern "C" fn(*mut ffi::udp_spawn_data),
+    ) -> io::Result<Self> {
+        Self::create(local_addr, f, None)
+    }
+
+    /// Like `new`, but runs `classify` on each datagram before its handler
+    /// thread is queued, so the hints decide where it lands in the runqueue.
+    pub unsafe fn new_classified(
+        local_addr: SocketAddrV4,
+        f: extern "C" fn(*mut ffi::udp_spawn_data),
+        classify: UdpClassifier,
+    ) -> io::Result<Self> {
+        Self::create(local_addr, f, Some(classify))
+    }
+
+    unsafe fn create(
+        local_addr: SocketAddrV4,
+        f: extern "C" fn(*mut ffi::udp_spawn_data),
+        classify: Option<UdpClassifier>,
     ) -> io::Result<Self> {
         println!("{:?}", local_addr);
         let laddr = ffi::netaddr {
@@ -189,7 +213,15 @@ impl UdpSpawner {
         };
 
         let mut spawner: *mut ffi::udpspawner_t = ptr::null_mut();
-        let ret = ffi::udp_create_spawner(laddr, Some(f), &mut spawner as *mut *mut _);
+        let ret = match classify {
+            Some(c) => ffi::udp_create_spawner_classified(
+                laddr,
+                Some(f),
+                Some(c),
+                &mut spawner as *mut *mut _,
+            ),
+            None => ffi::udp_create_spawner(laddr, Some(f), &mut spawner as *mut *mut _),
+        };
 
         if ret < 0 {
             Err(io::Error::from_raw_os_error(-ret as i32))

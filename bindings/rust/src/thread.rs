@@ -17,6 +17,65 @@ pub fn thread_yield() {
     unsafe { ffi::thread_yield() }
 }
 
+/// Scheduling-hint priority classes (mirror `THREAD_PRIO_*` in runtime/thread.h).
+pub const PRIO_NORMAL: u8 = ffi::THREAD_PRIO_NORMAL as u8;
+pub const PRIO_HIGH: u8 = ffi::THREAD_PRIO_HIGH as u8;
+pub const PRIO_LOW: u8 = ffi::THREAD_PRIO_LOW as u8;
+
+/// Optional scheduling hints for a thread. The default value means "no hints".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Hints {
+    /// Priority class: `PRIO_NORMAL`, `PRIO_HIGH`, or `PRIO_LOW`.
+    pub class: u8,
+    /// Deadline in microseconds from the moment the hints are applied; 0 = none.
+    pub deadline_us: u64,
+    /// Expected run time in microseconds; 0 = unknown.
+    pub service_us: u64,
+}
+
+impl Hints {
+    /// Converts to the runtime's representation, turning the relative
+    /// deadline into an absolute `microtime()` value.
+    pub fn to_ffi(&self) -> ffi::thread_hints {
+        let mut h: ffi::thread_hints = unsafe { mem::zeroed() };
+        h.prio_class = self.class;
+        h.deadline_us = if self.deadline_us > 0 {
+            microtime() + self.deadline_us
+        } else {
+            0
+        };
+        h.service_us = self.service_us;
+        h
+    }
+
+    /// Fills the hints output of a UDP spawner classifier.
+    ///
+    /// # Safety
+    /// `out` must be the valid pointer the runtime passed to the classifier.
+    pub unsafe fn write_to(&self, out: *mut ffi::thread_hints) {
+        *out = self.to_ffi();
+    }
+}
+
+/// Sets scheduling hints on the running thread. They take effect the next
+/// time this thread is made runnable.
+pub fn set_self_hints(h: &Hints) -> std::io::Result<()> {
+    let raw = h.to_ffi();
+    let ret = unsafe { ffi::thread_set_hints(thread_self(), &raw) };
+    if ret < 0 {
+        Err(std::io::Error::from_raw_os_error(-ret))
+    } else {
+        Ok(())
+    }
+}
+
+/// The priority class the runtime currently holds for the running thread.
+pub fn self_class() -> u8 {
+    let mut out: ffi::thread_hints = unsafe { mem::zeroed() };
+    unsafe { ffi::thread_get_hints(thread_self(), &mut out) };
+    out.prio_class
+}
+
 pub(crate) extern "C" fn trampoline<F>(arg: *mut c_void)
 where
     F: FnOnce(),
