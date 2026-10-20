@@ -75,13 +75,16 @@ def code_sha():
     return sha
 
 
-def runtime_config(ip, cfg, kthreads, guaranteed, spinning, prio, policy=None):
+def runtime_config(ip, cfg, kthreads, guaranteed, spinning, prio, policy=None,
+                   stats=False):
     lines = ["host_addr %s" % ip, "host_netmask %s" % cfg["netmask"],
              "host_gateway %s" % cfg["gateway"], "runtime_kthreads %d" % kthreads,
              "runtime_guaranteed_kthreads %d" % guaranteed,
              "runtime_spinning_kthreads %d" % spinning, "runtime_priority %s" % prio]
     if policy:
         lines.append("runtime_sched_policy %s" % policy)
+    if stats:
+        lines.append("runtime_sched_stats 1")
     return "\n".join(lines) + "\n"
 
 
@@ -121,13 +124,13 @@ def start_iokernel(node, cfg):
                   fail_pattern="PANIC|panic|Error|failed")
 
 
-def setup(cfg, server, client, spec, policy, mode):
+def setup(cfg, server, client, spec, policy, mode, stats):
     """Starts IOKernels, the server, and the antagonist for one experiment."""
     repo, srv = cfg["repo"], spec["server"]
     parallel(lambda n: start_iokernel(n, cfg), [server, client])
     server.put(runtime_config(cfg["server"]["ip"], cfg, srv["kthreads"],
                               srv["guaranteed_kthreads"], srv["spinning_kthreads"],
-                              "lc", policy), "/tmp/ar_server.config")
+                              "lc", policy, stats), "/tmp/ar_server.config")
     ccfg = cfg["client_runtime"]
     client.put(runtime_config(cfg["client"]["ip"], cfg, ccfg["kthreads"],
                               ccfg["kthreads"], ccfg["kthreads"], "lc"),
@@ -185,7 +188,7 @@ def append_csv(path, fields, rows):
 
 def experiment(args, cfg, server, client, spec, spec_path, policy, mode, repeat, sha):
     wid = spec["id"]
-    run_id = "%s__%s__%s__%s__r%d" % (wid, policy, mode, args.build, repeat)
+    run_id = "%s__%s__%s__%s__r%d" % (wid, policy, mode, args.label, repeat)
     gen_dir = os.path.join(HERE, "results", "gen%d" % args.gen)
     raw_dir = os.path.join(gen_dir, "raw", run_id)
     os.makedirs(raw_dir, exist_ok=True)
@@ -193,13 +196,14 @@ def experiment(args, cfg, server, client, spec, spec_path, policy, mode, repeat,
     meta = {"run_id": run_id, "gen": args.gen, "workload": wid, "workload_file":
             os.path.relpath(spec_path, HERE), "workload_sha256":
             hashlib.sha256(open(spec_path, "rb").read()).hexdigest()[:16],
-            "policy": policy, "mode": mode, "build": args.build, "repeat": repeat,
+            "policy": policy, "mode": mode, "build": args.label, "repeat": repeat,
+            "sched_stats": args.sched_stats,
             "code_sha": sha, "nodes": {"server": server.ssh, "client": client.ssh},
             "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "levels": []}
     t0 = time.time()
     summary, counters = [], []
     try:
-        setup(cfg, server, client, spec, policy, mode)
+        setup(cfg, server, client, spec, policy, mode, args.sched_stats == "on")
         meta["setup_s"] = round(time.time() - t0, 1)
         for rps in spec["load_rps"]:
             t1 = time.time()
@@ -208,7 +212,7 @@ def experiment(args, cfg, server, client, spec, spec_path, policy, mode, repeat,
                 f.write(keep_lines(out))
             rows, rt, flags = parse.parse_level(out)
             base = {"gen": args.gen, "run_id": run_id, "workload": wid, "policy": policy,
-                    "mode": mode, "build": args.build, "repeat": repeat, "load_rps": rps}
+                    "mode": mode, "build": args.label, "repeat": repeat, "load_rps": rps}
             for r in rows:
                 summary.append(dict(base, **r, **{k: int(v) for k, v in flags.items()
                                                   if k in ("client_saturated", "failed")}))
@@ -259,12 +263,17 @@ def main():
     ap.add_argument("--mode", default="hints", help="comma-separated: hints,ignore")
     ap.add_argument("--build", default="hints", choices=["hints", "stock"],
                     help="hints = CONFIG_THREAD_HINTS=y, stock = n (fifo/ignore only)")
+    ap.add_argument("--sched-stats", default="on", choices=["on", "off"],
+                    help="per-pick runtime statistics (default on); with off, results "
+                         "are labelled build 'hints-nostats'")
     ap.add_argument("--repeats", type=int, help="override the workload's repeat count")
     ap.add_argument("--nodes", default=os.path.join(HERE, "nodes.json"))
     ap.add_argument("--dry-run", action="store_true", help="validate and print the plan")
     args = ap.parse_args()
 
     cfg = json.load(open(args.nodes))
+    args.label = args.build + ("-nostats" if args.sched_stats == "off" and
+                               args.build == "hints" else "")
     policies = args.policy.split(",")
     modes = args.mode.split(",")
     if args.build == "stock" and (policies != ["fifo"] or modes != ["ignore"]):

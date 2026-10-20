@@ -35,7 +35,9 @@ IOKernel, which decides how many cores each application gets, is untouched.
 - **Mode**: `hints` (the server applies its hint map) or `ignore` (the server
   applies no hints; same binary, same traffic).
 - **Build**: `hints` (our fork) or `stock` (hint support compiled out, i.e.
-  Caladan as published). Only used for the overhead check.
+  Caladan as published). Only used for the overhead check. `hints-nostats` is
+  the hints build with the per-pick measurement counters switched off
+  (`run.py --sched-stats off`); experiments normally keep them on.
 - **Headline load**: the busiest load level at which the baseline (fifo,
   hints mode, hints build) answers at least 99% of requests, keeps client
   schedule adherence at least 99%, and keeps overall median latency within 2x
@@ -44,6 +46,20 @@ IOKernel, which decides how many cores each application gets, is untouched.
 - **Score**: the workload's chosen kind and percentile (e.g. `short` p99) at
   the headline load, median over repeats. Lower is better.
 - **p99**: the latency 99% of requests beat (tail latency).
+
+## Who does what
+
+- **Workload agent, policy agent, measurement agent**: propose workloads,
+  write policies, and write reports, from the prompts in `prompts/`. They reply
+  with text; they do not edit files.
+- **Orchestrator** (Claude Code, driven by the owner): runs the generation
+  protocol, saves and commits agent outputs, reviews policy code, runs
+  experiments, and checks reports against the raw data. Between generations it
+  also fixes the loop's own infrastructure when that is really needed (for
+  example, measurement overhead that would distort results), in separate
+  commits explained in the next generation's notes. It never changes the
+  IOKernel and never writes policies itself.
+- **Owner**: watches each generation and decides whether to continue.
 
 ## One generation
 
