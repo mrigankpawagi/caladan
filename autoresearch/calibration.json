@@ -4,7 +4,13 @@
   "fakework": {
     "stridedmem:1024:7": {
       "iterations_per_us": 99.6,
-      "raw": {"10us": 994, "100us": 9966, "1us": 43, "2us": 196, "20us": 1024},
+      "raw": {
+        "10us": 994,
+        "100us": 9966,
+        "1us": 43,
+        "2us": 196,
+        "20us": 1024
+      },
       "note": "From loadgen --calibrate on the server node. Readings below 10 us and the 20 us reading are unreliable; use 99.6 iterations per us. So 170 iterations is about 1.7 us of work and 1700 about 17 us."
     }
   },
@@ -27,11 +33,17 @@
     "experiment_setup": 11,
     "per_load_level": 7.1,
     "rebuild_after_code_change": 34,
-    "gen0_node_time": 782
+    "gen0_node_time": 1229.2
   },
   "budget": {
     "formula": "Per generation N >= 1, with P = N + 1 existing policies and N + 2 workloads after the new one: new workload x (P policies with hints + fifo ignore) x 2 repeats, plus the new policy x (N + 2 workloads) x 2 repeats, at 56 s each, plus one rebuild (34 s) and a debug-build smoke run (about 90 s). That is (2N + 4) x 112 s + 126 s.",
-    "estimate_minutes": {"gen1": 13, "gen2": 17, "gen3": 21, "gen5": 28, "gen10": 47},
+    "estimate_minutes": {
+      "gen1": 13,
+      "gen2": 17,
+      "gen3": 21,
+      "gen5": 28,
+      "gen10": 47
+    },
     "cap_minutes": 25,
     "trimming_when_over_cap": [
       "re-measure on the new workload only policies whose status is baseline or accepted",
@@ -41,8 +53,10 @@
     "per_8h_slot": "about 10 generations, counting roughly 10 minutes of agent time per generation"
   },
   "overhead_finding": {
-    "summary": "The hint-enabled build is slightly slower than stock Caladan near saturation on w0, where no policy can help: p99 at 300k req/s is 71-73 us in all four hint-build repeats (fifo and prio alike) versus 67 us in both stock repeats; median at 350k is 37 us versus 35 us. Lighter loads are identical.",
-    "likely_cause": "Not the policy scan (fifo and prio cost the same). Most likely the per-pick measurement counters (a clock read, a queue scan for inversions, several counter updates) or the indirect policy call.",
-    "next_step": "Make the per-pick counters switchable at run time and repeat the w0 comparison with them off, to separate measurement cost from mechanism cost."
+    "summary": "The hint-enabled build is about 1% slower than stock Caladan at saturation on w0 (376k vs 380k req/s answered) and about 2 us slower in median latency and 5% in p99 near saturation; identical at light load.",
+    "cause": "Not the per-pick counters and not the hints mode: switching both off (runtime_sched_stats 0, --ignore-hints) changes nothing measurable. It is the hint build's general pick mechanism (indirect policy call, gap closing) versus stock's one-line pop.",
+    "consequence": "All policies share it, so policy comparisons are fair; experiments keep the counters on.",
+    "evidence": "results/gen0/notes.md, addendum; runs w0__fifo__*__{hints r3-r4, hints-nostats r1-r2, stock r3-r4}, code 82c4fe9",
+    "open_item": "Possible fix: inlined fast path in sched_pop_next when only one thread is queued."
   }
 }

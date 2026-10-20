@@ -42,3 +42,29 @@ compiled out), each repeated twice; plus a fake-work calibration.
 - The workload agent's first harder workload should keep a FIFO penalty
   while leaving `prio` room to improve: `prio` already brings short p99 at
   400k to about half of fifo, and its HIGH queue wait is down to 0.5 µs.
+
+## Addendum: overhead follow-up (between gen 0 and gen 1)
+
+Finding 4 above blamed the per-pick counters. To test that, the counters
+were made switchable (`runtime_sched_stats`, commit 82c4fe9) and w0 was
+re-run in one session, fifo, two repeats per condition:
+
+| Condition | 300k p99 (µs) | 350k median (µs) | Saturated throughput |
+|---|---|---|---|
+| hint build, counters on (`hints`, r3–r4) | 72 / 72 | 37 / 37 | 375k / 375k |
+| hint build, counters off (`hints-nostats`) | 70 / 72 | 37 / 37 | 376k / 376k |
+| counters off, hints ignored | 70 / 70 | 37 / 37 | 376k / 377k |
+| stock Caladan (r3–r4) | 67 / 68 | 35 / 35 | 379k / 380k |
+
+The counters are **not** the cause: switching them off changes nothing
+measurable, and neither does the hints mode. The remaining cost, about 1% of
+saturated throughput and 2 µs of median latency near saturation, belongs to the
+hint build's general pick mechanism (an indirect policy call and the code that
+closes the gap in the queue, in place of stock Caladan's one-line pop). Every
+policy shares it, so policy comparisons are unaffected, and experiments keep
+the counters on. Not chased further for now (not needed for the loop); a
+possible later fix is an inlined fast path for a queue of one thread.
+
+Also fixed: re-running an experiment within a generation reused its run id
+and overwrote the earlier run's files. The originals were restored from git
+and the new runs renumbered r3–r4 (commit "never reuse a run id").

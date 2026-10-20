@@ -19,19 +19,23 @@ Score: `req` p99. Headline load: 350,000 req/s.
 
 | Policy | Mode | Build | Score (req p99) | vs fifo | req deadline met % | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|
-| p0 fifo | hints | hints | 178.5 (173.0–184.0) | +0% | - | 348728 | - | 9.72 | 2 | 0 |
-| p1 prio | hints | hints | 178.5 (178.0–179.0) | +0% | - | 348376 | - | 9.49 | 2 | 0 |
-| p0 fifo | ignore | stock | 169.0 (163.0–175.0) | -5% | - | 349120 | - | - | 2 | 0 |
+| p0 fifo | hints | hints | 182.5 (173.0–184.0) | +0% | - | 348572 | - | 9.72 | 4 | 0 |
+| p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
+| p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
+| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
+| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
-Best with hints applied: **fifo** (178.5 µs).
+Best with hints applied: **prio** (178.5 µs).
 
 req p99 by offered load (req/s):
 
 | Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 350,000 | 400,000 | 450,000 |
 |---|---|---|---|---|---|---|---|---|
-| fifo | hints | hints | 33.0 | 39.5 | 72.0 | 178.5 | inf | inf |
+| fifo | hints | hints | 33.0 | 40.0 | 72.0 | 182.5 | inf | inf |
 | prio | hints | hints | 33.0 | 39.0 | 72.0 | 178.5 | inf | inf |
-| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 169.0 | inf | inf |
+| fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
+| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
+| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
