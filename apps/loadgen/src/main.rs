@@ -102,7 +102,7 @@ mod http;
 use http::HttpProtocol;
 
 mod distribution;
-use distribution::Distribution;
+use distribution::{Distribution, KindMix};
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum Protocol {
@@ -285,6 +285,7 @@ pub struct AppConfig {
     pub packets_per_second: usize,
     pub start_packets_per_second: usize,
     pub distribution: Distribution,
+    pub kinds: KindMix,
     pub transport: Transport,
     pub protocol: Protocol,
     pub output_mode: OutputMode,
@@ -327,10 +328,10 @@ impl AppConfig {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 struct RequestSchedule {
     arrival: Distribution,
-    service: Distribution,
+    kinds: KindMix,
     output: OutputMode,
     runtime: Duration,
     rps: usize,
@@ -465,7 +466,7 @@ fn gen_classic_packet_schedule(
     runtime: Duration,
     packets_per_second: usize,
     output: OutputMode,
-    distribution: Distribution,
+    kinds: &KindMix,
     ramp_up_seconds: usize,
     nthreads: usize,
     discard_pct: f32,
@@ -482,7 +483,7 @@ fn gen_classic_packet_schedule(
 
         sched.push(RequestSchedule {
             arrival: Distribution::Exponential((nthreads * NS_PER_SEC as usize / rate) as f64),
-            service: distribution,
+            kinds: kinds.clone(),
             output: OutputMode::Silent,
             runtime: Duration::from_micros(1_000_000 / RAMPUP_STEPS_PER_SECOND as u64),
             rps: rate,
@@ -494,7 +495,7 @@ fn gen_classic_packet_schedule(
 
     sched.push(RequestSchedule {
         arrival: Distribution::Exponential(ns_per_packet as f64),
-        service: distribution,
+        kinds: kinds.clone(),
         output: output,
         runtime: runtime,
         rps: packets_per_second,
@@ -521,7 +522,7 @@ fn gen_loadshift_experiment(config: &AppConfig) -> Vec<RequestSchedule> {
             };
             RequestSchedule {
                 arrival: Distribution::Exponential(ns_per_packet as f64),
-                service: config.distribution,
+                kinds: config.kinds.clone(),
                 output: output,
                 runtime: Duration::from_micros(micros),
                 rps: packets_per_second as usize,
@@ -597,7 +598,7 @@ fn process_result_final(
     if response_count <= 1 {
         println!(
             "{}, {}, 0, {}, {}, {}",
-            sched.service.name(),
+            sched.kinds.name(),
             sched.rps,
             drop_count + full_stream_count,
             sched_miss_count,
@@ -663,7 +664,7 @@ fn process_result_final(
 
     println!(
         "{}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}{}",
-        sched.service.name(),
+        sched.kinds.name(),
         sent_rps,
         resp_rps,
         drop_count + full_stream_count,
@@ -827,10 +828,12 @@ fn gen_packets_for_schedule(schedules: &Arc<Vec<RequestSchedule>>) -> (Vec<Packe
     for sched in schedules.iter() {
         end += duration_to_ns(sched.runtime);
         loop {
+            let (kind, work_iterations) = sched.kinds.sample(&mut rng);
             packets.push(Packet {
                 randomness: rng.gen::<u64>(),
                 target_start: Duration::from_nanos(last),
-                work_iterations: sched.service.sample(&mut rng),
+                work_iterations,
+                kind,
                 ..Default::default()
             });
 
@@ -1082,7 +1085,7 @@ fn run_live_client(config: AppConfig, barrier_group: &mut lockstep::Group) {
         config.runtime,
         config.packets_per_second,
         OutputMode::Live,
-        config.distribution,
+        &config.kinds,
         config.rampup,
         config.nthreads,
         config.discard_pct,
@@ -1630,6 +1633,7 @@ impl AppConfig {
         let output_mode = *matches.get_one::<OutputMode>("output").unwrap();
 
         let distribution = Self::create_distribution(matches)?;
+        let kinds = Self::create_kinds(matches, &distribution)?;
         let protocol = Self::create_protocol(matches, transport, &distribution)?;
 
         Ok(AppConfig {
@@ -1639,6 +1643,7 @@ impl AppConfig {
             packets_per_second,
             start_packets_per_second,
             distribution,
+            kinds,
             transport,
             protocol,
             output_mode,
@@ -1690,6 +1695,18 @@ impl AppConfig {
             }
         };
         Ok(Distribution::create(&distspec)?)
+    }
+
+    /// The request-kind mix: `--kinds` if given, else a single kind using
+    /// the `--distspec`/`--distribution` distribution.
+    fn create_kinds(
+        matches: &ArgMatches,
+        distribution: &Distribution,
+    ) -> Result<KindMix, Box<dyn std::error::Error>> {
+        match matches.get_one::<String>("kinds") {
+            Some(spec) => Ok(KindMix::parse(spec)?),
+            None => Ok(KindMix::from_distribution(*distribution)),
+        }
     }
 
     fn create_protocol(
@@ -1755,7 +1772,7 @@ fn do_run_local(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
             Duration::from_secs(1),
             config.packets_per_second,
             OutputMode::Silent,
-            config.distribution,
+            &config.kinds,
             WARMUP_RAMPUP_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -1768,7 +1785,7 @@ fn do_run_local(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
             config.runtime,
             config.start_packets_per_second + step_size * j,
             config.output_mode,
-            config.distribution,
+            &config.kinds,
             WARMUP_RAMPUP_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -1832,7 +1849,7 @@ fn run_multistep_client(
             Duration::from_secs(1),
             config.packets_per_second,
             OutputMode::Silent,
-            config.distribution,
+            &config.kinds,
             WARMUP_DURATION_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -1846,7 +1863,7 @@ fn run_multistep_client(
             config.runtime,
             config.start_packets_per_second + step_size * j,
             config.output_mode,
-            config.distribution,
+            &config.kinds,
             config.rampup,
             config.nthreads,
             config.discard_pct,
@@ -1973,6 +1990,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("distspec")
                 .num_args(1)
                 .help("Distribution of request lengths to use, new format")
+                .conflicts_with("distribution")
+                .conflicts_with("mean"),
+        )
+        .arg(
+            Arg::new("kinds")
+                .long("kinds")
+                .num_args(1)
+                .help(
+                    "Mix of request kinds: name/distspec/weight[/deadline_us],... \
+                     (e.g. short/constant:170/0.2/60,long/exponential:1700/0.8). \
+                     The kind index is sent to the server, which maps it to a hint.",
+                )
+                .conflicts_with("distspec")
                 .conflicts_with("distribution")
                 .conflicts_with("mean"),
         )
