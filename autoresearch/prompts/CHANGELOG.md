@@ -17,3 +17,5 @@ the prompt version in its title and get their own commit.
   bursts, or wrong service hints); keep the top load near the headline";
   policy_agent +"order HIGH by earliest deadline; expect about 52 us at best on w2"
   (with its outcome noted).
+- v1.2 (between gen 2's workload proposal and its measurement): workload_agent
+  learns that bursts are supported (the `burst` field) and gets a burst ladder.

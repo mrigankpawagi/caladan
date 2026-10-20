@@ -1,4 +1,4 @@
-# Workload agent (prompt v1)
+# Workload agent (prompt v1.2)
 
 ## Role
 
@@ -52,9 +52,15 @@ the server's mapping from kind to hint.
 
 - UDP only, one server process plus at most one antagonist, one client node
   with 8 client cores. Up to 16 request kinds.
-- Each load level is a constant offered rate (Poisson arrivals). No bursts or
-  load shifts yet; if a workload needs them, say so in your rationale instead
-  of inventing fields (run.py rejects unknown fields).
+- Each load level is an offered average rate with Poisson arrivals, optionally
+  made bursty with the `burst` field (see workloads/README.md): in every period
+  the first `duty` fraction of the time runs at `factor` times the rate of the
+  rest, at the same average, and all connections burst together. The busy-phase
+  rate at the top load must stay at or below 700k req/s. A check run at 300k
+  req/s on w1 with period 1000 µs, duty 0.25, factor 3 raised the short p99
+  under fifo from 30 to 121 µs. Anything else (load shifts between levels,
+  TCP, more clients) needs run.py support first: say so in your rationale
+  instead of inventing fields (run.py rejects unknown fields).
 - Server: 1 to 16 runtime cores (`kthreads`), `guaranteed_kthreads` even,
   `spinning_kthreads` <= kthreads. The node has 20 hardware threads; the
   IOKernel uses 2.
@@ -76,7 +82,7 @@ that the current best policy handles best. Record the new values in
 | antagonist | none → cache → memory bandwidth → dynamic |
 | conns | 16 → 48 → 128 (deeper queues, more overflow beyond 32 queued threads) |
 | kthreads | 8 → 6 → 4 (same load on fewer cores) |
-| burst | needs run.py support first |
+| burst | none → period 1000 µs, duty 0.25, factor 2 → factor 3 → factor 4 or shorter periods |
 
 ## Requirements for the workload
 
