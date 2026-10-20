@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p2
 - changed_from_previous: p2 plus: among HIGH threads, one that must start within 20 µs to finish by its deadline runs first (most urgent first; a thread that can no longer finish in time is not urgent), and the others run in order of deadline plus 8 times their expected run time instead of deadline alone
-- commit: (filled by orchestrator)
+- commit: 31c94fd
 
 ## What it does
 Like edf_high, each core runs runtime helper threads first, then HIGH, then NORMAL, then LOW, and NORMAL and LOW threads keep their oldest-first order. Inside HIGH, the core now also uses each request's expected run time, so a short request normally goes ahead of a long one. Each HIGH thread's turn is its deadline pushed back by eight times its expected run time, which lets a 2 µs lookup pass a 17 µs query that arrived up to 120 µs before it, but no earlier. The exception is a HIGH thread that will miss its deadline unless it starts within the next 20 µs: it runs first, the most urgent one first. A thread that can no longer finish on time does not count as urgent. It keeps its normal turn, so it does not hold up requests that can still make their deadlines.
