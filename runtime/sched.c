@@ -398,6 +398,106 @@ static uint32_t choose_sjf_guard(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/* p4: a HIGH thread with less slack than this can no longer finish in time
+ * as the client sees it: at light load about 13 us of a request's latency
+ * is spent outside the run queue (network, runtime) */
+#define POLICY_RESCUE_LATE_US	13
+/* p4: what running a request costs beyond its run-time hint (thread
+ * creation, network stack; about 4 us per request in calibration.json) */
+#define POLICY_RESCUE_COST_US	4
+
+/* slack of HIGH thread @th at @now: how long it can still wait and start in
+ * time to finish by its due time; negative once that moment has passed */
+static inline int64_t rescue_slack(const thread_t *th, uint64_t now)
+{
+	return (int64_t)(sjf_latest_start(th) - now);
+}
+
+/* true if HIGH thread @a (too late if @al) goes before HIGH thread @b (too
+ * late if @bl) in p4's base order: a thread that is too late waits for any
+ * shorter one; otherwise the earlier sjf_turn() goes first */
+static inline bool rescue_before(const thread_t *a, bool al,
+				 const thread_t *b, bool bl)
+{
+	uint64_t sa = sjf_service(a), sb = sjf_service(b);
+
+	if ((al || bl) && sa != sb)
+		return sa < sb;
+	return (int64_t)(sjf_turn(a) - sjf_turn(b)) < 0;
+}
+
+/*
+ * p4 "sjf_rescue": class order as in p3 (helper threads, then HIGH, NORMAL,
+ * LOW; NORMAL and LOW oldest first). Among HIGH threads, one with less than
+ * POLICY_RESCUE_LATE_US of slack is too late to save: it waits for any
+ * shorter HIGH thread. The others keep p3's sjf_turn() order. p3's fixed
+ * urgency guard becomes a check against that order's choice: the HIGH
+ * thread with the least slack among those not too late runs first only if
+ * waiting for the choice (its expected run time plus POLICY_RESCUE_COST_US)
+ * would leave it too late. Ties keep the oldest. The clock is read at most
+ * once, and only when two HIGH threads are queued.
+ */
+static uint32_t choose_sjf_rescue(struct kthread *k, uint32_t n)
+{
+	thread_t *th = sched_rq_at(k, 0), *bth = th, *uth = NULL;
+	uint8_t r, rank = prio_rank[th->prio_class];
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	bool have_now = false;
+	uint64_t now = 0, cost;
+
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!have_now) {
+				/* a second HIGH thread: read the clock once */
+				now = rdtsc();
+				have_now = true;
+				late = (int64_t)POLICY_RESCUE_LATE_US *
+				       cycles_per_us;
+				bs = rescue_slack(bth, now);
+				if (bs >= late) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+				}
+			}
+			s = rescue_slack(th, now);
+			/* least slack among the threads not too late */
+			if (s >= late && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+			}
+			if (rescue_before(th, s < late, bth, bs < late)) {
+				best = i;
+				bth = th;
+				bs = s;
+			}
+		}
+	}
+
+	/* it goes first if waiting for the chosen thread would make it late */
+	if (uth && uth != bth) {
+		cost = sjf_service(bth) +
+		       (uint64_t)POLICY_RESCUE_COST_US * cycles_per_us;
+		if (us < late + (int64_t)cost)
+			return ubest;
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -406,6 +506,7 @@ static const struct {
 	{ "prio",	choose_prio },
 	{ "edf_high",	choose_edf_high },
 	{ "sjf_guard",	choose_sjf_guard },
+	{ "sjf_rescue",	choose_sjf_rescue },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
