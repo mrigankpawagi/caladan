@@ -174,6 +174,61 @@ static void drain_overflow(struct kthread *l)
 	}
 }
 
+#ifdef CONFIG_THREAD_HINTS
+/* run order by priority class: higher rank runs first */
+static const uint8_t prio_rank[THREAD_PRIO_NR] = {
+	[THREAD_PRIO_LOW] = 0,
+	[THREAD_PRIO_NORMAL] = 1,
+	[THREAD_PRIO_HIGH] = 2,
+	[THREAD_PRIO_SOFTIRQ] = 3,
+};
+
+/**
+ * sched_pop_next - removes and returns the next thread to run
+ * @k: the kthread (its lock must be held and its runqueue non-empty)
+ *
+ * Policy: strict priority by class, FIFO within a class. Scans the runqueue
+ * ring for the highest-ranked thread (the earliest one among equals), then
+ * closes the gap it leaves by shifting the entries ahead of it, so the order
+ * of the remaining threads is preserved. Threads in the overflow list are not
+ * considered until they move into the ring.
+ */
+static thread_t *sched_pop_next(struct kthread *k)
+{
+	uint32_t tail = k->rq_tail, i, best = 0;
+	uint32_t n = load_acquire(&k->rq_head) - tail;
+	thread_t *th, *t;
+	uint8_t rank;
+
+	assert_spin_lock_held(&k->lock);
+	assert(n > 0 && n <= RUNTIME_RQ_SIZE);
+
+	th = k->rq[tail % RUNTIME_RQ_SIZE];
+	rank = prio_rank[th->prio_class];
+	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
+		t = k->rq[(tail + i) % RUNTIME_RQ_SIZE];
+		if (prio_rank[t->prio_class] > rank) {
+			rank = prio_rank[t->prio_class];
+			best = i;
+			th = t;
+		}
+	}
+
+	/* close the gap: slide the threads queued before @th back by one slot */
+	for (i = best; i > 0; i--)
+		k->rq[(tail + i) % RUNTIME_RQ_SIZE] =
+			k->rq[(tail + i - 1) % RUNTIME_RQ_SIZE];
+
+	k->rq_tail = tail + 1;
+	return th;
+}
+#else
+static inline thread_t *sched_pop_next(struct kthread *k)
+{
+	return k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
+}
+#endif
+
 static bool work_available(struct kthread *k, uint64_t now_tsc)
 {
 	return ACCESS_ONCE(k->rq_tail) != ACCESS_ONCE(k->rq_head) ||
@@ -433,7 +488,7 @@ again:
 done:
 	/* pop off a thread and run it */
 	assert(l->rq_head != l->rq_tail);
-	th = l->rq[l->rq_tail++ % RUNTIME_RQ_SIZE];
+	th = sched_pop_next(l);
 	ACCESS_ONCE(l->q_ptrs->rq_tail)++;
 
 	/* move overflow tasks into the runqueue */
@@ -480,8 +535,6 @@ static __always_inline void enter_schedule(thread_t *curth)
 	spin_lock(&k->lock);
 	now_tsc = rdtsc();
 
-	th = k->rq[k->rq_tail % RUNTIME_RQ_SIZE];
-
 	/* slow path: switch from the uthread stack to the runtime stack */
 	if (k->rq_head == k->rq_tail ||
 	    preempt_cede_needed(k) ||
@@ -499,7 +552,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 	perthread_get_stable(last_tsc) = now_tsc;
 
 	/* pop the next runnable thread from the queue */
-	k->rq_tail++;
+	th = sched_pop_next(k);
 	ACCESS_ONCE(k->q_ptrs->rq_tail)++;
 
 	/* move overflow tasks into the runqueue */

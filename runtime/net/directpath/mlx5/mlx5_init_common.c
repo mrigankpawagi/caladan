@@ -128,6 +128,7 @@ int mlx5_init_thread(void)
 		v->poll_th = thread_create(mlx5_softirq, v);
 	if (!v->poll_th)
 		return -ENOMEM;
+	thread_mark_softirq(v->poll_th);
 
 	ret = mlx5_rx_stride_init_thread();
 	if (ret)
