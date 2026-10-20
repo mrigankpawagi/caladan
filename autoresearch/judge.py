@@ -110,12 +110,12 @@ def accept(args):
         if not head:
             continue
         a, b = score(idx, s, new, head), score(idx, s, champ, head)
-        if a is None or b is None:
+        if wid != "w0" and (a is None or b is None):
             print("  %s: missing data (%s=%s, %s=%s)" % (wid, new, a, champ, b))
             if wid == newest or wid == "w0":
                 ok = False
             continue
-        rel = a / b - 1 if b else 0
+        rel = a / b - 1 if (a is not None and b) else 0
         if wid == "w0":
             loads = s["load_rps"]
             below = max([l for l in loads if l < head], default=head)
