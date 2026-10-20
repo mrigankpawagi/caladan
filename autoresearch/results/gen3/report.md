@@ -68,3 +68,26 @@ To be accepted, a policy needs get p99 at or below 77.4 µs and query met at or 
 
 workload: w4's bursts hurt less than modeled (about 0.5 threads waiting per core; sjf_guard get p99 86 µs vs a predicted 118–123), and the client sends 2.5–6.3% below nominal under bursts, so size backlogs from measured depth and sent rate.
 policy: On w4 sjf_guard's lead over edf_high grows with load (39% at the headline), so urgent queries are at most part of the get's 31–55 µs burst penalty; let gets pass urgent queries with slack to spare, or stop promoting queries that will miss anyway, keeping query met at or above 91.40%.
+
+## Addendum (orchestrator): w4 superseded by w4b
+
+Section 5's "client sends below nominal" was a bug in the new burst
+generator: each arrival gap was scaled by the rate of the phase it started
+in, so quiet-phase gaps skipped part of the next burst. It was fixed
+(exact time rescaling) and the identical workload re-measured as **w4b**;
+the client now sends 99.1–99.9% of nominal (w4: 93.7–97.4%). w4 is
+superseded. At the true rate the workload is a little harder; the picture
+is the same. w4b at its headline load (380k req/s), medians of two repeats:
+
+| Policy | get p99 | query p99 | query met % | batch p99 | scan p99 | HIGH wait (µs) | late at pick | depth |
+|---|---|---|---|---|---|---|---|---|
+| fifo | 189.0 | 207.5 | 84.81 | 208.0 | 207.0 | 18.41 | 3.77% | 1.75 |
+| prio | 169.5 | 189.0 | 87.90 | 286.0 | 309.5 | 15.18 | 2.31% | 1.78 |
+| edf_high | 165.5 | 186.0 | 87.81 | 281.0 | 304.5 | 15.18 | 2.29% | 1.78 |
+| sjf_guard (champion) | 94.0 | 194.0 | 87.15 | 285.5 | 306.0 | 12.65 | 1.77% | 1.81 |
+
+For acceptance on w4b a policy needs get p99 ≤ 84.6 µs (10% below 94.0),
+query deadline-met ≥ 86.15% (rule 6), and batch and scan p99 ≤ 357 and
+382.5 µs (rule 3). Note that queries now miss their 100 µs deadline about
+13% of the time under every priority policy: the burst backlog, not the
+order within HIGH, dominates query latency.
