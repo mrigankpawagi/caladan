@@ -69,6 +69,13 @@ pub fn set_self_hints(h: &Hints) -> std::io::Result<()> {
     }
 }
 
+/// The cycle count at which the running thread last became ready to run
+/// (was queued). Right after the thread starts, `rdtsc()` minus this is the
+/// time it spent waiting in a runqueue.
+pub fn self_ready_tsc() -> u64 {
+    unsafe { (*thread_self()).ready_tsc }
+}
+
 /// The priority class the runtime currently holds for the running thread.
 pub fn self_class() -> u8 {
     let mut out: ffi::thread_hints = unsafe { mem::zeroed() };
