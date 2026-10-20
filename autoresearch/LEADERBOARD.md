@@ -123,3 +123,29 @@ get p99 by offered load (req/s):
 | sjf_guard | hints | hints | 13.0 | 16.0 | 24.5 | 30.5 | 55.0 | 135.0 |
 | fifo | ignore | hints | 13.0 | 16.5 | 28.0 | 43.5 | 89.5 | 254.5 |
 
+## w4: Lookups and queries with one shared deadline, arriving in bursts
+
+[workloads/w4-bursty-shared-deadline.json](workloads/w4-bursty-shared-deadline.json). The same key-value front end as w3: quick lookups and ten-times-longer queries are both HIGH with one shared 100 us deadline, batch is NORMAL and bulk scans are LOW. Now the traffic arrives in bursts: for the first quarter of every millisecond requests come twice as fast as in the rest of it, so the server is briefly overloaded and then catches up. During each burst many queries pile up and near their deadline at the same time. A scheduler that runs nearly-late queries ahead of everything else then makes a lookup wait behind several of them, although letting the lookup go first would cost each query only a couple of microseconds.
+
+Score: `get` p99. Headline load: 380,000 req/s.
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | query p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 140.5 (135.0–146.0) | -16% | 96.09 | 160.0 | 239.0 | 255.5 | 370474 | 10.20 | 19.69 | 2 | 3 |
+| p0 fifo | hints | hints | 167.0 (165.0–169.0) | +0% | 94.15 | 187.0 | 186.5 | 186.5 | 370546 | 12.88 | 12.88 | 2 | 3 |
+| p1 prio | hints | hints | 139.5 (138.0–141.0) | -16% | 96.07 | 158.5 | 234.5 | 252.5 | 370401 | 10.14 | 19.51 | 2 | 3 |
+| p3 sjf_guard | hints | hints | 86.0 (85.0–87.0) | -49% | 99.73 | 161.5 | 241.5 | 258.0 | 370372 | 8.59 | 20.19 | 2 | 3 |
+| p0 fifo | ignore | hints | 163.0 (161.0–165.0) | -2% | 94.40 | 182.5 | 183.0 | 183.0 | 371346 | - | 12.53 | 2 | 3 |
+
+Best with hints applied: **sjf_guard** (86.0 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 330,000 | 355,000 | 380,000 |
+|---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 13.5 | 20.0 | 65.5 | 94.0 | 115.5 | 140.5 |
+| fifo | hints | hints | 14.0 | 21.5 | 70.5 | 104.0 | 132.0 | 167.0 |
+| prio | hints | hints | 13.5 | 21.0 | 62.0 | 89.0 | 114.5 | 139.5 |
+| sjf_guard | hints | hints | 13.0 | 19.0 | 47.0 | 62.0 | 74.0 | 86.0 |
+| fifo | ignore | hints | 13.0 | 21.0 | 71.0 | 100.0 | 130.0 | 163.0 |
+
