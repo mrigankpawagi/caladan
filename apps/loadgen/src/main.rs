@@ -75,6 +75,10 @@ const SCHEDULE_ADHERANCE_THRESH_HIGH: f64 = 95.0;
 pub struct Packet {
     work_iterations: u64,
     randomness: u64,
+    /// Request kind (index into the server's hint map); 0 = default kind.
+    kind: u8,
+    /// Priority class the server reported applying, from the response.
+    class_seen: Option<u8>,
     target_start: Duration,
     actual_start: Option<Duration>,
     completion_time_ns: Arc<AtomicU64>,
@@ -207,7 +211,9 @@ impl<'a> Buffer<'a> {
 trait LoadgenProtocol: Send + Sync {
     fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>);
     fn uses_ordered_requests(&self) -> bool;
-    fn read_response(&self, sock: &Connection, scratch: &mut Buffer) -> io::Result<(usize, u64)>;
+    /// Reads one response; returns (request index, server tsc, applied class).
+    fn read_response(&self, sock: &Connection, scratch: &mut Buffer)
+        -> io::Result<(usize, u64, u8)>;
 }
 
 impl LoadgenProtocol for Protocol {
@@ -231,7 +237,8 @@ impl LoadgenProtocol for Protocol {
         }
     }
 
-    fn read_response(&self, sock: &Connection, scratch: &mut Buffer) -> io::Result<(usize, u64)> {
+    fn read_response(&self, sock: &Connection, scratch: &mut Buffer)
+        -> io::Result<(usize, u64, u8)> {
         match self {
             Protocol::Synthetic(proto) => proto.read_response(sock, scratch),
             Protocol::Memcached(proto) => proto.read_response(sock, scratch),
@@ -946,11 +953,11 @@ fn run_client_worker(
         wg2.follower_notify();
         for i in 0..receive_times.len() {
             match rproto.read_response(&socket2, &mut buf) {
-                Ok((mut idx, tsc)) => {
+                Ok((mut idx, tsc, class)) => {
                     if use_ordering {
                         idx = i;
                     }
-                    receive_times[idx] = Some((Instant::now(), tsc));
+                    receive_times[idx] = Some((Instant::now(), tsc, class));
                 }
                 Err(e) => {
                     match e.raw_os_error() {
@@ -1051,9 +1058,10 @@ fn run_client_worker(
                 }),
         )
         .for_each(|(c, p)| {
-            if let Some((inst, tsc)) = c {
+            if let Some((inst, tsc, class)) = c {
                 (*p).completion_time = Some(inst - start);
                 (*p).completion_server_tsc = Some(tsc);
+                (*p).class_seen = Some(class);
             }
         });
 
