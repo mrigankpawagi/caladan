@@ -90,3 +90,27 @@ get p99 by offered load (req/s):
 | prio | hints | hints | 13.5 | 16.5 | 28.5 | 41.5 | 84.5 | 252.0 |
 | fifo | ignore | hints | 13.5 | 16.5 | 29.0 | 45.0 | 92.0 | 302.0 |
 
+## w3: Lookups and queries share one deadline, plus a LOW kind
+
+[workloads/w3-shared-deadline-low.json](workloads/w3-shared-deadline-low.json). The same key-value front end as w2, but the service now gives every user-facing request one 100 us deadline, as many real services do: quick lookups (20%) and queries ten times longer (60%) are both HIGH and differ only in their expected run time. Background work is split between batch requests (10%, NORMAL) and bulk scans (10%, LOW, run only when nothing more important is waiting). Running HIGH work in deadline order now means running it in arrival order, so a lookup again waits behind older queries; only a scheduler that reads the run-time hint can let it go first, and it must do so without pushing queries past their own 100 us deadline or starving the scans.
+
+Score: `get` p99. Headline load: 400,000 req/s.
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | query p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 87.5 (87.0–88.0) | -7% | 99.22 | 107.0 | 147.0 | 158.5 | 398082 | 3.81 | 6.96 | 2 | 2 |
+| p0 fifo | hints | hints | 94.5 (93.0–96.0) | +0% | 99.10 | 114.5 | 113.5 | 114.0 | 398628 | 4.59 | 4.62 | 2 | 2 |
+| p1 prio | hints | hints | 84.0 (81.0–87.0) | -11% | 99.31 | 103.0 | 139.5 | 154.5 | 398618 | 3.66 | 6.66 | 2 | 2 |
+| p0 fifo | ignore | hints | 89.5 (88.0–91.0) | -5% | 99.20 | 109.5 | 108.5 | 111.0 | 398781 | - | 4.28 | 2 | 2 |
+
+Best with hints applied: **prio** (84.0 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 350,000 | 400,000 | 440,000 |
+|---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 14.0 | 16.0 | 28.5 | 43.0 | 87.5 | 288.5 |
+| fifo | hints | hints | 13.5 | 16.5 | 29.0 | 45.5 | 94.5 | 329.0 |
+| prio | hints | hints | 13.5 | 16.0 | 28.0 | 43.0 | 84.0 | 247.0 |
+| fifo | ignore | hints | 13.0 | 16.5 | 28.0 | 43.5 | 89.5 | 254.5 |
+
