@@ -279,8 +279,23 @@ def main():
     if args.build == "stock" and (policies != ["fifo"] or modes != ["ignore"]):
         sys.exit("a stock build only supports --policy fifo --mode ignore")
     loaded = [(p, specs.load(p)) for p in args.workload]
-    plan = [(path, s, pol, mode, r) for path, s in loaded for pol in policies
-            for mode in modes for r in range(1, (args.repeats or s.get("repeats", 1)) + 1)]
+    meta_dir = os.path.join(HERE, "results", "gen%d" % args.gen, "meta")
+
+    def first_repeat(wid, pol, mode):
+        """Repeat numbers continue from earlier runs in this generation, so a
+        re-run never overwrites an earlier run's files."""
+        prefix = "%s__%s__%s__%s__r" % (wid, pol, mode, args.label)
+        done = [int(f[len(prefix):-5]) for f in (os.listdir(meta_dir)
+                if os.path.isdir(meta_dir) else []) if f.startswith(prefix)]
+        return max(done, default=0) + 1
+
+    plan = []
+    for path, s in loaded:
+        for pol in policies:
+            for mode in modes:
+                r0 = first_repeat(s["id"], pol, mode)
+                n = args.repeats or s.get("repeats", 1)
+                plan += [(path, s, pol, mode, r) for r in range(r0, r0 + n)]
     for path, s, pol, mode, r in plan:
         log("plan: %s %s %s r%d (%d levels)" % (s["id"], pol, mode, r, len(s["load_rps"])))
     if args.dry_run:
