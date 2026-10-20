@@ -1,7 +1,8 @@
 """Parsing loadgen client output (grouped rows and the RtStats line)."""
 
 ROW_FIELDS = ["group", "dist", "sent_rps", "resp_rps", "dropped", "adherence",
-              "p0", "p50", "p90", "p99", "p999", "p9999", "max", "deadline_met"]
+              "p0", "p50", "p90", "p99", "p999", "p9999", "max", "deadline_met",
+              "qwait_p50", "qwait_p99"]
 CLASSES = ("normal", "high", "low", "softirq")
 
 
@@ -35,7 +36,9 @@ def parse_level(text):
                 flags["failed"] = True  # loadgen's short row: almost no responses
                 continue
             row = {"group": parts[0], "dist": parts[1]}
-            for name, v in zip(ROW_FIELDS[2:], parts[2:14]):
+            # rows from clients without queue-wait columns have 14 fields
+            ncols = 16 if len(parts) >= 18 else 14
+            for name, v in zip(ROW_FIELDS[2:ncols], parts[2:ncols]):
                 row[name] = _num(v)
             rows.append(row)
         elif "Aborting: schedule adherance is low" in line:

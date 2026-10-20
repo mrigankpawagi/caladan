@@ -235,18 +235,19 @@ def gen_tables(gen, rows, crows, workloads):
         out += ["## %s: %s" % (wid, s["title"]), ""]
         for combo in combos:
             out += ["### %s / %s / %s" % combo, "",
-                    "| Load | Group | Resp/s | p50 | p90 | p99 | p99.9 | Deadline met % |",
-                    "|---|---|---|---|---|---|---|---|"]
+                    "| Load | Group | Resp/s | p50 | p90 | p99 | p99.9 | Deadline met % | "
+                    "Queue wait p50 | Queue wait p99 |",
+                    "|---|---|---|---|---|---|---|---|---|---|"]
             for l in loads:
                 for g in groups:
                     rs = idx.get((wid,) + combo + (l, g))
                     if not rs:
                         continue
-                    m = lambda f: med([fnum(r[f]) for r in rs])  # noqa: E731
-                    out.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % (
+                    m = lambda f: med([fnum(r.get(f)) for r in rs])  # noqa: E731
+                    out.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
                         "{:,}".format(l), g, fmt(m("resp_rps")), fmt(m("p50")),
                         fmt(m("p90")), fmt(m("p99")), fmt(m("p999")),
-                        fmt(m("deadline_met"), 2)))
+                        fmt(m("deadline_met"), 2), fmt(m("qwait_p50")), fmt(m("qwait_p99"))))
             out += ["", "| Load | Wait HIGH | Wait NORMAL | Wait LOW | Wait helper | "
                     "Mean depth | Inversion rate | Late at pick | HIGH/LOW stolen rate | "
                     "Hinted overflow | Overflow | CPU cores |",
