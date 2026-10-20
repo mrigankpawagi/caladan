@@ -1,0 +1,21 @@
+{
+  "id": "w2",
+  "slug": "two-high-kinds",
+  "generation": 1,
+  "title": "Short and long latency-critical requests share the HIGH class",
+  "description": "A key-value or search front end: 20% of requests are quick lookups that must answer within 60 us, 60% are user-facing queries about ten times longer that must answer within 200 us, and 20% are background batch requests of the same length as a query. Lookups and queries are both latency-critical, so the server marks both HIGH, with different deadlines and expected run times; batch stays NORMAL. Running HIGH first no longer protects a lookup, because it now waits mostly behind older queries of its own class; only a scheduler that reads the deadline or run-time hints can let it go first.",
+  "changed_from_previous": "w1 with three quarters of the long NORMAL requests turned into HIGH queries (200 us deadline, 17 us expected run time), so short HIGH requests now queue behind long HIGH ones; the client's service-time mix is unchanged.",
+  "difficulty": {"load": 0.85, "tails": 0, "classes": 3, "burst": 0, "inaccuracy": 0, "antagonist": 0, "conns": 16, "kthreads": 8},
+  "server": {"kthreads": 8, "guaranteed_kthreads": 8, "spinning_kthreads": 8, "fakework": "stridedmem:1024:7"},
+  "client": {"conns": 16, "duration_s": 3, "rampup_s": 1, "discard_pct": 10},
+  "kinds": [
+    {"name": "get", "service": "constant:170", "weight": 0.2, "deadline_us": 60, "hint": {"class": "high", "deadline_us": 60, "service_us": 2}},
+    {"name": "query", "service": "constant:1700", "weight": 0.6, "deadline_us": 200, "hint": {"class": "high", "deadline_us": 200, "service_us": 17}},
+    {"name": "batch", "service": "constant:1700", "weight": 0.2, "deadline_us": 0, "hint": {"class": "normal"}}
+  ],
+  "load_rps": [100000, 200000, 300000, 350000, 400000, 440000],
+  "score": {"kind": "get", "percentile": "p99"},
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity: fake work alone is 0.2 x 170/99.6 + 0.6 x 1700/99.6 + 0.2 x 1700/99.6 = 0.34 + 10.24 + 3.41 = 14.0 us per request, so 8 / 14.0 us = 572k req/s at most. Adding about 4 us of runtime and network cost per request (calibration.json): 0.2 x 5.7 + 0.8 x 21.1 = 1.14 + 16.86 = 18.0 us, so 8 / 18.0 us = 444k req/s. That is the estimate used: 300k/350k/400k/440k are 68/79/90/99% of it. The client's service mix is identical to w1's (which saturated between 400k and 450k), so fifo, which ignores hints, should reproduce w1's fifo curve (a built-in check), and the headline should again be 400k. HIGH now takes 76% of core time (gets 6%, queries 70%), against 6% in w1. Deadlines are about 10x each kind's expected run time (get 60 vs about 5.7 us, query 200 vs about 21 us). classes 3 means three kinds in two classes: the classes step is a second HIGH kind (the ladder's 'more kinds per class') instead of LOW, as the gen-0 lesson asks; LOW is left for a later workload. A rough offline queueing model (8 cores, per-core queues with stealing; not a measurement) puts prio's get p99 at 400k at about 75% of fifo's, and an earliest-deadline-first order at about 40%."
+}
