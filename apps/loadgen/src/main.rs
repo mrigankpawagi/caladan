@@ -661,6 +661,24 @@ fn get_rt_stat_values(map1: &StatMap, map0: &StatMap) -> Vec<String> {
     values
 }
 
+/// One "key=delta" entry per runtime counter: how much each counter grew
+/// during the load step. cycles_per_us is reported as-is.
+fn get_rt_stat_deltas(map1: &StatMap, map0: &StatMap) -> String {
+    let mut keys: Vec<&String> = map1.keys().collect();
+    keys.sort();
+    keys.iter()
+        .map(|k| {
+            let v1 = map1[*k];
+            let v = match (k.as_str(), map0.get(*k)) {
+                ("cycles_per_us", _) | (_, None) => v1,
+                (_, Some(v0)) => v1.saturating_sub(*v0),
+            };
+            format!("{}={}", k, v)
+        })
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
 fn process_result_final(
     sched: &RequestSchedule,
     results: Vec<ScheduleResult>,
@@ -746,6 +764,9 @@ fn process_result_final(
         );
         return true;
     }
+    let rt_stat_deltas = rt_stats
+        .as_ref()
+        .map(|(map1, map0)| get_rt_stat_deltas(map1, map0));
     let rt_stat_values = rt_stats.map_or_else(
         || String::new(),
         |(map1, map0)| format!(", {}", get_rt_stat_values(&map1, &map0).join(", ")),
@@ -846,6 +867,10 @@ fn process_result_final(
                 first_tsc
             );
         }
+    }
+
+    if let Some(deltas) = rt_stat_deltas {
+        println!("RtStats: {}", deltas);
     }
 
     if let OutputMode::Buckets = sched.output {
