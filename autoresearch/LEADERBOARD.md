@@ -22,8 +22,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p0 fifo | hints | hints | 182.5 (173.0–184.0) | +0% | - | 348572 | - | 9.72 | 4 | 0 |
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 | p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
+| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 
 Best with hints applied: **prio** (178.5 µs).
 
@@ -34,8 +34,8 @@ req p99 by offered load (req/s):
 | fifo | hints | hints | 33.0 | 40.0 | 72.0 | 182.5 | inf | inf |
 | prio | hints | hints | 33.0 | 39.0 | 72.0 | 178.5 | inf | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 | fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
+| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -60,4 +60,26 @@ short p99 by offered load (req/s):
 | prio | hints | hints | 14.0 | 16.0 | 25.0 | 31.0 | 52.5 | 303.0 |
 | fifo | ignore | hints | 13.5 | 16.0 | 29.5 | 43.5 | 91.0 | 554.5 |
 | prio | ignore | hints | 13.5 | 16.5 | 29.0 | 43.5 | 95.0 | 984.0 |
+
+## w2: Short and long latency-critical requests share the HIGH class
+
+[workloads/w2-two-high-kinds.json](workloads/w2-two-high-kinds.json). A key-value or search front end: 20% of requests are quick lookups that must answer within 60 us, 60% are user-facing queries about ten times longer that must answer within 200 us, and 20% are background batch requests of the same length as a query. Lookups and queries are both latency-critical, so the server marks both HIGH, with different deadlines and expected run times; batch stays NORMAL. Running HIGH first no longer protects a lookup, because it now waits mostly behind older queries of its own class; only a scheduler that reads the deadline or run-time hints can let it go first.
+
+Score: `get` p99. Headline load: 400,000 req/s.
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | query p99 | batch p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 100.5 (99.0–102.0) | +0% | 97.28 | 120.0 | 119.5 | 398318 | 4.61 | 4.59 | 2 | 1 |
+| p1 prio | hints | hints | 84.5 (80.0–89.0) | -16% | 97.82 | 103.5 | 144.5 | 398061 | 3.64 | 7.06 | 2 | 1 |
+| p0 fifo | ignore | hints | 92.0 (91.0–93.0) | -8% | 97.45 | 114.0 | 114.5 | 398961 | - | 4.35 | 2 | 1 |
+
+Best with hints applied: **prio** (84.5 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 350,000 | 400,000 | 440,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 14.0 | 16.5 | 29.0 | 44.5 | 100.5 | 272.0 |
+| prio | hints | hints | 13.5 | 16.5 | 28.5 | 41.5 | 84.5 | 252.0 |
+| fifo | ignore | hints | 13.5 | 16.5 | 29.0 | 45.0 | 92.0 | 302.0 |
 
