@@ -245,12 +245,66 @@ static uint32_t choose_prio(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/* implied deadline of a HIGH thread that carries none, after it became ready */
+#define POLICY_EDF_NODL_US	1000
+
+/* when a HIGH thread is due: its deadline, or POLICY_EDF_NODL_US after it
+ * became ready if it has none */
+static inline uint64_t edf_due(const thread_t *th)
+{
+	if (th->deadline_tsc)
+		return th->deadline_tsc;
+	return th->ready_tsc + (uint64_t)POLICY_EDF_NODL_US * cycles_per_us;
+}
+
+/*
+ * p2 "edf_high": strict priority by class as in p1 (helper threads, then
+ * HIGH, NORMAL, LOW), but among HIGH threads the one due first runs first
+ * (earliest deadline first, oldest first on ties). NORMAL and LOW threads
+ * keep their oldest-first order.
+ */
+static uint32_t choose_edf_high(struct kthread *k, uint32_t n)
+{
+	thread_t *th = sched_rq_at(k, 0);
+	uint8_t r, rank = prio_rank[th->prio_class];
+	uint32_t i, best = 0;
+	uint64_t d, due = 0;
+
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+	if (rank == prio_rank[THREAD_PRIO_HIGH])
+		due = edf_due(th);
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			if (r == prio_rank[THREAD_PRIO_HIGH])
+				due = edf_due(th);
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			/* among HIGH, strictly earlier due time wins */
+			d = edf_due(th);
+			if ((int64_t)(d - due) < 0) {
+				due = d;
+				best = i;
+			}
+		}
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
 } sched_policies[] = {
 	{ "fifo",	choose_fifo },
 	{ "prio",	choose_prio },
+	{ "edf_high",	choose_edf_high },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
