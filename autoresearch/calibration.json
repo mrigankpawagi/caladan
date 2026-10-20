@@ -1,0 +1,48 @@
+{
+  "generation": 0,
+  "measured_on": "2026-10-20, two CloudLab xl170 nodes (Intel E5-2640v4, ConnectX-4 Lx), Ubuntu 22.04, code 5786466",
+  "fakework": {
+    "stridedmem:1024:7": {
+      "iterations_per_us": 99.6,
+      "raw": {"10us": 994, "100us": 9966, "1us": 43, "2us": 196, "20us": 1024},
+      "note": "From loadgen --calibrate on the server node. Readings below 10 us and the 20 us reading are unreliable; use 99.6 iterations per us. So 170 iterations is about 1.7 us of work and 1700 about 17 us."
+    }
+  },
+  "effective_capacity": {
+    "note": "Beyond the fake work itself, each request costs about 4 us of runtime, network stack, and thread creation on the server, so capacity is lower than kthreads / mean work.",
+    "w0_8_kthreads_17us": "saturates between 350k and 400k req/s (about 21 us per request per core)",
+    "w1_8_kthreads_13.9us_mean": "saturates between 400k and 450k req/s"
+  },
+  "noise_band": {
+    "score_relative_half_range": 0.06,
+    "evidence": "Score at the headline load, two repeats: w1 fifo 90 / 101 us, w1 prio 52 / 53, w0 fifo 173 / 184, w0 stock 163 / 175.",
+    "rule": "Differences under 6% are noise. The 10% acceptance threshold for new policies stays. If two repeats differ by more than 15%, run a third."
+  },
+  "client": {
+    "verified_up_to_rps": 450000,
+    "note": "The client misses about 0.15% of send slots at every load (adherence about 99.85%), so loadgen's 'adherence may be low' warning appears everywhere; it is not saturation. The headline-load rule uses a 99% adherence threshold."
+  },
+  "timing_s": {
+    "experiment_6_levels": 56,
+    "experiment_setup": 11,
+    "per_load_level": 7.1,
+    "rebuild_after_code_change": 34,
+    "gen0_node_time": 782
+  },
+  "budget": {
+    "formula": "Per generation N >= 1, with P = N + 1 existing policies and N + 2 workloads after the new one: new workload x (P policies with hints + fifo ignore) x 2 repeats, plus the new policy x (N + 2 workloads) x 2 repeats, at 56 s each, plus one rebuild (34 s) and a debug-build smoke run (about 90 s). That is (2N + 4) x 112 s + 126 s.",
+    "estimate_minutes": {"gen1": 13, "gen2": 17, "gen3": 21, "gen5": 28, "gen10": 47},
+    "cap_minutes": 25,
+    "trimming_when_over_cap": [
+      "re-measure on the new workload only policies whose status is baseline or accepted",
+      "drop the two lightest load levels for workloads older than the current generation",
+      "one repeat for policies more than 15% behind the best on that workload"
+    ],
+    "per_8h_slot": "about 10 generations, counting roughly 10 minutes of agent time per generation"
+  },
+  "overhead_finding": {
+    "summary": "The hint-enabled build is slightly slower than stock Caladan near saturation on w0, where no policy can help: p99 at 300k req/s is 71-73 us in all four hint-build repeats (fifo and prio alike) versus 67 us in both stock repeats; median at 350k is 37 us versus 35 us. Lighter loads are identical.",
+    "likely_cause": "Not the policy scan (fifo and prio cost the same). Most likely the per-pick measurement counters (a clock read, a queue scan for inversions, several counter updates) or the indirect policy call.",
+    "next_step": "Make the per-pick counters switchable at run time and repeat the w0 comparison with them off, to separate measurement cost from mechanism cost."
+  }
+}
