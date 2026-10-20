@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p1
 - changed_from_previous: p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready)
-- commit: (filled by orchestrator)
+- commit: 7281afd
 
 ## What it does
 Like prio, each core runs runtime helper threads first, then HIGH, then NORMAL, then LOW. The change is inside the HIGH class. Instead of the HIGH thread that has waited longest, the core runs the one whose deadline is soonest. So a quick lookup due in 60 µs goes ahead of a long query due in 200 µs, even if the query arrived first. A HIGH thread with no deadline counts as due 1 ms after it became ready, so it cannot be passed forever. NORMAL and LOW threads, including every unhinted one, keep prio's oldest-first order.
