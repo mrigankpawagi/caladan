@@ -165,7 +165,7 @@ impl LoadgenProtocol for ReflexProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<(usize, u64, u64)> {
         let scratch = buf.get_empty_buf();
         sock.read_exact(&mut scratch[..REFLEX_HDR_SZ])?;
         let hdr = PacketHeader::read(&mut &scratch[..])?;

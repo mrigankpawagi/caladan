@@ -18,7 +18,10 @@ use std::io::Read;
 ///   bits 8..16  priority class the server actually applied to the handler
 ///               thread, filled in by the server on the reply
 ///               (`HINT_CLASS_IGNORED` if the server ignores hints)
-///   bits 16..64 reserved (zero)
+///   bits 16..40 time the handler thread waited in a runqueue before it
+///               started, in units of 100 ns, filled in by the server
+///               (`HINT_WAIT_UNKNOWN` if the server does not measure it)
+///   bits 40..64 reserved (zero)
 pub struct Payload {
     pub work_iterations: u64,
     pub index: u64,
@@ -30,9 +33,12 @@ pub const PAYLOAD_SIZE: usize = 32;
 
 /// Value of the applied-class field when the server did not apply any hint.
 pub const HINT_CLASS_IGNORED: u8 = 0xff;
+/// Value of the queue-wait field when the server does not measure it.
+pub const HINT_WAIT_UNKNOWN: u32 = 0xff_ffff;
 
 const HINT_KIND_SHIFT: u64 = 0;
 const HINT_CLASS_SHIFT: u64 = 8;
+const HINT_WAIT_SHIFT: u64 = 16;
 /// Byte offset of the hint word in a serialized payload.
 const HINT_OFFSET: usize = 24;
 
@@ -59,15 +65,11 @@ impl LoadgenProtocol for SyntheticProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<(usize, u64, u64)> {
         let scratch = buf.get_empty_buf();
         sock.read_exact(&mut scratch[..PAYLOAD_SIZE])?;
         let payload = Payload::deserialize(&mut &scratch[..])?;
-        Ok((
-            payload.index as usize,
-            payload.randomness,
-            payload.class_applied(),
-        ))
+        Ok((payload.index as usize, payload.randomness, payload.hint))
     }
 }
 
@@ -82,9 +84,33 @@ impl SyntheticProtocol {
 }
 
 impl Payload {
-    /// Builds the hint word a client sends for request kind `kind`.
+    /// Builds the hint word a client sends for request kind `kind` (queue
+    /// wait marked unknown until a server that measures it fills it in).
     pub fn hint_for_kind(kind: u8) -> u64 {
-        (kind as u64) << HINT_KIND_SHIFT
+        ((kind as u64) << HINT_KIND_SHIFT) | ((HINT_WAIT_UNKNOWN as u64) << HINT_WAIT_SHIFT)
+    }
+
+    /// The applied class carried in a reply's hint word.
+    pub fn class_of(hint: u64) -> u8 {
+        (hint >> HINT_CLASS_SHIFT) as u8
+    }
+
+    /// The queue wait (100 ns units) carried in a reply's hint word, if known.
+    pub fn wait_of(hint: u64) -> Option<u32> {
+        let w = ((hint >> HINT_WAIT_SHIFT) & HINT_WAIT_UNKNOWN as u64) as u32;
+        if w == HINT_WAIT_UNKNOWN {
+            None
+        } else {
+            Some(w)
+        }
+    }
+
+    /// Records, on the server, how long the handler thread waited in a
+    /// runqueue (100 ns units, saturating).
+    pub fn set_wait_100ns(&mut self, wait: u64) {
+        let w = wait.min(HINT_WAIT_UNKNOWN as u64 - 1);
+        self.hint &= !((HINT_WAIT_UNKNOWN as u64) << HINT_WAIT_SHIFT);
+        self.hint |= w << HINT_WAIT_SHIFT;
     }
 
     /// The request kind chosen by the client.
