@@ -33,6 +33,8 @@ pub const HINT_CLASS_IGNORED: u8 = 0xff;
 
 const HINT_KIND_SHIFT: u64 = 0;
 const HINT_CLASS_SHIFT: u64 = 8;
+/// Byte offset of the hint word in a serialized payload.
+const HINT_OFFSET: usize = 24;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SyntheticProtocol {}
@@ -99,6 +101,23 @@ impl Payload {
     pub fn set_class_applied(&mut self, class: u8) {
         self.hint &= !(0xffu64 << HINT_CLASS_SHIFT);
         self.hint |= (class as u64) << HINT_CLASS_SHIFT;
+    }
+
+    /// Reads the request kind straight from a serialized payload, without
+    /// decoding the rest (used by the UDP classifier, which must be cheap).
+    pub fn kind_from_wire(buf: &[u8]) -> Option<u8> {
+        let w: [u8; 8] = buf.get(HINT_OFFSET..HINT_OFFSET + 8)?.try_into().ok()?;
+        Some((u64::from_be_bytes(w) >> HINT_KIND_SHIFT) as u8)
+    }
+
+    /// Sets the applied-class field directly in a serialized payload.
+    pub fn set_class_applied_on_wire(buf: &mut [u8], class: u8) {
+        if let Some(w) = buf.get_mut(HINT_OFFSET..HINT_OFFSET + 8) {
+            let mut h = u64::from_be_bytes((&*w).try_into().unwrap());
+            h &= !(0xffu64 << HINT_CLASS_SHIFT);
+            h |= (class as u64) << HINT_CLASS_SHIFT;
+            w.copy_from_slice(&h.to_be_bytes());
+        }
     }
 
     pub fn serialize_into<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {

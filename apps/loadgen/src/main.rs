@@ -36,6 +36,9 @@ mod server;
 
 mod lockstep;
 
+mod hintmap;
+use hintmap::HintMap;
+
 mod payload;
 use payload::{Payload, SyntheticProtocol, PAYLOAD_SIZE};
 
@@ -377,6 +380,10 @@ pub struct AppConfig {
     pub rampup: usize,
     pub discard_pct: f32,
     pub fakework_spec: String,
+    /// Server: --hintmap spec mapping request kinds to scheduling hints.
+    pub hintmap_spec: Option<String>,
+    /// Server: do not apply hints (the baseline for hint experiments).
+    pub ignore_hints: bool,
     pub intersample_sleep: u64,
     pub do_runtime_stat: bool,
     pub live_mode: bool,
@@ -394,6 +401,13 @@ pub struct AppConfig {
 impl AppConfig {
     fn fakeworker(&self) -> Arc<FakeWorker> {
         Arc::new(FakeWorker::create(&self.fakework_spec).unwrap())
+    }
+
+    /// The parsed --hintmap, if one was given (validated in from_matches).
+    pub fn hintmap(&self) -> Option<HintMap> {
+        self.hintmap_spec
+            .as_ref()
+            .map(|s| HintMap::parse(s).unwrap())
     }
 
     fn split(&self) -> Vec<AppConfig> {
@@ -1810,6 +1824,11 @@ impl AppConfig {
             .get_one::<String>("loadshift")
             .unwrap_or(&"".to_string())
             .to_string();
+        let hintmap_spec = matches.get_one::<String>("hintmap").cloned();
+        if let Some(spec) = &hintmap_spec {
+            HintMap::parse(spec)?;
+        }
+        let ignore_hints = matches.get_flag("ignore-hints");
 
         let mode_str = matches.get_one::<String>("mode").unwrap();
         let mode = RunMode::from_str(mode_str)?;
@@ -1852,6 +1871,8 @@ impl AppConfig {
             rampup,
             discard_pct,
             fakework_spec,
+            hintmap_spec,
+            ignore_hints,
             intersample_sleep,
             do_runtime_stat,
             live_mode,
@@ -2169,6 +2190,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("Server protocol"),
         )
         .arg(
+            Arg::new("hintmap")
+                .long("hintmap")
+                .num_args(1)
+                .help(
+                    "Server: map request kinds to scheduling hints, \
+                     kind=class[:deadline_us[:service_us]],... (e.g. 0=high:60:10,1=normal)",
+                ),
+        )
+        .arg(
+            Arg::new("ignore-hints")
+                .long("ignore-hints")
+                .action(clap::ArgAction::SetTrue)
+                .help("Server: do not apply scheduling hints (baseline)"),
+        )
+        .arg(
             Arg::new("warmup")
                 .long("warmup")
                 .action(clap::ArgAction::SetTrue)
@@ -2382,7 +2418,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .backend
                 .clone()
                 .init_and_run(cfg_file.as_deref(), move || {
-                    server::run_spawner_server(config.addrs[0], &config.fakework_spec)
+                    let hints = server::ServerHints::from_config(&config);
+                    server::run_spawner_server(config.addrs[0], &config.fakework_spec, hints)
                 }),
             Transport::Tcp => config
                 .backend
