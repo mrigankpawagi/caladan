@@ -61,6 +61,45 @@ impl Distribution {
     }
 }
 
+/// Bursty arrivals. Every `period_ns`, the first `duty` fraction of the period
+/// runs at `factor` times the arrival rate of the rest, keeping the same
+/// average rate. All client connections share the phase (it depends only on
+/// time since the schedule start), so bursts hit the server together.
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+pub struct Burst {
+    pub period_ns: u64,
+    pub duty: f64,
+    pub factor: f64,
+}
+
+impl Burst {
+    /// Parses "period_us:duty:factor", e.g. "1000:0.2:4".
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let f: Vec<&str> = spec.split(':').collect();
+        if f.len() != 3 {
+            return Err(format!("bad burst spec '{}' (period_us:duty:factor)", spec));
+        }
+        let period_us: u64 = f[0].parse().map_err(|_| "bad burst period".to_string())?;
+        let duty: f64 = f[1].parse().map_err(|_| "bad burst duty".to_string())?;
+        let factor: f64 = f[2].parse().map_err(|_| "bad burst factor".to_string())?;
+        if period_us < 10 || !(duty > 0.0 && duty < 1.0) || !(factor >= 1.0) {
+            return Err("burst needs period_us >= 10, 0 < duty < 1, factor >= 1".to_string());
+        }
+        Ok(Burst { period_ns: period_us * 1000, duty, factor })
+    }
+
+    /// Arrival rate at time `t_ns`, relative to the average rate.
+    pub fn rate_multiplier(&self, t_ns: u64) -> f64 {
+        let norm = self.duty * self.factor + (1.0 - self.duty);
+        let on = ((t_ns % self.period_ns) as f64) < self.duty * self.period_ns as f64;
+        if on {
+            self.factor / norm
+        } else {
+            1.0 / norm
+        }
+    }
+}
+
 /// One kind of request in a mix: a name, a service-time distribution (in
 /// work iterations), a relative weight, and an optional client-side deadline
 /// (microseconds, 0 = none) used only for reporting.

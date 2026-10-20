@@ -105,7 +105,7 @@ mod http;
 use http::HttpProtocol;
 
 mod distribution;
-use distribution::{Distribution, KindMix};
+use distribution::{Burst, Distribution, KindMix};
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum Protocol {
@@ -373,6 +373,8 @@ pub struct AppConfig {
     pub distribution: Distribution,
     pub kinds: KindMix,
     pub groups: GroupMode,
+    /// Optional bursty arrivals within each load level (--burst).
+    pub burst: Option<Burst>,
     pub transport: Transport,
     pub protocol: Protocol,
     pub output_mode: OutputMode,
@@ -431,6 +433,7 @@ struct RequestSchedule {
     arrival: Distribution,
     kinds: KindMix,
     groups: GroupMode,
+    burst: Option<Burst>,
     output: OutputMode,
     runtime: Duration,
     rps: usize,
@@ -569,6 +572,7 @@ fn gen_classic_packet_schedule(
     output: OutputMode,
     kinds: &KindMix,
     groups: GroupMode,
+    burst: Option<Burst>,
     ramp_up_seconds: usize,
     nthreads: usize,
     discard_pct: f32,
@@ -587,6 +591,7 @@ fn gen_classic_packet_schedule(
             arrival: Distribution::Exponential((nthreads * NS_PER_SEC as usize / rate) as f64),
             kinds: kinds.clone(),
             groups,
+            burst,
             output: OutputMode::Silent,
             runtime: Duration::from_micros(1_000_000 / RAMPUP_STEPS_PER_SECOND as u64),
             rps: rate,
@@ -600,6 +605,7 @@ fn gen_classic_packet_schedule(
         arrival: Distribution::Exponential(ns_per_packet as f64),
         kinds: kinds.clone(),
         groups,
+        burst,
         output: output,
         runtime: runtime,
         rps: packets_per_second,
@@ -628,6 +634,7 @@ fn gen_loadshift_experiment(config: &AppConfig) -> Vec<RequestSchedule> {
                 arrival: Distribution::Exponential(ns_per_packet as f64),
                 kinds: config.kinds.clone(),
                 groups: config.groups,
+                burst: config.burst,
                 output: output,
                 runtime: Duration::from_micros(micros),
                 rps: packets_per_second as usize,
@@ -1066,7 +1073,11 @@ fn gen_packets_for_schedule(schedules: &Arc<Vec<RequestSchedule>>) -> (Vec<Packe
                 ..Default::default()
             });
 
-            let nxt = last + sched.arrival.sample(&mut rng);
+            let mut gap = sched.arrival.sample(&mut rng);
+            if let Some(b) = sched.burst {
+                gap = (gap as f64 / b.rate_multiplier(last)) as u64;
+            }
+            let nxt = last + gap;
             if nxt >= end {
                 break;
             }
@@ -1316,6 +1327,7 @@ fn run_live_client(config: AppConfig, barrier_group: &mut lockstep::Group) {
         OutputMode::Live,
         &config.kinds,
         config.groups,
+        config.burst,
         config.rampup,
         config.nthreads,
         config.discard_pct,
@@ -1869,6 +1881,10 @@ impl AppConfig {
 
         let distribution = Self::create_distribution(matches)?;
         let kinds = Self::create_kinds(matches, &distribution)?;
+        let burst = match matches.get_one::<String>("burst") {
+            Some(spec) => Some(Burst::parse(spec)?),
+            None => None,
+        };
         let groups = match matches.get_one::<String>("groups").map(|s| s.as_str()) {
             Some("all") => GroupMode::All,
             Some("class") => GroupMode::Class,
@@ -1889,6 +1905,7 @@ impl AppConfig {
             distribution,
             kinds,
             groups,
+            burst,
             transport,
             protocol,
             output_mode,
@@ -2021,6 +2038,7 @@ fn do_run_local(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
             OutputMode::Silent,
             &config.kinds,
             config.groups,
+            config.burst,
             WARMUP_RAMPUP_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -2035,6 +2053,7 @@ fn do_run_local(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
             config.output_mode,
             &config.kinds,
             config.groups,
+            config.burst,
             WARMUP_RAMPUP_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -2100,6 +2119,7 @@ fn run_multistep_client(
             OutputMode::Silent,
             &config.kinds,
             config.groups,
+            config.burst,
             WARMUP_DURATION_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -2115,6 +2135,7 @@ fn run_multistep_client(
             config.output_mode,
             &config.kinds,
             config.groups,
+            config.burst,
             config.rampup,
             config.nthreads,
             config.discard_pct,
@@ -2258,6 +2279,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("Distribution of request lengths to use, new format")
                 .conflicts_with("distribution")
                 .conflicts_with("mean"),
+        )
+        .arg(
+            Arg::new("burst")
+                .long("burst")
+                .num_args(1)
+                .help(
+                    "Bursty arrivals, period_us:duty:factor: in every period the first \
+                     duty fraction runs at factor times the rate of the rest, same average",
+                ),
         )
         .arg(
             Arg::new("groups")
