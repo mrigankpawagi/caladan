@@ -95,9 +95,10 @@ rejected without being run.
 
 Accepted if, versus the current best policy: the newest workload's score
 improves by at least 10% (or 10 µs); no earlier workload's score gets more than
-10% worse; NORMAL p99 at the headline load rises at most 25%; LOW still
-completes at least 90% of its requests below saturation; and on w0 (no hints)
-latency and CPU use stay within the noise band. Rejected policies stay in the
+10% worse; other kinds' p99 at the headline load rises at most 25%; any other
+kind with a deadline loses at most 1 percentage point of its deadline-met rate;
+LOW still completes at least 90% of its requests below saturation; and on w0
+(no hints) latency and CPU use stay within the noise band. Rejected policies stay in the
 tree as evidence.
 
 ## Lessons (append-only; one line per generation, newest last)

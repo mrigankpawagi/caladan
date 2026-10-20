@@ -19,3 +19,5 @@ the prompt version in its title and get their own commit.
   (with its outcome noted).
 - v1.2 (between gen 2's workload proposal and its measurement): workload_agent
   learns that bursts are supported (the `burst` field) and gets a burst ladder.
+- gen 2 (before the policy proposal): policy_agent's acceptance section adds rule 6,
+  other kinds with a deadline may lose at most 1 point of deadline-met.

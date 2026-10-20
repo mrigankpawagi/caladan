@@ -22,7 +22,10 @@ accept: (1) the newest workload's score improves on the champion's by at
         (4) LOW-hinted kinds answer at least 90% of their requests at every
             level up to the headline load;
         (5) on w0, p99 at the headline load is within the noise band of the
-            champion's and throughput within 1%.
+            champion's and throughput within 1%;
+        (6) other kinds that have a deadline lose at most 1 percentage point
+            of deadline-met at the headline load (so a policy cannot win by
+            sacrificing another kind's deadline).
 Exit status 0 means pass, 1 means fail; the numbers are always printed.
 """
 
@@ -135,6 +138,16 @@ def accept(args):
                     k["name"], S.fmt(pa), S.fmt(pb), 100 * (pa / pb - 1),
                     "ok" if good else "FAIL (3)"))
                 ok &= good
+            if k.get("deadline_us", 0) > 0:
+                da, _ = S.metric(idx, wid, (new, "hints", "hints"), head, "kind:" + k["name"],
+                                 "deadline_met")
+                db, _ = S.metric(idx, wid, (champ, "hints", "hints"), head,
+                                 "kind:" + k["name"], "deadline_met")
+                if da is not None and db is not None:
+                    good = da >= db - 1.0
+                    print("    %s deadline met %.2f%% vs %.2f%% -> %s" % (
+                        k["name"], da, db, "ok" if good else "FAIL (6)"))
+                    ok &= good
             if k.get("hint", {}).get("class") == "low":
                 for l in [x for x in s["load_rps"] if x <= head]:
                     rs = idx.get((wid, new, "hints", "hints", l, "kind:" + k["name"]), [])

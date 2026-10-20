@@ -83,8 +83,9 @@ Acceptance rules for a new policy (also in the policy agent's prompt): the new
 workload's score improves by at least 10% or 10 µs over the current best; no
 earlier workload gets more than 10% worse; NORMAL p99 at the headline load
 rises at most 25%; LOW still completes at least 90% of its requests below
-saturation; and on w0 latency and CPU use stay within the noise band. A
-rejected policy stays in the tree with `status: rejected`.
+saturation; on w0 latency and CPU use stay within the noise band; and any
+other kind with a deadline loses at most 1 percentage point of its
+deadline-met rate. A rejected policy stays in the tree with `status: rejected`.
 
 Nothing is ever overwritten. Workloads, policies, and results only accumulate;
 a broken workload gets a new revised file. The only regenerated file is
