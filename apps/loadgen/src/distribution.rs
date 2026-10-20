@@ -88,14 +88,29 @@ impl Burst {
         Ok(Burst { period_ns: period_us * 1000, duty, factor })
     }
 
-    /// Arrival rate at time `t_ns`, relative to the average rate.
-    pub fn rate_multiplier(&self, t_ns: u64) -> f64 {
+    /// The next arrival time after `t_ns`, given an exponential gap `gap_ns`
+    /// drawn at the average rate. The gap is spent at each phase's rate in
+    /// turn, carrying over phase boundaries (exact time rescaling of a
+    /// piecewise-constant rate), so the long-run average rate is preserved.
+    pub fn advance(&self, t_ns: u64, gap_ns: u64) -> u64 {
         let norm = self.duty * self.factor + (1.0 - self.duty);
-        let on = ((t_ns % self.period_ns) as f64) < self.duty * self.period_ns as f64;
-        if on {
-            self.factor / norm
-        } else {
-            1.0 / norm
+        let (m_on, m_off) = (self.factor / norm, 1.0 / norm);
+        let on_len = ((self.duty * self.period_ns as f64) as u64).max(1);
+        let mut t = t_ns;
+        let mut budget = gap_ns as f64;
+        loop {
+            let pos = t % self.period_ns;
+            let (m, remaining) = if pos < on_len {
+                (m_on, on_len - pos)
+            } else {
+                (m_off, self.period_ns - pos)
+            };
+            let cap = remaining as f64 * m;
+            if budget <= cap {
+                return t + (budget / m) as u64;
+            }
+            budget -= cap;
+            t += remaining;
         }
     }
 }
