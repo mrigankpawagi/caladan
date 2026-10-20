@@ -175,6 +175,13 @@ static void drain_overflow(struct kthread *l)
 	}
 }
 
+/*
+ * Whether to record per-pick statistics (sched_count_pick; hint builds only). Off by default so
+ * applications do not pay for measurement; experiments turn it on with the
+ * runtime config line "runtime_sched_stats 1".
+ */
+bool cfg_sched_stats;
+
 #ifdef CONFIG_THREAD_HINTS
 /* ===== BEGIN SCHEDULING POLICY REGION ======================================
  *
@@ -337,7 +344,8 @@ static thread_t *sched_pop_next(struct kthread *k)
 	best = n > 1 ? sched_choose(k, n) : 0;
 	BUG_ON(best >= n);
 	th = k->rq[(tail + best) % RUNTIME_RQ_SIZE];
-	sched_count_pick(k, n, best, th);
+	if (cfg_sched_stats)
+		sched_count_pick(k, n, best, th);
 
 	/* close the gap: slide the threads queued before @th back by one slot */
 	for (i = best; i > 0; i--)
