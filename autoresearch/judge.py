@@ -104,6 +104,8 @@ def accept(args):
     print("policy %s vs champion %s; newest workload %s" % (new, champ, newest))
     for wid in ids:
         s = workloads[wid]
+        if s.get("status") == "superseded":
+            continue
         head = S.headline_load(idx, wid, s["load_rps"])
         if not head:
             continue

@@ -154,8 +154,9 @@ def leaderboard(rows, crows, cards, workloads):
             c.get("status", "?"), c.get("changed_from_previous", "")))
     out.append("")
 
+    superseded = [w for w, s in sorted(workloads.items()) if s.get("status") == "superseded"]
     for wid, s in sorted(workloads.items(), key=lambda kv: kv[0]):
-        if not any(r["workload"] == wid for r in rows):
+        if not any(r["workload"] == wid for r in rows) or wid in superseded:
             continue
         sk, sp = s["score"]["kind"], s["score"]["percentile"]
         loads = s["load_rps"]
@@ -212,6 +213,9 @@ def leaderboard(rows, crows, cards, workloads):
             out.append("| %s | %s | %s | %s |" % (combo + (" | ".join(
                 fmt(v) if n else "" for v, n in vals),)))
         out.append("")
+    if superseded:
+        out += ["Superseded workloads (kept with their results, not scored): " +
+                ", ".join(superseded) + ".", ""]
     return "\n".join(out) + "\n"
 
 
