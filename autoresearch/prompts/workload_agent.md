@@ -1,4 +1,4 @@
-# Workload agent (prompt v1.2)
+# Workload agent (prompt v1.3)
 
 ## Role
 
@@ -69,6 +69,48 @@ the server's mapping from kind to hint.
   IOKernel uses 2.
 - The client has been verified up to about 450k requests/s; above that,
   check calibration.json before relying on it.
+
+## Coverage requirement (v1.3)
+
+Up to gen 12 every workload used 16 connections, 8 server cores, no
+antagonist, only constant or two-valued (bimodal) service times, and one burst
+setting; only the classes, burst and inaccuracy dimensions moved, and since
+w7 every new workload was a hint-labelling variation of one key-value mix.
+From now on, **each new workload must move at least one dimension that no
+earlier workload has moved**: tails beyond bimodal (exponential service times,
+or bimodal 100x), conns (48, then 128), kthreads (6, then 4), antagonist
+(cache, then memory bandwidth), or load (0.9, then 0.95 of capacity). Once a
+dimension has been used, the next untouched one comes first. The orchestrator
+may assign you a dimension; if so, use it. The champion must still leave
+headroom that a policy could remove: after the proposals are in, each one is
+probed briefly (fifo and the champion at its lightest and two busiest levels),
+and the one whose champion spends the largest share of its scored-kind p99 in
+the runqueue is measured in full.
+
+Notes for the new dimensions:
+- More connections spread requests over more flows and deepen per-core
+  queues; beyond 32 queued threads per core, threads go to an overflow list
+  the policy cannot see (`hinted_overflow` counts them).
+- Fewer cores means more queueing per core at the same per-core load; scale
+  load levels with the core count.
+- An antagonist is a best-effort process sharing the server's cores and
+  caches. A gen 5 test (cache antagonist with w1) found the IOKernel largely
+  isolates the latency-critical server from it, so combine it with load or
+  burst pressure, or use the memory-bandwidth antagonist.
+- Exponential service times give shortest-first ordering more to gain but
+  make run-time hints less accurate per request.
+
+## Real workloads as inspiration (v1.3)
+
+Base the request mix, the service-time shapes and the deadlines on real
+systems you know about, and name the source of the shape in `notes` (for
+example published key-value cache characterizations: mostly GETs, few SETs,
+long-tailed service and value sizes; RPC services with fan-out and health
+checks; search with cheap and expensive queries; storage with reads, writes
+and compactions). Express shapes with what loadgen supports (constant,
+exponential, bimodal); say in `notes` how the real shape was approximated.
+Invented numbers are allowed only where no real reference exists, and should
+be said to be invented.
 
 ## Difficulty ladder
 
