@@ -14,6 +14,7 @@ Mode `ignore` means the server did not apply hints; build `stock` is Caladan wit
 | [p3](policies/p3-sjf_guard.md) | `sjf_guard` | 2 | accepted | p2 plus: among HIGH threads, one that must start within 20 µs to finish by its deadline runs first (most urgent first; a thread that can no longer finish in time is not urgent), and the others run in order of deadline plus 8 times their expected run time instead of deadline alone |
 | [p4](policies/p4-sjf_rescue.md) | `sjf_rescue` | 3 | rejected | p3 with two changes among HIGH threads: one with less than 13 µs to spare before it must start (p3: less than 0) counts as too late to save, so it is never urgent and waits for any shorter HIGH thread; and p3's fixed 20 µs urgency guard is replaced by a check against the thread p3's order would run: the savable HIGH thread with the least time to spare runs first only if waiting for that thread (its expected run time plus 4 µs) would leave it less than 13 µs |
 | [p5](policies/p5-sjf_learn.md) | `sjf_learn` | 4 | rejected | p4 plus: each core learns, for each run-time hint value, how long its HIGH threads really run (timed between consecutive picks, leaning toward the long runs), and uses the larger of that and p4's hint plus 4 µs as a HIGH thread's length, both for ordering and for the rescue check |
+| [p6](policies/p6-sjf_timed.md) | `sjf_timed` | 5 | candidate | p3 plus: a HIGH thread's expected run time is the run time this core has measured for threads with the same run-time hint (p5's timing and estimate, without p5's floor, so it can end up below the hint as well as above it; the hint plus 4 µs until measured), used both in the thread's turn (deadline plus 8 times the run time) and in the 20 µs urgency test |
 
 ## w0: One request kind, no hints: overhead check
 
@@ -28,8 +29,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 | p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
+| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -43,9 +44,10 @@ req p99 by offered load (req/s):
 | sjf_guard | hints | hints | 33.0 | 39.0 | 69.5 | 163.0 | inf | inf |
 | sjf_learn | hints | hints |  |  | 72.5 |  |  | inf |
 | sjf_rescue | hints | hints |  |  | 69.0 |  |  | inf |
+| sjf_timed | hints | hints |  |  | 69.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 | fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
+| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -61,6 +63,7 @@ Score: `short` p99. Headline load: 400,000 req/s.
 | p3 sjf_guard | hints | hints | 51.0 (51.0–51.0) | -47% | 99.47 | 111.0 | 398797 | 0.50 | 4.27 | 2 | 2 |
 | p5 sjf_learn | hints | hints | 53.0 (52.0–54.0) | -45% | 99.41 | 116.5 | 398866 | 0.56 | 4.78 | 2 | 4 |
 | p4 sjf_rescue | hints | hints | 51.5 (51.0–52.0) | -46% | 99.44 | 114.0 | 398455 | 0.51 | 4.34 | 2 | 3 |
+| p6 sjf_timed | hints | hints | 51.5 (51.0–52.0) | -46% | 99.44 | 115.0 | 398948 | 0.52 | 4.48 | 2 | 5 |
 | p0 fifo | ignore | hints | 91.0 (90.0–92.0) | -5% | 97.48 | 109.5 | 399132 | - | 4.32 | 2 | 0 |
 | p1 prio | ignore | hints | 95.0 (90.0–100.0) | -1% | 97.40 | 114.5 | 398462 | - | 4.41 | 2 | 0 |
 
@@ -76,6 +79,7 @@ short p99 by offered load (req/s):
 | sjf_guard | hints | hints | 13.5 | 16.0 | 24.5 | 30.0 | 51.0 | 157.5 |
 | sjf_learn | hints | hints |  |  |  |  | 53.0 |  |
 | sjf_rescue | hints | hints |  |  |  |  | 51.5 |  |
+| sjf_timed | hints | hints |  |  |  |  | 51.5 |  |
 | fifo | ignore | hints | 13.5 | 16.0 | 29.5 | 43.5 | 91.0 | 554.5 |
 | prio | ignore | hints | 13.5 | 16.5 | 29.0 | 43.5 | 95.0 | 984.0 |
 
@@ -93,6 +97,7 @@ Score: `get` p99. Headline load: 400,000 req/s.
 | p3 sjf_guard | hints | hints | 51.0 (51.0–51.0) | -49% | 99.48 | 101.0 | 140.0 | 398542 | 2.82 | 6.60 | 2 | 2 |
 | p5 sjf_learn | hints | hints | 54.0 (54.0–54.0) | -46% | 99.35 | 113.0 | 163.5 | 398446 | 3.31 | 7.80 | 2 | 4 |
 | p4 sjf_rescue | hints | hints | 52.5 (51.0–54.0) | -48% | 99.40 | 109.0 | 155.0 | 398574 | 3.13 | 7.31 | 2 | 3 |
+| p6 sjf_timed | hints | hints | 52.5 (52.0–53.0) | -48% | 99.40 | 105.0 | 144.0 | 398646 | 2.93 | 6.71 | 2 | 5 |
 | p0 fifo | ignore | hints | 92.0 (91.0–93.0) | -8% | 97.45 | 114.0 | 114.5 | 398961 | - | 4.35 | 2 | 1 |
 
 Best with hints applied: **sjf_guard** (51.0 µs).
@@ -107,6 +112,7 @@ get p99 by offered load (req/s):
 | sjf_guard | hints | hints | 13.5 | 16.0 | 25.0 | 31.0 | 51.0 | 76.0 |
 | sjf_learn | hints | hints |  |  |  |  | 54.0 |  |
 | sjf_rescue | hints | hints |  |  |  |  | 52.5 |  |
+| sjf_timed | hints | hints |  |  |  |  | 52.5 |  |
 | fifo | ignore | hints | 13.5 | 16.5 | 29.0 | 45.0 | 92.0 | 302.0 |
 
 ## w3: Lookups and queries share one deadline, plus a LOW kind
@@ -123,6 +129,7 @@ Score: `get` p99. Headline load: 400,000 req/s.
 | p3 sjf_guard | hints | hints | 55.0 (55.0–55.0) | -42% | 99.78 | 103.0 | 143.0 | 148.5 | 398778 | 2.91 | 6.45 | 2 | 2 |
 | p5 sjf_learn | hints | hints | 55.0 (55.0–55.0) | -42% | 99.88 | 109.0 | 151.0 | 159.5 | 398708 | 3.22 | 7.10 | 2 | 4 |
 | p4 sjf_rescue | hints | hints | 52.5 (52.0–53.0) | -44% | 99.88 | 99.0 | 133.5 | 138.5 | 398582 | 2.81 | 6.25 | 2 | 3 |
+| p6 sjf_timed | hints | hints | 55.5 (55.0–56.0) | -41% | 99.84 | 105.0 | 143.5 | 152.0 | 398876 | 3.01 | 6.61 | 2 | 5 |
 | p0 fifo | ignore | hints | 89.5 (88.0–91.0) | -5% | 99.20 | 109.5 | 108.5 | 111.0 | 398781 | - | 4.28 | 2 | 2 |
 
 Best with hints applied: **sjf_rescue** (52.5 µs).
@@ -137,6 +144,7 @@ get p99 by offered load (req/s):
 | sjf_guard | hints | hints | 13.0 | 16.0 | 24.5 | 30.5 | 55.0 | 135.0 |
 | sjf_learn | hints | hints | 13.5 | 16.0 | 25.0 | 32.0 | 55.0 | 116.5 |
 | sjf_rescue | hints | hints | 13.5 | 16.0 | 24.5 | 31.0 | 52.5 | 89.5 |
+| sjf_timed | hints | hints | 14.0 | 16.0 | 25.0 | 31.0 | 55.5 | 155.0 |
 | fifo | ignore | hints | 13.0 | 16.5 | 28.0 | 43.5 | 89.5 | 254.5 |
 
 ## w4b: Lookups and queries with one shared deadline, arriving in bursts
@@ -153,6 +161,7 @@ Score: `get` p99. Headline load: 380,000 req/s.
 | p3 sjf_guard | hints | hints | 94.0 (94.0–94.0) | -50% | 99.47 | 194.0 | 285.5 | 306.0 | 378460 | 12.65 | 30.08 | 2 | 3 |
 | p5 sjf_learn | hints | hints | 86.0 (86.0–86.0) | -54% | 99.89 | 192.0 | 282.0 | 304.5 | 378858 | 12.78 | 30.39 | 2 | 4 |
 | p4 sjf_rescue | hints | hints | 86.5 (86.0–87.0) | -54% | 99.84 | 190.0 | 279.5 | 300.5 | 378682 | 12.05 | 28.67 | 2 | 3 |
+| p6 sjf_timed | hints | hints | 92.5 (92.0–93.0) | -51% | 99.61 | 196.0 | 287.5 | 309.0 | 378993 | 12.51 | 29.58 | 2 | 5 |
 | p0 fifo | ignore | hints | 187.0 (186.0–188.0) | -1% | 90.25 | 206.0 | 206.5 | 206.0 | 378544 | - | 18.08 | 2 | 3 |
 
 Best with hints applied: **sjf_learn** (86.0 µs).
@@ -167,6 +176,7 @@ get p99 by offered load (req/s):
 | sjf_guard | hints | hints | 13.0 | 22.5 | 57.5 | 72.0 | 83.5 | 94.0 |
 | sjf_learn | hints | hints | 14.0 | 22.0 | 56.5 | 72.0 | 78.0 | 86.0 |
 | sjf_rescue | hints | hints | 14.0 | 22.0 | 55.0 | 70.5 | 77.0 | 86.5 |
+| sjf_timed | hints | hints | 14.0 | 22.0 | 55.5 | 72.0 | 83.0 | 92.5 |
 | fifo | ignore | hints | 13.0 | 26.0 | 90.5 | 125.0 | 154.5 | 187.0 |
 
 ## w5: Quick-looking puts that sometimes flush, arriving in bursts
@@ -183,6 +193,7 @@ Score: `get` p99. Headline load: 390,000 req/s.
 | p3 sjf_guard | hints | hints | 98.5 (98.0–99.0) | -49% | 99.09 | 103.5 | 187.0 | 270.5 | 291.5 | 387884 | 11.51 | 27.57 | 2 | 4 |
 | p5 sjf_learn | hints | hints | 85.0 (85.0–85.0) | -56% | 99.88 | 107.0 | 195.5 | 279.5 | 303.0 | 388700 | 12.19 | 29.89 | 2 | 4 |
 | p4 sjf_rescue | hints | hints | 94.0 (94.0–94.0) | -51% | 99.43 | 98.5 | 198.0 | 286.5 | 311.5 | 389346 | 12.08 | 29.49 | 2 | 4 |
+| p6 sjf_timed | hints | hints | 91.5 (91.0–92.0) | -52% | 99.69 | 134.0 | 193.0 | 278.0 | 303.5 | 389014 | 11.94 | 28.45 | 2 | 5 |
 | p0 fifo | ignore | hints | 193.0 (191.0–195.0) | +1% | 90.75 | 201.0 | 212.0 | 212.5 | 210.5 | 388682 | - | 17.64 | 2 | 4 |
 
 Best with hints applied: **sjf_learn** (85.0 µs).
@@ -197,6 +208,7 @@ get p99 by offered load (req/s):
 | sjf_guard | hints | hints | 14.0 | 22.0 | 55.5 | 76.5 | 91.0 | 98.5 |
 | sjf_learn | hints | hints | 14.0 | 22.0 | 54.0 | 72.0 | 78.5 | 85.0 |
 | sjf_rescue | hints | hints | 14.0 | 22.0 | 56.0 | 76.5 | 86.5 | 94.0 |
+| sjf_timed | hints | hints | 14.0 | 22.0 | 53.0 | 72.0 | 83.0 | 91.5 |
 | fifo | ignore | hints | 14.0 | 25.0 | 81.0 | 125.0 | 152.0 | 193.0 |
 
 ## w6: Lookups with a stale, too-long run-time hint, arriving in bursts
@@ -212,9 +224,10 @@ Score: `get` p99. Headline load: 390,000 req/s.
 | p1 prio | hints | hints | 161.0 (160.0–162.0) | -18% | 93.05 | 169.0 | 181.5 | 275.0 | 297.5 | 388711 | 14.62 | 28.32 | 2 | 5 |
 | p3 sjf_guard | hints | hints | 143.0 (142.0–144.0) | -28% | 89.34 | 112.5 | 198.5 | 292.0 | 314.5 | 389367 | 15.11 | 30.29 | 2 | 5 |
 | p5 sjf_learn | hints | hints | 200.0 (200.0–200.0) | +1% | 90.22 | 104.5 | 193.0 | 280.0 | 301.5 | 388788 | 15.23 | 30.02 | 2 | 5 |
+| p6 sjf_timed | hints | hints | 92.0 (92.0–92.0) | -53% | 99.58 | 140.5 | 197.0 | 290.5 | 312.0 | 388104 | 12.05 | 29.23 | 2 | 5 |
 | p0 fifo | ignore | hints | 192.5 (188.0–197.0) | -3% | 90.17 | 201.5 | 212.0 | 213.0 | 211.0 | 388973 | - | 18.27 | 2 | 5 |
 
-Best with hints applied: **sjf_guard** (143.0 µs).
+Best with hints applied: **sjf_timed** (92.0 µs).
 
 get p99 by offered load (req/s):
 
@@ -225,6 +238,7 @@ get p99 by offered load (req/s):
 | prio | hints | hints | 14.0 | 24.0 | 77.0 | 109.0 | 137.0 | 161.0 |
 | sjf_guard | hints | hints | 14.0 | 26.0 | 95.5 | 122.0 | 133.5 | 143.0 |
 | sjf_learn | hints | hints | 14.0 | 26.5 | 93.0 | 124.5 | 158.0 | 200.0 |
+| sjf_timed | hints | hints | 14.0 | 25.5 | 53.0 | 71.5 | 83.5 | 92.0 |
 | fifo | ignore | hints | 14.0 | 24.0 | 86.5 | 129.0 | 158.0 | 192.5 |
 
 Superseded workloads (kept with their results, not scored): w4.
