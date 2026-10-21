@@ -637,5 +637,35 @@ get p99 by offered load (req/s):
 | sjf_scale | hints | hints | 24.5 | 104.0 | 222.0 | 259.0 | 302.0 | 341.0 |
 | sjf_upper | hints | hints | 26.5 | 98.5 | 189.0 | 208.5 | 245.5 | 284.0 |
 
+## w14: The tight-query key-value mix on six server cores instead of eight
+
+[workloads/w14-six-cores.json](workloads/w14-six-cores.json). The same bursty key-value front end as w13 (lookups, puts with occasional 120 us flushes, replica syncs routed through the put path, 68 us queries due in 300 us, 120 us multigets, batch, scans and 2 us lease renewals), with the same hints, but the service now runs on 6 cores instead of 8, as when a cluster manager shrinks a service's allocation to free cores for batch work, and traffic is scaled down by the same factor so each core is exactly as busy as before. With fewer cores, a lookup more often finds every core busy with a long request and more requests queued on its own core, so the order in which waiting requests run matters more. A scheduler that ranks lookups behind puts, syncs or queries that turned urgent now costs them more waiting than on w13.
+
+Score: `get` p99. Headline load: 75,000 req/s.
+
+![get p99 by offered load on w14](plots/w14-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w14](plots/w14-wait.svg)
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | lease p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 804.0 (797.0–811.0) | +0% | 91.31 | 919.0 | 871.5 | 1273 | 1288 | 868.5 | 856.5 | 785.5 | 74726 | 87.19 | 86.71 | 2 | 13 |
+| p1 prio | hints | hints | 662.0 (651.0–673.0) | -18% | 94.59 | 793.0 | 727.5 | 1118 | 1110 | 1366 | 1494 | 651.5 | 74319 | 65.31 | 144.37 | 2 | 13 |
+| p12 sjf_scale | hints | hints | 357.5 (348.0–367.0) | -56% | 99.34 | 377.0 | 1062 | 482.5 | 1002 | 1419 | 1537 | 132.0 | 74356 | 46.44 | 157.11 | 2 | 13 |
+| p13 sjf_upper | hints | hints | 247.5 (247.0–248.0) | -69% | 99.91 | 408.0 | 1074 | 560.5 | 1050 | 1431 | 1548 | 132.0 | 74445 | 45.74 | 153.78 | 2 | 13 |
+| p0 fifo | ignore | hints | 799.0 (788.0–810.0) | -1% | 91.54 | 922.5 | 877.5 | 1287 | 1301 | 868.0 | 884.0 | 785.0 | 74704 | - | 87.83 | 2 | 13 |
+
+Best with hints applied: **sjf_upper** (247.5 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 26,250 | 52,500 | 67,500 | 71,250 | 73,125 | 75,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 40.5 | 221.0 | 584.0 | 690.5 | 732.0 | 804.0 |
+| prio | hints | hints | 40.5 | 206.0 | 480.0 | 572.0 | 618.0 | 662.0 |
+| sjf_scale | hints | hints | 36.0 | 115.5 | 254.0 | 306.5 | 334.0 | 357.5 |
+| sjf_upper | hints | hints | 37.5 | 114.5 | 169.5 | 198.0 | 220.5 | 247.5 |
+| fifo | ignore | hints | 42.0 | 222.5 | 572.0 | 658.0 | 733.5 | 799.0 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
