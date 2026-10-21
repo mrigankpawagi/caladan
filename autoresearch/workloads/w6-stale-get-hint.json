@@ -1,0 +1,104 @@
+{
+  "id": "w6",
+  "slug": "stale-get-hint",
+  "generation": 5,
+  "title": "Lookups with a stale, too-long run-time hint, arriving in bursts",
+  "description": "The same bursty key-value front end as w5: quick lookups, puts that sometimes flush, and ten-times-longer queries are all HIGH with one shared 100 us deadline, batch is NORMAL and bulk scans are LOW. The server's table of expected run times is out of date: it still says a lookup takes 20 us, as when lookups read from flash, although they now come from memory and take about 2 us. A scheduler that trusts this hint now runs lookups after the queries instead of before them, so during each burst a lookup waits through the whole backlog; only one that notices from observed run times that these '20 us' requests finish in a few microseconds can let them go first again.",
+  "changed_from_previous": "w5 with the lookups' run-time hint wrong: the server says 20 us (longer than a query's 17 us) although a lookup takes about 2 us; the client's traffic, bursts, deadlines, classes, and all other hints are unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 2,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:170",
+      "weight": 0.15,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 20
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:100:3000",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:1700",
+      "weight": 0.55,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 17
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 17
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    300000,
+    340000,
+    365000,
+    390000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, at 99.6 iterations per us (calibration.json); the client's traffic is identical to w5's, so the estimate is too: 13.60 us of fake work + 4.0 us overhead = 17.60 us per request, 8 / 17.60 us = 455k req/s; 300k/340k/365k/390k are 66/75/80/86% of it, and 390k was w5's measured headline. Bursts as in w4b and w5 (busy phase 624k req/s at 390k). Deadlines: 100 us for every HIGH kind, 5x the get's (wrong) 20 us hint and about 17x its real ~5.7 us. Ladder, against w5: inaccuracy 1 -> 2 (a kind's service_us is wrong, not only a hidden tail); no other dimension changes. The only edit is in the server's hint map, get service_us 2 -> 20: the cost table dates from when lookups read from flash. This error runs the opposite way from w5's: there a too-short hint pushed slow puts ahead of gets; here a too-long hint holds the scored kind back. Under sjf_guard a get's turn is arrival + 260 us, a query's arrival + 236 and a put's arrival + 108, so a get runs after every query that arrived before it or up to 24 us after it; its urgency guard thinks a get needs 20 us. sjf_rescue and sjf_learn rank a get as hint + 4 = 24 us against a query's 21 us, and sjf_learn's max(learned, hint) cannot correct a hint that is too long. Runqueue-wait check, from w5 at 390k: under sjf_guard gets wait 43.3 us at p99, under edf_high and prio, which rank gets with queries in arrival order, 120.3 and 119.7; so ranking gets with queries costs about 77 us of get runqueue wait at p99. Prediction: fifo, prio, edf_high, and fifo/ignore never read service_us, so they run exactly w5's experiment and should reproduce its numbers within noise (get p99 192 / 159 / 161.5 / 193 us at 390k); this is the built-in check. Under sjf_guard, get runqueue-wait p99 at 390k should rise from 43.3 to about 80-120 us and get p99 from 98.5 to about 130-165 us. A policy that learns from observed run times that '20 us' threads finish in about 6 us restores w5's order, worth about 85-100 us. Scans are LOW, so judge rule 4 still applies. No run.py changes are needed."
+}
