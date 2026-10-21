@@ -64,3 +64,23 @@ point of deadline-met).
 The learning works: lookups no longer wait behind flushing puts, and the get
 tail on w5 dropped as predicted. The price was paid by queries, which lost
 1.5 points of deadline-met, as the card flagged as its main risk.
+
+## Re-check (generation 7)
+The query loss above was drift between sessions, not a cost of the policy.
+The champion's w5 runs were taken 30 minutes before p5's, and gen 6 showed
+that deadline-met drifts by about 1.5 points across sessions (results/gen6/
+notes.md). In gen 7, sjf_guard and sjf_learn alternated on a full w5 sweep,
+two repeats each (results/gen7/, runs p1 and p2):
+
+| w5 at 390k, paired | sjf_guard | sjf_learn |
+|---|---|---|
+| get p99 (score) | 102.5 µs | 84.5 µs (−17.6%) |
+| query deadline met | 86.75% | 86.83% |
+| put deadline met | 98.65% | 98.66% |
+
+Under today's judge, which confirms such rejections with paired runs, p5
+would have been accepted in gen 4. The record is left as it was decided: p5
+stays rejected and later champions were judged against sjf_guard. The idea
+remains open: learning that only raises a HIGH thread's length above its
+hint helped lookups on w5 at no measured cost. Its failure on w6 (gets
+rated 24 µs behind newer queries, gen 5) is separate and real.
