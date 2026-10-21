@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p14
 - changed_from_previous: p14 plus: a HIGH thread readied again after more than 150 µs of total run time (so yielded at the 100 µs time slice at least twice; on w15 only the large lookups) runs after every waiting HIGH thread with the same label that has not run that long, and is never rescued ahead of the order's choice; against every other thread its place is p14's; no HIGH thread on w1–w14 runs that long, so there every decision is p14's
-- commit: (filled by orchestrator)
+- commit: ddc13c9
 
 ## What it does
 Like sjf_ratio, each core runs helper threads first, then HIGH, NORMAL and LOW threads, and among HIGH threads it runs short requests first. The system pauses any request that has run for 100 µs while others wait, and puts it back in the queue. sjf_overrun spots a request that comes back after more than 150 µs of running, using the run time the runtime already records for every thread. Such a request is clearly far longer than its label says. It now lets the waiting requests with the same label run first (on w15, the ordinary lookups queued behind a large lookup), and it can no longer jump the queue as urgent. It keeps its place against every other kind, so it still runs ahead of queries and other longer work. On the earlier workloads no HIGH request runs that long, so nothing changes.
