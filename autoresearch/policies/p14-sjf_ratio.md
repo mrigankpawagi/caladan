@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p13
 - changed_from_previous: p13 plus: when the core's time unit is above 1, p4's rescue check lets an urgent HIGH thread run ahead of the chosen one only if its learned length is at most 3 times the chosen one's (urgent 68 µs queries no longer pass 7 µs gets or 2 µs leases, but still pass puts, syncs and multigets); at unit 1 (w1–w10) every decision is p13's; order, lengths, slack, unit, timing and learning unchanged
-- commit: (filled by orchestrator)
+- commit: c5e5ffa
 
 ## What it does
 Like sjf_upper, each core runs helper threads first, then HIGH, NORMAL and LOW threads, and among HIGH threads it runs short requests first. A request close to missing its deadline may still jump the queue. sjf_ratio allows that jump only when the waiting request is not much shorter than the one jumping. On w14, a 68 µs query about to miss its deadline no longer runs ahead of a 7 µs lookup or a 2 µs lease renewal. The lookup runs first and costs the query only a few microseconds. The query may still jump ahead of puts, syncs and multigets. On the older workloads that use the small time scale (w1–w10), nothing changes.
