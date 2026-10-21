@@ -3,7 +3,7 @@
 - id: p11
 - config: sjf_unit
 - generation: 10
-- status: candidate
+- status: rejected
 - builds_on: p10
 - changed_from_previous: p10 plus: each core reads a time unit from the tightest relative deadline of the HIGH threads it runs (nearest multiple of 100 µs, at least 1; it takes the last learning slot, leaving four), multiplies the 250 µs deadline split and the 50 µs drop-limit allowance by it, and grows the 8 µs cap allowance, the 17 µs blank length and the 4 µs shared-length drop by half a step per unit; per-request cost, too-late line, order, slack, rescue and timing unchanged (unit 1 on w1–w10, so p10's decisions; 4 on w11, where the cap allowance is 20 µs)
 - commit: b9b2fc8
@@ -112,4 +112,24 @@ Unchanged from p10, for the owner:
 | w0 | p99 one level below the headline / sustained throughput | flat (p10's path, no HIGH threads) | within noise; within 1% |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 10 (judge.py, results/gen10/) on rule 1 against the
+champion p10 sjf_mixed: the w11 score did not improve.
+
+| Workload | sjf_mixed | sjf_unit | Change | Notes |
+|---|---|---|---|---|
+| w11 | get p99 242.0 µs | 259.0 µs | +7.0% | predicted 140–190 (model 119–139) |
+| w11 | put / query / sync / multiget p99 | 342.0 / 850.5 / 461.5 / 833.0 µs | 342.5 / 842.0 / 453.5 / 851.5 µs | all within 2.2% |
+| w11 | put / query / multiget met | 99.56 / 91.28 / 100.00% | 99.55 / 91.20 / 99.99% | unchanged |
+| w1–w10 | | | −2.7 to +4.6% | p10's decisions, as intended |
+| w0 | p99 at 300k 71.0 µs | 72.0 µs | +1.4% | sustained throughput +0.08% |
+
+On w11 every kind came within about 2% of sjf_mixed, so sjf_unit decided
+like p10 there: the time unit evidently did not reach 4 on the real system,
+although the offline model, which calls the same code, reached it on every
+core. The cause is not verified (no counter reports the unit). Two
+candidates, both outside the model: a handler thread readied a second time
+gets a new ready time, so deadline minus ready time understates its relative
+deadline and the tightest-deadline rule pins the unit low; or the unit
+changes often and each change clears the learning table, leaving lengths at
+hint plus 4 µs, which also ranks puts ahead of gets. A counter for each
+core's unit would settle it.
