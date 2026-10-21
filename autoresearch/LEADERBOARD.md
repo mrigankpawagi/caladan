@@ -759,5 +759,37 @@ get p99 by offered load (req/s):
 | sjf_upper | hints | hints | 38.5 | 135.0 | 271.5 | 330.0 | 364.0 | 385.0 |
 | fifo | ignore | hints | 41.0 | 234.0 | 580.5 | 652.5 | 750.5 | 786.0 |
 
+## w16: An RPC leaf service where cheap user-facing reads carry looser deadlines than fan-out sub-requests
+
+[workloads/w16-fanout-leaf-deadlines.json](workloads/w16-fanout-leaf-deadlines.json). A leaf service in a microservice tree, on six cores, answering many callers: cheap single-object reads from the user-facing frontend (about 8 us of work, due in 800 us), fan-out sub-requests from an aggregator that queries many leaves at once and so passes down a tight per-leaf deadline (about 41 us of work, due in 300 us), load-balancer health checks, and background export and index-rebuild work. The server's hints are honest, but its deadlines conflict with request lengths: the long sub-requests are due sooner than the short reads. A scheduler that ranks by deadline keeps letting sub-requests run ahead of reads that would take a fifth of the time, even when the sub-requests have plenty of time to spare, so the reads' tail is spent waiting in the queue. The score is the reads' tail; the sub-requests must keep meeting their deadlines.
+
+Score: `point` p99. Headline load: 155,000 req/s.
+
+![point p99 by offered load on w16](plots/w16-load.svg)
+
+![point p99 and its runqueue wait at the headline load on w16](plots/w16-wait.svg)
+
+| Policy | Mode | Build | Score (point p99) | vs fifo | point deadline met % | fanout p99 | health p99 | export p99 | rebuild p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 683.5 (683.0–684.0) | +5% | 99.73 | 301.0 | 804.0 | 1082 | 1479 | 153632 | 38.65 | 116.28 | 2 | 15 |
+| p0 fifo | hints | hints | 649.0 (648.0–650.0) | +0% | 99.75 | 683.0 | 636.0 | 686.0 | 682.5 | 154135 | 79.28 | 79.62 | 2 | 15 |
+| p1 prio | hints | hints | 305.0 (303.0–307.0) | -53% | 100.00 | 340.5 | 302.5 | 1089 | 1465 | 153582 | 25.99 | 119.48 | 2 | 15 |
+| p3 sjf_guard | hints | hints | 520.5 (520.0–521.0) | -20% | 99.97 | 321.0 | 636.5 | 1102 | 1468 | 153583 | 37.00 | 118.42 | 2 | 15 |
+| p15 sjf_overrun | hints | hints | 483.0 | -26% | 100.00 | 298.0 | 606.0 | 1126 | 1517 | 153347 | 36.83 | 121.41 | 1 | 15 |
+| p0 fifo | ignore | hints | 625.5 (617.0–634.0) | -4% | 99.80 | 659.0 | 622.0 | 659.5 | 663.5 | 153888 | - | 76.06 | 2 | 15 |
+
+Best with hints applied: **prio** (305.0 µs).
+
+point p99 by offered load (req/s):
+
+| Policy | Mode | Build | 55,000 | 110,000 | 140,000 | 147,000 | 151,000 | 155,000 |
+|---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 28.0 | 153.5 | 517.0 | 615.0 | 639.0 | 683.5 |
+| fifo | hints | hints | 28.0 | 145.5 | 433.5 | 535.5 | 588.0 | 649.0 |
+| prio | hints | hints | 27.5 | 110.5 | 229.0 | 255.5 | 281.0 | 305.0 |
+| sjf_guard | hints | hints | 27.0 | 155.0 | 419.5 | 459.5 | 491.5 | 520.5 |
+| sjf_overrun | hints | hints | 28.0 | 161.0 | 407.0 | 447.0 | 473.0 | 483.0 |
+| fifo | ignore | hints | 28.5 | 146.0 | 439.0 | 524.0 | 577.5 | 625.5 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
