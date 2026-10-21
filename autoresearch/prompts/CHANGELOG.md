@@ -30,3 +30,4 @@ the prompt version in its title and get their own commit.
 - v1.2 measurement / notes for all (gen 4): prompts describe the new per-kind runqueue-wait columns.
 - gen 4 lessons: workload_agent +"check per-kind wait gaps" and policy_agent +"get wait is 43 of 98.5 us" (with p5's outcome, which disproved the report's bound).
 - gen 5 lessons: workload_agent +"a too-long hint on the scored kind is a clean lever"; policy_agent +"learn in both directions, lost threads keep their place" with p6's outcome (protect every kind with a deadline).
+- gen 6 lessons: workload_agent +"a missing run-time hint is a clean lever" (repaired by p7); policy_agent +"keep hinted kinds at their hint; an unhinted HIGH thread counts about 8 µs" with p7's accepted outcome and the paired confirmation; measurement_agent +"compare runs from one session" (its first lesson).

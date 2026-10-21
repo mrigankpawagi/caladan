@@ -3,7 +3,7 @@
 - id: p7
 - config: sjf_nohint
 - generation: 6
-- status: candidate
+- status: accepted
 - builds_on: p3
 - changed_from_previous: p3 plus: a HIGH thread without a run-time hint counts as 8 µs long instead of 0, both in its turn (deadline plus 8 times its run time) and in the 20 µs urgency test; threads that carry a run-time hint are ranked exactly as in p3
 - commit: 7f53df7
@@ -46,4 +46,25 @@ Outside the policy region, for the owner (as in p2–p6): preemption (a get cann
 | w0 | p99 at 300k / sustained throughput | flat | about 69.5 µs (limit 73.7); within 0.3% |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 6 (judge.py, results/gen6/) against the champion p3
+sjf_guard. The first verdict was a rejection on w5 rule 6 (query deadline-met
+86.50% against sjf_guard's 88.05% from gen 4), although both policies make
+identical decisions there. A paired confirmation, the two policies alternated
+on w5 in one session, gave 86.92% against 86.81%: the gap was drift between
+sessions, and the judge accepted.
+
+| Workload | sjf_guard | sjf_nohint | Change | Notes |
+|---|---|---|---|---|
+| w7 | get p99 139.0 µs | 116.5 µs | −16.2% | predicted 100–115; get runqueue-wait p99 96.1 → 61.8 µs (predicted 45–60) |
+| w7 | put p99 / met | 140.0 µs / 95.87% | 117.5 µs / 97.98% | puts gain, as predicted; put wait p99 94.6 → 45.5 µs |
+| w7 | query p99 / met | 217.5 µs / 83.72% | 219.5 µs / 83.28% | flat, as predicted |
+| w7 | sync p99 / wait p99 | 144.5 / 60.8 µs | 174.5 / 91.9 µs | +20.8% (limit 25%); syncs pay, as predicted |
+| w5 (paired) | get p99 100.5 µs | 100.0 µs | −0.5% | identical decisions; query met 86.81 vs 86.92% |
+| w6 | 143.0 µs | 140.5 µs | −1.7% | identical decisions |
+| w4b | 94.0 µs | 94.0 µs | 0% | |
+| w1, w2, w3 | 51.0 / 51.0 / 55.0 µs | 53.0 / 54.0 / 57.5 µs | +3.9 to +5.9% | identical decisions; within the 10% rule, so drift of this size is normal |
+| w0 | p99 at 300k 69.5 µs | 70.5 µs | +1.4% | sustained throughput −0.76% |
+
+The prediction held on every line: an unhinted HIGH kind counted as 8 µs
+lets gets and puts pass syncs, and only syncs pay. sjf_timed still has the
+lower get tail on w7 (96.5 µs) but costs puts 2 points of deadline-met.

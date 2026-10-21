@@ -76,3 +76,4 @@ about code you have not been shown.
 ## Lessons (append-only; one line per generation, newest last)
 
 - gen0: (none yet)
+- gen6: With identical decisions, deadline-met drifted by about 1.5 points and scores by up to about 6% between sessions hours apart, while repeats within a session agree within about 0.3 points; before calling a cross-generation difference real, compare runs from one session (paired runs are labelled p1, p2 in run_id).
