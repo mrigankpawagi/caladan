@@ -128,7 +128,8 @@ def headline_load(idx, wid, loads):
 
 def metric(idx, wid, combo, load, group, field):
     rs = idx.get((wid,) + combo + (load, group), [])
-    return med([fnum(r[field]) for r in rs]), len(rs)
+    # rows from before a column existed (e.g. qwait_p99 before gen 4) count as missing
+    return med([fnum(r.get(field)) for r in rs]), len(rs)
 
 
 def spread(idx, wid, combo, load, group, field):
@@ -178,6 +179,9 @@ def leaderboard(rows, crows, cards, workloads):
         if "%s-load.svg" % wid in svgs:
             out += ["![%s %s by offered load on %s](plots/%s-load.svg)" % (sk, sp, wid, wid),
                     ""]
+        if "%s-wait.svg" % wid in svgs:
+            out += ["![%s %s and its runqueue wait at the headline load on %s]"
+                    "(plots/%s-wait.svg)" % (sk, sp, wid, wid), ""]
         if head:
             others = [k["name"] for k in s["kinds"] if k["name"] != sk]
             hdr = ("| Policy | Mode | Build | Score (%s %s) | vs fifo | %s deadline met %% | "
@@ -326,6 +330,21 @@ def make_plots(idx, cards, workloads):
             series, heads.get(wid), colors, "%s %s (µs)" % (sk, sp))
         if svg:
             svgs["%s-load.svg" % wid] = svg
+        # score kind's p99 and its runqueue-wait p99 at the headline load
+        head = heads.get(wid)
+        wrows = []
+        for p in order:
+            if not head:
+                break
+            v, n = metric(idx, wid, combo(p), head, "kind:" + sk, sp)
+            w, _ = metric(idx, wid, combo(p), head, "kind:" + sk, "qwait_p99")
+            if n and v is not None and w is not None and math.isfinite(v):
+                wrows.append((p, v, w))
+        if wid != "w0" and len(wrows) >= 2:
+            svgs["%s-wait.svg" % wid] = plots.wait_split(
+                "%s: where the %s tail is spent, at %s" % (wid, sk, plots._klabel(head)),
+                "Median of repeats at the headline load; runqueue wait is measured per "
+                "request by the server (from gen 4).", wrows, colors, "%s %s" % (sk, sp))
     return svgs
 
 

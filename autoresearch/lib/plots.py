@@ -281,3 +281,44 @@ def generations(title, subtitle, bars, colors, threshold):
     body.append(_t(L - 48, (T + B) / 2, "change vs champion", "sub", "middle",
                    ' transform="rotate(-90 %d %.1f)"' % (L - 48, (T + B) / 2)))
     return _doc(W, H, title, body)
+
+
+def wait_split(title, subtitle, rows, colors, unit_label):
+    """rows: [(policy, p99, wait p99)] -> horizontal bars, one per policy: the
+    light bar is the kind's p99 latency, the solid bar inside it is its
+    runqueue-wait p99 (the part a policy can change); the gap between them
+    is time outside the runqueue."""
+    W, L, R, T, RH = 720, 130, 120, 92, 30
+    H = T + RH * len(rows) + 48
+    hi = max(max(p, w) for _, p, w in rows)
+    ticks = _nice_ticks(hi * 1.02)
+    X = lambda v: L + v / float(ticks[-1]) * (W - L - R)
+    body = [_t(16, 26, title, "title"), _t(16, 44, subtitle, "sub")]
+    # key
+    body.append('<rect class="f-b0" x="16" y="56" width="22" height="12" rx="3" '
+                'fill-opacity="0.35"/>')
+    body.append(_t(44, 66, unit_label + " latency", "tick"))
+    kx = 52 + 7 * len(unit_label + " latency")
+    body.append('<rect class="f-b0" x="%d" y="56" width="22" height="12" rx="3"/>' % kx)
+    body.append(_t(kx + 28, 66, "of which runqueue wait p99 (what a policy can change)",
+                   "tick"))
+    B = T + RH * len(rows)
+    for tv in ticks:
+        body.append('<line class="grid" x1="%.1f" y1="%d" x2="%.1f" y2="%d"/>' % (
+            X(tv), T - 6, X(tv), B))
+        body.append(_t(X(tv), B + 16, _num(tv), "tick", "middle"))
+    body.append(_t((L + W - R) / 2, B + 34, "microseconds", "sub", "middle"))
+    for i, (policy, p, w) in enumerate(rows):
+        y = T + RH * i
+        body.append(_t(L - 10, y + RH / 2 + 4, policy, "lab", "end"))
+        tip = "<title>%s: %s p99 %s µs, runqueue wait p99 %s µs</title>" % (
+            escape(policy), escape(unit_label), _num(round(p, 1)), _num(round(w, 1)))
+        body.append('<rect class="%s" x="%d" y="%.1f" width="%.1f" height="%d" rx="4" '
+                    'fill-opacity="0.35">%s</rect>' % (colors.fill(policy), L, y + 5,
+                                                        max(X(p) - L, 1), RH - 10, tip))
+        body.append('<rect class="%s ring" x="%d" y="%.1f" width="%.1f" height="%d" rx="4">'
+                    '%s</rect>' % (colors.fill(policy), L, y + 9, max(X(min(w, p)) - L, 1),
+                                   RH - 18, tip))
+        body.append(_t(X(p) + 6, y + RH / 2 + 4, "%s (wait %s)" % (
+            _num(round(p)), _num(round(w))), "val"))
+    return _doc(W, H, title, body)

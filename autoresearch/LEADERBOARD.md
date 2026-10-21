@@ -39,8 +39,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 | p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
+| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -58,8 +58,8 @@ req p99 by offered load (req/s):
 | sjf_rescue | hints | hints |  |  | 69.0 |  |  | inf |
 | sjf_timed | hints | hints |  |  | 69.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 | fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
+| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -68,6 +68,8 @@ req p99 by offered load (req/s):
 Score: `short` p99. Headline load: 400,000 req/s.
 
 ![short p99 by offered load on w1](plots/w1-load.svg)
+
+![short p99 and its runqueue wait at the headline load on w1](plots/w1-wait.svg)
 
 | Policy | Mode | Build | Score (short p99) | vs fifo | short deadline met % | long p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -109,6 +111,8 @@ Score: `get` p99. Headline load: 400,000 req/s.
 
 ![get p99 by offered load on w2](plots/w2-load.svg)
 
+![get p99 and its runqueue wait at the headline load on w2](plots/w2-wait.svg)
+
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | query p99 | batch p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p2 edf_high | hints | hints | 53.0 (53.0–53.0) | -47% | 99.34 | 111.5 | 160.0 | 397876 | 3.12 | 7.30 | 2 | 1 |
@@ -146,6 +150,8 @@ get p99 by offered load (req/s):
 Score: `get` p99. Headline load: 400,000 req/s.
 
 ![get p99 by offered load on w3](plots/w3-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w3](plots/w3-wait.svg)
 
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | query p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -185,6 +191,8 @@ Score: `get` p99. Headline load: 380,000 req/s.
 
 ![get p99 by offered load on w4b](plots/w4b-load.svg)
 
+![get p99 and its runqueue wait at the headline load on w4b](plots/w4b-wait.svg)
+
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | query p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p2 edf_high | hints | hints | 165.5 (164.0–167.0) | -12% | 92.71 | 186.0 | 281.0 | 304.5 | 378450 | 15.18 | 29.79 | 2 | 3 |
@@ -222,6 +230,8 @@ get p99 by offered load (req/s):
 Score: `get` p99. Headline load: 390,000 req/s.
 
 ![get p99 by offered load on w5](plots/w5-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w5](plots/w5-wait.svg)
 
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -261,6 +271,8 @@ Score: `get` p99. Headline load: 390,000 req/s.
 
 ![get p99 by offered load on w6](plots/w6-load.svg)
 
+![get p99 and its runqueue wait at the headline load on w6](plots/w6-wait.svg)
+
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p2 edf_high | hints | hints | 165.5 (163.0–168.0) | -16% | 92.68 | 173.5 | 185.0 | 281.0 | 307.0 | 389080 | 15.14 | 29.55 | 2 | 5 |
@@ -297,6 +309,8 @@ Score: `get` p99. Headline load: 380,000 req/s.
 
 ![get p99 by offered load on w7](plots/w7-load.svg)
 
+![get p99 and its runqueue wait at the headline load on w7](plots/w7-wait.svg)
+
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p2 edf_high | hints | hints | 180.5 (177.0–184.0) | -10% | 91.61 | 187.5 | 199.5 | 215.0 | 295.0 | 319.5 | 378182 | 16.43 | 31.69 | 2 | 6 |
@@ -330,6 +344,8 @@ get p99 by offered load (req/s):
 Score: `get` p99. Headline load: 380,000 req/s.
 
 ![get p99 by offered load on w8](plots/w8-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w8](plots/w8-wait.svg)
 
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
