@@ -899,6 +899,140 @@ static uint32_t choose_sjf_nohint(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/* p8: a learned run time counts at most this many us above p4's length for
+ * its hint (the hint plus POLICY_RESCUE_COST_US): w8's 1 us hint, shared by
+ * quick puts and 30 us syncs, then counts as 13 us, behind gets (about
+ * 6 us) and ahead of queries (about 21 us) */
+#define POLICY_CAP_UP_US	8
+/* p8: length of a HIGH thread without a run-time hint: behind the 13 us
+ * that a 1 us hint can reach, ahead of queries (about 21 us) */
+#define POLICY_CAP_BLANK_US	17
+
+/* p8: expected length of HIGH thread @th in cycles: the run time this core
+ * has learned for its run-time hint value (p6's timed_cost(), which can be
+ * below the hint), but at most POLICY_CAP_UP_US above learn_floor(); a
+ * thread without a run-time hint counts as POLICY_CAP_BLANK_US */
+static inline uint64_t capped_cost(const uint64_t *ps, const thread_t *th)
+{
+	uint64_t key = sjf_service(th), c, cap;
+
+	if (!key)
+		return (uint64_t)POLICY_CAP_BLANK_US * cycles_per_us;
+	c = timed_cost(ps, th);
+	cap = learn_floor(key) + (uint64_t)POLICY_CAP_UP_US * cycles_per_us;
+	return c < cap ? c : cap;
+}
+
+/* p8: slack of HIGH thread @th of length @c at @now: how long it can still
+ * wait and finish by its due time; negative once that moment has passed */
+static inline int64_t capped_slack(const thread_t *th, uint64_t c,
+				   uint64_t now)
+{
+	return (int64_t)(edf_due(th) - c - now);
+}
+
+/*
+ * p8 "sjf_capped": p5's order (helper threads, then HIGH, NORMAL, LOW;
+ * NORMAL and LOW oldest first; among HIGH, a thread that is too late waits
+ * for any shorter one, the others go by due time plus POLICY_SJF_WEIGHT
+ * times their length, then p4's rescue check) and p5's per-core timing,
+ * with three changes to a HIGH thread's length, which capped_cost() gives:
+ * the learned run time is used without p5's floor, so it can also fall
+ * below the hint (as in p6); it counts at most POLICY_CAP_UP_US above the
+ * hint plus POLICY_RESCUE_COST_US; and a thread without a run-time hint
+ * counts as POLICY_CAP_BLANK_US (p5: POLICY_RESCUE_COST_US). Slack is
+ * measured with the same length, so a thread is too late below
+ * POLICY_RESCUE_LATE_US - POLICY_RESCUE_COST_US of slack; for a hint whose
+ * threads run in exactly the hint plus POLICY_RESCUE_COST_US this is p4's
+ * test. The clock is read at most once per pick. Without HIGH threads this
+ * is p4's path and the clock is never read.
+ */
+static uint32_t choose_sjf_capped(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	thread_t *th, *bth, *uth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0;
+	bool two_high = false;
+
+	/* close the sample of this core's previous timed pick (as in p5) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				learn_update(ps, ps[1], now - ps[0]);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the first one */
+				two_high = true;
+				learn_clock(&now);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = capped_cost(ps, bth);
+				bs = capped_slack(bth, bc, now);
+				if (bs >= late) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+				}
+			}
+			c = capped_cost(ps, th);
+			s = capped_slack(th, c, now);
+			/* least slack among the threads not too late */
+			if (s >= late && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+			}
+			if (learn_before(th, c, s < late, bth, bc, bs < late)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+			}
+		}
+	}
+
+	/* p4's rescue check, with the capped length of the chosen thread */
+	if (uth && uth != bth && us < late + (int64_t)bc) {
+		best = ubest;
+		bth = uth;
+	}
+
+	/* time this pick (as in p5): mark the newest thread it leaves queued */
+	if (bth->prio_class == THREAD_PRIO_HIGH && bth->service_tsc &&
+	    n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = sjf_service(bth);
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -911,6 +1045,7 @@ static const struct {
 	{ "sjf_learn",	choose_sjf_learn },
 	{ "sjf_timed",	choose_sjf_timed },
 	{ "sjf_nohint",	choose_sjf_nohint },
+	{ "sjf_capped",	choose_sjf_capped },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
