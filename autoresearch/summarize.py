@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Builds LEADERBOARD.md and per-generation tables from autoresearch results.
 
-  ./summarize.py              rewrite LEADERBOARD.md from all generations
+  ./summarize.py              rewrite LEADERBOARD.md and plots/*.svg from all
+                              generations
   ./summarize.py --gen 3      also write results/gen3/tables.md, the detailed
                               per-load tables the measurement agent reads
 
@@ -19,6 +20,7 @@ import argparse
 import csv
 import glob
 import json
+import math
 import os
 import re
 import statistics
@@ -27,6 +29,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from lib import spec as specs  # noqa: E402
+from lib import plots  # noqa: E402
 
 BASELINE = ("fifo", "hints", "hints")
 # headline load: overall median at most this multiple of its lightest-load value
@@ -154,8 +157,14 @@ def leaderboard(rows, crows, cards, workloads):
             c.get("status", "?"), c.get("changed_from_previous", "")))
     out.append("")
 
+    svgs = make_plots(idx, cards, workloads)
+    out += ["## Progress", "",
+            "![Score of every policy on every workload, as change from fifo]"
+            "(plots/scores.svg)", "",
+            "![Each candidate against the champion it faced](plots/generations.svg)", ""]
+
     superseded = [w for w, s in sorted(workloads.items()) if s.get("status") == "superseded"]
-    for wid, s in sorted(workloads.items(), key=lambda kv: kv[0]):
+    for wid, s in sorted(workloads.items(), key=lambda kv: wnum(kv[0])):
         if not any(r["workload"] == wid for r in rows) or wid in superseded:
             continue
         sk, sp = s["score"]["kind"], s["score"]["percentile"]
@@ -166,6 +175,9 @@ def leaderboard(rows, crows, cards, workloads):
                 "Score: `%s` %s. Headline load: %s req/s." % (
                     sk, sp, "{:,}".format(head) if head else "not determined "
                     "(no baseline fifo/hints data)"), ""]
+        if "%s-load.svg" % wid in svgs:
+            out += ["![%s %s by offered load on %s](plots/%s-load.svg)" % (sk, sp, wid, wid),
+                    ""]
         if head:
             others = [k["name"] for k in s["kinds"] if k["name"] != sk]
             hdr = ("| Policy | Mode | Build | Score (%s %s) | vs fifo | %s deadline met %% | "
@@ -216,7 +228,105 @@ def leaderboard(rows, crows, cards, workloads):
     if superseded:
         out += ["Superseded workloads (kept with their results, not scored): " +
                 ", ".join(superseded) + ".", ""]
-    return "\n".join(out) + "\n"
+    return "\n".join(out) + "\n", svgs
+
+
+def wnum(wid):
+    """Workload ids in numeric order: w2 < w4 < w4b < w10."""
+    return (int(wid[1:].rstrip("abcdefghij")), wid)
+
+
+def card_num(c):
+    return int(str(c.get("id", "p999"))[1:] or 999)
+
+
+def make_plots(idx, cards, workloads):
+    """The leaderboard's plots, as {file name: SVG text}."""
+    colors = plots.Colors(cards)
+    combo = lambda p: (p, "hints", "hints")
+    live = sorted((w for w, s in workloads.items() if s.get("status") != "superseded"),
+                  key=wnum)
+    heads = {w: headline_load(idx, w, workloads[w]["load_rps"]) for w in live}
+
+    def score(policy, wid):
+        s, head = workloads[wid], heads[wid]
+        if not head:
+            return None
+        v, n = metric(idx, wid, combo(policy), head, "kind:" + s["score"]["kind"],
+                      s["score"]["percentile"])
+        return v if n and v is not None and math.isfinite(v) else None
+
+    acc = [c for c in cards.values() if c.get("status") == "accepted"]
+    champ = max(acc, key=lambda c: (int(c.get("generation", 0)), c.get("id")))["config"] \
+        if acc else "prio"
+    svgs = {}
+
+    # every policy on every scored workload, as change from fifo
+    pols = [c["config"] for c in sorted(cards.values(), key=card_num) if c["config"] != "fifo"]
+    cols = [w for w in live if w != "w0" and score("fifo", w)]
+    pols = [p for p in pols if any(score(p, w) for w in cols)]
+
+    def cell(p, w):
+        a, b = score(p, w), score("fifo", w)
+        return 100 * (a / b - 1) if a and b else None
+
+    def note(p):
+        st = cards.get(p, {}).get("status", "")
+        return " (champion)" if p == champ else (" (%s)" % st if st in (
+            "rejected", "candidate", "baseline") else "")
+    if cols and pols:
+        svgs["scores.svg"] = plots.score_map(
+            "Every policy on every workload",
+            "Score at the headline load (median of repeats), change from fifo; "
+            "w0 (no hints) is left out.",
+            ["%s %s" % (cards[p]["id"], p) for p in pols], cols,
+            lambda r, c: cell(r.split(" ", 1)[1], c),
+            lambda r: note(r.split(" ", 1)[1]))
+
+    # each candidate against the champion it faced, on its generation's newest workload
+    bars = []
+    for c in sorted((c for c in cards.values() if c.get("status") != "baseline"),
+                    key=card_num):
+        g = int(c.get("generation", 0))
+        before = [x for x in acc if int(x.get("generation", 0)) < g]
+        faced = max(before, key=lambda x: (int(x.get("generation", 0)), x.get("id")))[
+            "config"] if before else "prio"
+        ws = [w for w in live if int(workloads[w].get("generation", 0)) <= g]
+        if not ws:
+            continue
+        wid = ws[-1]
+        a, b = score(c["config"], wid), score(faced, wid)
+        v = 100 * (a / b - 1) if a and b else None
+        bars.append(("%s" % c["id"], c["config"], v, c.get("status", ""),
+                     "%s vs %s" % (wid, cards.get(faced, {}).get("id", faced))))
+    if bars:
+        svgs["generations.svg"] = plots.generations(
+            "Each candidate against the champion it faced",
+            "Score on the workload that was newest in the candidate's generation, "
+            "from the latest measurements.", bars, colors, -10)
+
+    # score kind against offered load, per workload
+    order = sorted({p for (w, p, m, b, l, g) in idx if m == "hints" and b == "hints"},
+                   key=lambda p: (p != "fifo", p != "prio", card_num(cards.get(p, {}))))
+    for wid in live:
+        s = workloads[wid]
+        sk, sp = s["score"]["kind"], s["score"]["percentile"]
+        series = []
+        for p in order:
+            pts = []
+            for l in s["load_rps"]:
+                v, n = metric(idx, wid, combo(p), l, "kind:" + sk, sp)
+                if n and v is not None:
+                    pts.append((l, v))
+            if len(pts) >= 3:
+                series.append((p, pts))
+        svg = plots.load_curves(
+            "%s: %s %s by offered load" % (wid, sk, sp),
+            "Median of repeats; policies measured at three or more loads.",
+            series, heads.get(wid), colors, "%s %s (µs)" % (sk, sp))
+        if svg:
+            svgs["%s-load.svg" % wid] = svg
+    return svgs
 
 
 def gen_tables(gen, rows, crows, workloads):
@@ -275,9 +385,14 @@ def main():
     args = ap.parse_args()
     rows, crows = load_rows("summary.csv"), load_rows("counters.csv")
     cards, workloads = load_cards(), load_workloads()
+    text, svgs = leaderboard(rows, crows, cards, workloads)
     with open(os.path.join(HERE, "LEADERBOARD.md"), "w") as f:
-        f.write(leaderboard(rows, crows, cards, workloads))
-    print("wrote LEADERBOARD.md")
+        f.write(text)
+    os.makedirs(os.path.join(HERE, "plots"), exist_ok=True)
+    for name, svg in svgs.items():
+        with open(os.path.join(HERE, "plots", name), "w") as f:
+            f.write(svg)
+    print("wrote LEADERBOARD.md and %d plots" % len(svgs))
     if args.gen is not None:
         path = os.path.join(HERE, "results", "gen%d" % args.gen, "tables.md")
         with open(path, "w") as f:

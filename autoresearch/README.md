@@ -119,9 +119,11 @@ a broken workload gets a new revised file. The only regenerated file is
 ```
 README.md            this file
 LEADERBOARD.md       generated summary: policies, scores per workload, curves
+plots/               generated SVG plots shown in LEADERBOARD.md
 calibration.json     gen 0 measurements: fake-work speed, noise band, timings, budget
 run.py               runs experiments on the two nodes (see ./run.py --help)
-summarize.py         builds LEADERBOARD.md and results/genN/tables.md
+summarize.py         builds LEADERBOARD.md, plots/, and results/genN/tables.md
+lib/plots.py         the plots (plain SVG, no plotting library)
 judge.py             gate and acceptance decisions, and the current champion
 eval_policy.sh       judge a new policy on every scored workload (reduced sweeps), then judge.py
 lib/                 spec validation, ssh helpers, output parsing
