@@ -473,5 +473,35 @@ get p99 by offered load (req/s):
 | sjf_pair | hints | hints | 14.0 | 28.0 | 83.0 | 110.0 | 137.5 | 162.5 |
 | fifo | ignore | hints | 14.0 | 30.5 | 104.5 | 143.5 | 173.5 | 219.5 |
 
+## w11: The multiget key-value mix at four times the time scale, arriving in bursts
+
+[workloads/w11-fourfold-timescale.json](workloads/w11-fourfold-timescale.json). The same bursty key-value front end as w9 with every time in it multiplied by four: lookups take about 7 us (hint 8 us), puts 4 us with occasional 120 us flushes (hint 4 us), queries 68 us and replica syncs 120 us labeled as puts, all HIGH with a 400 us deadline, plus 120 us multigets that carry the lookups' 8 us hint with a 1200 us deadline, NORMAL batch and LOW scans. Nothing else changes, so a scheduler whose rules scale with the hints and deadlines would behave as it does on w9. One whose rules hold fixed microsecond constants tuned to w9 does not: it discards any timing more than 50 us above twice a label's expected run time as a glitch, so it never sees the 120 us syncs behind the '4 us' label and runs them ahead of waiting lookups, and its fixed 250 us deadline split no longer tells multigets from lookups.
+
+Score: `get` p99. Headline load: 90,000 req/s.
+
+![get p99 by offered load on w11](plots/w11-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w11](plots/w11-wait.svg)
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 679.0 (673.0–685.0) | +0% | 93.34 | 808.0 | 738.0 | 1080 | 1104 | 742.0 | 736.0 | 89502 | 80.58 | 79.53 | 2 | 10 |
+| p1 prio | hints | hints | 551.0 (546.0–556.0) | -19% | 96.25 | 704.0 | 620.0 | 941.5 | 929.5 | 1010 | 1106 | 89524 | 62.64 | 122.53 | 2 | 10 |
+| p10 sjf_mixed | hints | hints | 242.0 (235.0–249.0) | -64% | 99.91 | 342.0 | 850.5 | 461.5 | 833.0 | 1084 | 1160 | 89746 | 49.24 | 133.95 | 2 | 10 |
+| p9 sjf_pair | hints | hints | 238.0 (225.0–251.0) | -65% | 99.92 | 338.5 | 827.0 | 454.0 | 834.0 | 1058 | 1135 | 89414 | 47.92 | 129.22 | 2 | 10 |
+| p0 fifo | ignore | hints | 652.0 (646.0–658.0) | -4% | 93.91 | 787.5 | 726.5 | 1070 | 1086 | 722.5 | 724.5 | 89680 | - | 78.42 | 2 | 10 |
+
+Best with hints applied: **sjf_pair** (238.0 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 30,000 | 60,000 | 90,000 | 97,000 | 103,000 | 109,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 21.5 | 169.0 | 679.0 | 834.5 | 1052 | 4236 |
+| prio | hints | hints | 21.0 | 143.5 | 551.0 | 687.0 | 839.0 | 3748 |
+| sjf_mixed | hints | hints | 22.5 | 94.0 | 242.0 | 293.0 | 376.0 | 16052 |
+| sjf_pair | hints | hints | 22.0 | 94.5 | 238.0 | 310.0 | 393.0 | 6462 |
+| fifo | ignore | hints | 22.0 | 155.5 | 652.0 | 817.5 | 1030 | 3089 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
