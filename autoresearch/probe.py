@@ -32,18 +32,34 @@ import judge as J  # noqa: E402
 import summarize as S  # noqa: E402
 
 
+def probe_rows(gen, pid=None):
+    rows = [r for r in S.load_rows(os.path.join("probe", "summary.csv"))
+            if int(r["gen"]) == gen]
+    return [r for r in rows if pid is None or r["workload"] == pid]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gen", type=int, required=True)
     ap.add_argument("--champion", help="default: judge.py's champion")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--reuse", action="store_true",
+                    help="do not re-run proposals that already have probe rows in this "
+                         "generation (only probe lower levels where needed)")
     ap.add_argument("proposals", nargs="+")
     args = ap.parse_args()
     champ = args.champion or J.champion(S.load_cards())
     gdir = os.path.join(HERE, "results", "gen%d" % args.gen)
     pdir = os.path.join(gdir, "proposals")
     os.makedirs(pdir, exist_ok=True)
+
+    def run(pid, dst, levels):
+        cmd = [os.path.join(HERE, "run.py"), "--gen", str(args.gen), "--workload", dst,
+               "--policy", "fifo," + champ, "--levels", ",".join(map(str, levels)),
+               "--repeats", "1", "--probe"] + (["--dry-run"] if args.dry_run else [])
+        print("probe %s: %s" % (pid, " ".join(cmd[1:])), flush=True)
+        subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
 
     probed = []
     for i, path in enumerate(args.proposals):
@@ -56,23 +72,33 @@ def main():
             f.write("\n")
         loads = s["load_rps"]
         levels = sorted({loads[0]} | set(loads[-2:]))
-        probed.append((pid, s, levels))
-        cmd = [os.path.join(HERE, "run.py"), "--gen", str(args.gen), "--workload", dst,
-               "--policy", "fifo," + champ, "--levels", ",".join(map(str, levels)),
-               "--repeats", "1", "--probe"] + (["--dry-run"] if args.dry_run else [])
-        print("probe %s: %s" % (pid, " ".join(cmd[1:])), flush=True)
-        subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
+        probed.append([pid, s, levels, dst])
+        if not (args.reuse and probe_rows(args.gen, pid)):
+            run(pid, dst, levels)
     if args.dry_run:
         return
 
-    rows = S.load_rows(os.path.join("probe", "summary.csv"))
-    rows = [r for r in rows if int(r["gen"]) == args.gen]
-    idx = S.index(rows)
+    # a proposal whose two busiest levels are both past the headline rule gets
+    # the next two lower levels probed, until one passes or none are left
+    while True:
+        idx = S.index(probe_rows(args.gen))
+        more = False
+        for p in probed:
+            pid, s, levels, dst = p
+            head = S.headline_load(idx, pid, levels)
+            lower = [l for l in s["load_rps"][1:] if l < min(levels[1:] or [0])]
+            if (not head or head == levels[0]) and lower:
+                step = lower[-2:]
+                run(pid, dst, step)
+                p[2] = sorted(set(levels) | set(step))
+                more = True
+        if not more:
+            break
     print("\nchampion: %s" % champ)
     print("%-6s %-9s %-10s %-10s %-14s %s" % ("id", "level", "fifo", "champion",
                                               "champ wait p99", "wait share"))
     best = None
-    for pid, s, levels in probed:
+    for pid, s, levels, _ in probed:
         kind, pc = "kind:" + s["score"]["kind"], s["score"]["percentile"]
         head = S.headline_load(idx, pid, levels)
         if not head or head == levels[0]:
