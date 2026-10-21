@@ -4,9 +4,10 @@ Each plot is a standalone SVG with its own light and dark colors (it follows
 the viewer's color scheme), a title, a legend or direct labels, and a
 <title> tooltip on every mark. Colors follow the policy, never its rank: the
 baselines fifo and prio are gray and dashed, and every other policy keeps the
-categorical slot of its card id (p2 slot 1, p3 slot 2, ...) in every plot.
-The palette is the dataviz skill's validated default (8 slots, adjacent CVD
-separation >= 8.4 in both modes); policies past slot 8 fold to gray.
+categorical slot it was given in card-id order (see Colors). The palette is
+the dataviz skill's validated default (8 slots, adjacent CVD separation >= 8.4
+in both modes); past eight policies, the oldest rejected one is drawn gray and
+dotted instead.
 """
 
 import math
@@ -48,6 +49,7 @@ def _style():
         css.append(".s%d{stroke:var(--s%d)}.f%d{fill:var(--s%d)}" % (i + 1, i + 1, i + 1, i + 1))
     css.append(".s-b0{stroke:var(--base0)}.f-b0{fill:var(--base0)}")
     css.append(".s-b1{stroke:var(--base1)}.f-b1{fill:var(--base1)}")
+    css.append(".s-fold{stroke:var(--muted)}.f-fold{fill:var(--muted)}")
     return "<style>%s</style>" % "".join(css)
 
 
@@ -82,25 +84,41 @@ def _klabel(load):
 
 
 class Colors:
-    """Fixed color per policy: baselines gray, others by card id."""
+    """Fixed color per policy: baselines gray and dashed; the others take the
+    categorical slots in card-id order. When a ninth policy arrives, the
+    oldest rejected policy that holds a slot gives it up and is drawn gray and
+    dotted ("folded"), so every other policy keeps its color."""
 
     def __init__(self, cards):
         self.cls = {"fifo": "b0", "prio": "b1"}
-        others = sorted((c for n, c in cards.items() if n not in self.cls),
-                        key=lambda c: int(str(c.get("id", "p99"))[1:] or 99))
-        for i, c in enumerate(others):
-            self.cls[c["config"]] = str(i + 1) if i < len(SERIES_LIGHT) else "b0"
+        num = lambda c: int(str(c.get("id", "p999"))[1:] or 999)
+        others = sorted((c for n, c in cards.items() if n not in self.cls), key=num)
+        free = [str(i + 1) for i in range(len(SERIES_LIGHT))]
+        holders = []
+        for c in others:
+            if not free:
+                victim = next((h for h in holders if h.get("status") == "rejected"), None)
+                if victim is None:
+                    self.cls[c["config"]] = "fold"
+                    continue
+                holders.remove(victim)
+                free.append(self.cls[victim["config"]])
+                self.cls[victim["config"]] = "fold"
+            self.cls[c["config"]] = free.pop(0)
+            holders.append(c)
 
     def stroke(self, policy):
-        c = self.cls.get(policy, "b0")
+        c = self.cls.get(policy, "fold")
         return "s" + c if c[0].isdigit() else "s-" + c
 
     def fill(self, policy):
-        c = self.cls.get(policy, "b0")
+        c = self.cls.get(policy, "fold")
         return "f" + c if c[0].isdigit() else "f-" + c
 
-    def dashed(self, policy):
-        return not self.cls.get(policy, "b0")[0].isdigit()
+    def dash(self, policy):
+        """SVG dash pattern: dashed baselines, dotted folded policies."""
+        c = self.cls.get(policy, "fold")
+        return "" if c[0].isdigit() else ("2 3" if c == "fold" else "6 4")
 
 
 def _legend(x, y, w, items, colors):
@@ -110,7 +128,7 @@ def _legend(x, y, w, items, colors):
         width = 26 + 7 * len(name)
         if cx + width > x + w and cx > x:
             cx, cy = x, cy + 18
-        dash = ' stroke-dasharray="5 3"' if colors.dashed(name) else ""
+        dash = (' stroke-dasharray="%s"' % colors.dash(name)) if colors.dash(name) else ""
         parts.append('<line class="%s" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" '
                      'stroke-width="2" stroke-linecap="round"%s/>' % (
                          colors.stroke(name), cx, cy - 4, cx + 16, cy - 4, dash))
@@ -165,7 +183,7 @@ def load_curves(title, subtitle, series, headline, colors, ylabel):
         pts = [(l, v) for l, v in sorted(pts) if v is not None and math.isfinite(v)]
         if not pts:
             continue
-        dash = ' stroke-dasharray="6 4"' if colors.dashed(policy) else ""
+        dash = (' stroke-dasharray="%s"' % colors.dash(policy)) if colors.dash(policy) else ""
         d = " ".join("%s%.1f %.1f" % ("M" if i == 0 else "L", X(l), Y(v))
                      for i, (l, v) in enumerate(pts))
         body.append('<path class="%s" d="%s" fill="none" stroke-width="2" '
