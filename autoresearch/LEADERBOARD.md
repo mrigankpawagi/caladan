@@ -29,8 +29,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 | p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
+| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -46,8 +46,8 @@ req p99 by offered load (req/s):
 | sjf_rescue | hints | hints |  |  | 69.0 |  |  | inf |
 | sjf_timed | hints | hints |  |  | 69.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 | fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
+| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -240,6 +240,34 @@ get p99 by offered load (req/s):
 | sjf_learn | hints | hints | 14.0 | 26.5 | 93.0 | 124.5 | 158.0 | 200.0 |
 | sjf_timed | hints | hints | 14.0 | 25.5 | 53.0 | 71.5 | 83.5 | 92.0 |
 | fifo | ignore | hints | 14.0 | 24.0 | 86.5 | 129.0 | 158.0 | 192.5 |
+
+## w7: Replica syncs with no run-time hint, arriving in bursts
+
+[workloads/w7-unhinted-sync.json](workloads/w7-unhinted-sync.json). The same bursty key-value front end as w5 (quick lookups, puts that sometimes flush, and ten-times-longer queries, all HIGH with one shared 100 us deadline; NORMAL batch and LOW scans), plus sync requests from peer replicas: 5% of traffic, about 30 us of work each. The server gives syncs the front end's HIGH class and 100 us deadline, but its table of expected run times has no entry for them, and no user waits on their replies. A scheduler that counts an unknown run time as zero runs every waiting sync before the waiting lookups, so during bursts a 2 us lookup often waits behind a 30 us sync; one that learns how long syncs really take can let lookups go first while still serving syncs before queries, so no kind with a deadline has to pay.
+
+Score: `get` p99. Headline load: 380,000 req/s.
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 180.5 (177.0–184.0) | -10% | 91.61 | 187.5 | 199.5 | 215.0 | 295.0 | 319.5 | 378182 | 16.43 | 31.69 | 2 | 6 |
+| p0 fifo | hints | hints | 200.5 (195.0–206.0) | +0% | 88.92 | 206.0 | 219.0 | 234.5 | 218.0 | 219.5 | 378520 | 19.98 | 19.95 | 2 | 6 |
+| p1 prio | hints | hints | 181.0 (179.0–183.0) | -10% | 91.59 | 186.5 | 200.0 | 214.5 | 301.0 | 325.5 | 378763 | 16.43 | 31.95 | 2 | 6 |
+| p3 sjf_guard | hints | hints | 139.0 (137.0–141.0) | -31% | 96.28 | 140.0 | 217.5 | 144.5 | 297.0 | 320.0 | 378856 | 14.96 | 33.10 | 2 | 6 |
+| p6 sjf_timed | hints | hints | 96.5 (95.0–98.0) | -52% | 99.26 | 171.5 | 225.0 | 155.0 | 310.5 | 333.5 | 378490 | 14.73 | 33.56 | 2 | 6 |
+| p0 fifo | ignore | hints | 197.5 (197.0–198.0) | -1% | 89.16 | 204.0 | 217.0 | 233.0 | 213.5 | 217.0 | 378408 | - | 19.58 | 2 | 6 |
+
+Best with hints applied: **sjf_timed** (96.5 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 330,000 | 355,000 | 380,000 |
+|---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 14.0 | 26.5 | 90.5 | 122.5 | 146.0 | 180.5 |
+| fifo | hints | hints | 14.0 | 27.0 | 100.0 | 135.0 | 165.5 | 200.5 |
+| prio | hints | hints | 14.0 | 27.0 | 88.5 | 117.0 | 146.0 | 181.0 |
+| sjf_guard | hints | hints | 14.0 | 24.0 | 75.5 | 97.5 | 120.5 | 139.0 |
+| sjf_timed | hints | hints | 14.0 | 24.5 | 62.5 | 75.5 | 87.5 | 96.5 |
+| fifo | ignore | hints | 14.0 | 27.0 | 95.5 | 128.5 | 167.0 | 197.5 |
 
 Superseded workloads (kept with their results, not scored): w4.
 
