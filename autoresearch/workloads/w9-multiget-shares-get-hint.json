@@ -1,0 +1,126 @@
+{
+  "id": "w9",
+  "slug": "multiget-shares-get-hint",
+  "generation": 8,
+  "title": "Multigets sharing the lookups' run-time hint, arriving in bursts",
+  "description": "The same bursty key-value front end as w8 (quick lookups, puts that sometimes flush, ten-times-longer queries and replica syncs labeled as puts, all HIGH with one shared 100 us deadline; NORMAL batch and LOW scans), plus multigets from an analytics client: 5% of traffic, each fetching many keys in about 30 us. The server routes a multiget through the lookup handler, so it inherits the lookup's 2 us run-time hint, but gives it a relaxed 300 us deadline because the analytics client can wait. A scheduler that learns one run time per run-time hint now sees '2 us' requests that often take 30 us, ranks real lookups as long jobs and runs them behind waiting puts and syncs; only one that tells the two apart, for example by their different deadlines, can let lookups go first again.",
+  "changed_from_previous": "w8 plus a HIGH multiget kind (5% of traffic, taken from queries 50% to 45%; 30 us of work; the gets' 2 us run-time hint but a 300 us deadline, client and hint); bursts, all other kinds, deadlines, and hints unchanged; load levels scaled to the same core time as w8 (top level 370k).",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 7,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:170",
+      "weight": 0.15,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:100:3000",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:1700",
+      "weight": 0.45,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 17
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:3000",
+      "weight": 0.05,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:3000",
+      "weight": 0.05,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 17
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    290000,
+    320000,
+    345000,
+    370000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, at 99.6 iterations per us (calibration.json). Fake work per request: get 0.15 x 170/99.6 = 0.256; put 0.10 x (0.85 x 100 + 0.15 x 3000)/99.6 = 0.537; query 0.45 x 17.068 = 7.681; sync 0.05 x 30.120 = 1.506; multiget 0.05 x 30.120 = 1.506; batch 0.10 x 17.068 = 1.707; scan 1.707; total 14.900 us. With about 4 us of runtime and network cost per request, 18.900 us, so 8 / 18.900 us = 423k req/s; 290k/320k/345k/370k are 69/76/82/87% of it, the same core time as w8's 300k-380k (370k x 18.90 us = 6.99 cores; w8 380k x 18.25 us = 6.93). Bursts as in w4b-w8 (busy phase 370k x 1.6 = 592k req/s, under the 700k limit). Deadlines: 100 us for get, put, query and sync as in w8 (sync still has no client deadline); multiget 300 us, client and hint, 10x its 30 us. Ladder, against w8: classes 6 -> 7 (a fifth HIGH kind); nothing else changes, except that queries go from 50% to 45% to make room. Why the champion suffers: sjf_capped learns one length per run-time hint value, at most hint + 12 us. Gets and multigets share the 2 us hint, so about one '2 us' run in four takes 34 us (30 us of work plus overhead), and the learned length, which leans toward long runs (its estimate settles where 4 x the mean excess of longer runs equals the mean shortfall of shorter ones), reaches the 14 us cap; one long run in eleven would already be enough. The '1 us' label (puts and syncs) stays at its 13 us cap, as on w8. Counted from becoming ready, the turns (deadline + 8 x length) become: puts and syncs +204 us, gets +212, queries about +268, multigets +412. So a get waits behind every queued put and sync that became ready less than 8 us after it, the same 8 us margin by which syncs ran ahead of gets under sjf_nohint on w8 (get runqueue-wait p99 97.3 us there), and it passes only queries that became ready less than 56 us before it (w8 under sjf_capped: 120 us). A get also counts as too late after 77 us of waiting (w8: 85) and then yields to the shorter '1 us' threads. Why the policy region can fix it: multigets carry a different deadline hint (300 vs 100 us), and a policy can read deadline minus ready time, so one that learns a length per pair of run-time hint and relative deadline (four pairs here, within the five learning slots) learns gets at about 6 us and multigets at about 34 us and restores w8's order; multigets keep their place behind queries either way, because their deadline is 200 us later. Per-hint learners without the cap (sjf_learn, sjf_timed) rank '2 us' near 22 us, behind queries. Hint-only policies (sjf_guard, sjf_nohint) give a multiget the turn +316, behind queries, so for gets they repeat w8. Prediction at 370k: fifo and fifo/ignore near their w8 values at the same core time (get p99 about 200-215 us), prio about 170-180; sjf_nohint about 140-155 us (w8: 145.0); sjf_capped get runqueue-wait p99 about 80-110 us (w8: 25.4) and get p99 about 125-150 us (w8: 83.0), so it may fall to sjf_nohint's level; put and sync runqueue wait under sjf_capped about as on w8 (82.0 and 81.7 us) or lower, because gets no longer pass them; a learner keyed by run-time hint and deadline about 85-95 us. Multiget deadline-met under sjf_capped about 97-99.5%. Part of the new cost cannot be removed by ordering: a running 30 us multiget cannot be passed (no preemption), which also raises every policy's get tail slightly. Every policy's get p99 at 100k should stay near 14 us. Scans are LOW, so judge rule 4 still applies. The server's hint map entry for multiget is high:300:2. No run.py changes are needed."
+}
