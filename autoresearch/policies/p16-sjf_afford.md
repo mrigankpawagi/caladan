@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p15
 - changed_from_previous: p15 plus: after the order has chosen a HIGH thread, the shortest waiting HIGH thread (not overrun) runs first instead if it is at most a third as long (p14's ratio), due at least twice as late relative to when each became ready but within p9's deadline split, and the chosen thread would still keep 40% of its relative deadline as slack after it (on w16 points and health checks pass fanouts that have time to spare); on w1–w15 no such thread exists outside rare multiget cases, so decisions are p15's
-- commit: (filled by orchestrator)
+- commit: bb79c96
 
 ## What it does
 Like sjf_overrun, each core runs helper threads first, then HIGH, NORMAL and LOW threads, and orders HIGH threads by deadline and length. Sometimes that order picks a long request only because its deadline is tighter, while a much shorter request with a much looser deadline waits. sjf_afford then runs the short request first, as long as the long one would still have plenty of time left afterwards (40% of its deadline window). On w16, a cheap point read no longer waits behind a fan-out sub-request that has time to spare, and the sub-request loses only about 10 µs. On the earlier workloads, shorter requests are never due much later than longer ones, apart from multigets that only look short, which are excluded, so nothing changes there.
