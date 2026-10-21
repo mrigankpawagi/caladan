@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p3
 - changed_from_previous: p3 plus: a HIGH thread without a run-time hint counts as 8 µs long instead of 0, both in its turn (deadline plus 8 times its run time) and in the 20 µs urgency test; threads that carry a run-time hint are ranked exactly as in p3
-- commit: (filled by orchestrator)
+- commit: 7f53df7
 
 ## What it does
 Like sjf_guard, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads a short request normally goes ahead of a long one, and a request that must start within 20 µs to make its deadline goes first. The only change is for a HIGH request whose expected run time the server left blank, such as w7's 30 µs replica syncs. sjf_guard counted the blank as zero, so these requests ran ahead of every waiting lookup and put; sjf_nohint counts it as 8 µs, so a sync now lets lookups and puts that arrive shortly after it go first, but still runs ahead of the long queries. Requests that carry a run-time hint are ranked exactly as before, so every earlier workload gets the same decisions.
