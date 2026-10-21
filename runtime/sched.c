@@ -1033,6 +1033,178 @@ static uint32_t choose_sjf_capped(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/* p9: a HIGH thread whose deadline lies more than this many us after it
+ * became ready is learned apart from threads with the same run-time hint and
+ * a nearer deadline: w9's multigets (300 us) apart from its gets (100 us);
+ * no other workload has a deadline above 200 us, so there p9 decides as p8 */
+#define POLICY_PAIR_SPLIT_US	250
+/* p9: marks such a thread in its learning key; run-time hints are capped at
+ * POLICY_SJF_SVC_MAX_US, far below 2^31 cycles, so the bit is otherwise 0 */
+#define POLICY_PAIR_RELAXED	(1ULL << 31)
+
+/* p9: learning key of HIGH thread @th with run-time hint @hint: the hint,
+ * with POLICY_PAIR_RELAXED set if its deadline is more than
+ * POLICY_PAIR_SPLIT_US after it became ready */
+static inline uint64_t pair_key(const thread_t *th, uint64_t hint)
+{
+	if (th->deadline_tsc &&
+	    (int64_t)(th->deadline_tsc - th->ready_tsc) >
+	    (int64_t)POLICY_PAIR_SPLIT_US * cycles_per_us)
+		return hint | POLICY_PAIR_RELAXED;
+	return hint;
+}
+
+/* p9: expected length of HIGH thread @th: p8's capped_cost(), with the run
+ * time looked up under pair_key() instead of the hint alone */
+static inline uint64_t pair_cost(const uint64_t *ps, const thread_t *th)
+{
+	uint64_t hint = sjf_service(th), key, fl, c, cap;
+	int i;
+
+	if (!hint)
+		return (uint64_t)POLICY_CAP_BLANK_US * cycles_per_us;
+	key = pair_key(th, hint);
+	fl = learn_floor(hint);
+	c = fl;
+	for (i = POLICY_LEARN_FIRST;
+	     i < POLICY_LEARN_FIRST + POLICY_LEARN_SLOTS; i++) {
+		if ((ps[i] >> 32) == key) {
+			c = ps[i] & 0xffffffffULL;
+			break;
+		}
+	}
+	cap = fl + (uint64_t)POLICY_CAP_UP_US * cycles_per_us;
+	return c < cap ? c : cap;
+}
+
+/* p9: p5's learn_update() for learning key @key: the floor and the drop
+ * limit come from the run-time hint alone, without POLICY_PAIR_RELAXED */
+static void pair_update(uint64_t *ps, uint64_t key, uint64_t sample)
+{
+	uint64_t fl = learn_floor(key & ~POLICY_PAIR_RELAXED), e;
+	int i, slot = -1;
+
+	if (sample > 2 * fl + (uint64_t)POLICY_LEARN_CAP_US * cycles_per_us)
+		return;
+	for (i = POLICY_LEARN_FIRST;
+	     i < POLICY_LEARN_FIRST + POLICY_LEARN_SLOTS; i++) {
+		if ((ps[i] >> 32) == key) {
+			slot = i;
+			break;
+		}
+		if (!ps[i] && slot < 0)
+			slot = i;
+	}
+	if (slot < 0)
+		return;
+	e = ps[slot] ? (ps[slot] & 0xffffffffULL) : fl;
+	if (sample > e)
+		e += (sample - e) >> POLICY_LEARN_UP_SHIFT;
+	else
+		e -= (e - sample) >> POLICY_LEARN_DOWN_SHIFT;
+	ps[slot] = (key << 32) | e;
+}
+
+/*
+ * p9 "sjf_pair": p8's order, timing and capped lengths (see
+ * choose_sjf_capped()), with one change: each core learns a run time per
+ * pair of run-time hint and coarse deadline instead of per hint, so HIGH
+ * threads whose deadline is more than POLICY_PAIR_SPLIT_US after they became
+ * ready keep their own estimate (pair_key()). On w9, 30 us multigets carry
+ * the gets' 2 us hint with a 300 us deadline; learned apart, gets keep their
+ * own short length and multigets count as p8's cap (hint plus
+ * POLICY_RESCUE_COST_US plus POLICY_CAP_UP_US). Where every hint value comes
+ * with one deadline, or no deadline exceeds the split, the keys pair up one
+ * to one with p8's and every decision is p8's. The clock is read at most
+ * once per pick. Without HIGH threads this is p4's path and the clock is
+ * never read.
+ */
+static uint32_t choose_sjf_pair(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	thread_t *th, *bth, *uth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0;
+	bool two_high = false;
+
+	/* close the sample of this core's previous timed pick (as in p5) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				pair_update(ps, ps[1], now - ps[0]);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the first one */
+				two_high = true;
+				learn_clock(&now);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = pair_cost(ps, bth);
+				bs = capped_slack(bth, bc, now);
+				if (bs >= late) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+				}
+			}
+			c = pair_cost(ps, th);
+			s = capped_slack(th, c, now);
+			/* least slack among the threads not too late */
+			if (s >= late && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+			}
+			if (learn_before(th, c, s < late, bth, bc, bs < late)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+			}
+		}
+	}
+
+	/* p4's rescue check, with the capped length of the chosen thread */
+	if (uth && uth != bth && us < late + (int64_t)bc) {
+		best = ubest;
+		bth = uth;
+	}
+
+	/* time this pick (as in p5), under the chosen thread's learning key */
+	if (bth->prio_class == THREAD_PRIO_HIGH && bth->service_tsc &&
+	    n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = pair_key(bth, sjf_service(bth));
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -1046,6 +1218,7 @@ static const struct {
 	{ "sjf_timed",	choose_sjf_timed },
 	{ "sjf_nohint",	choose_sjf_nohint },
 	{ "sjf_capped",	choose_sjf_capped },
+	{ "sjf_pair",	choose_sjf_pair },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
