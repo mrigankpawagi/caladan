@@ -32,8 +32,8 @@ accept: (1) the newest workload's score improves on the champion's by at
 A workload on which both the policy and the champion have paired runs
 (run.py --paired) in the same generation is decided from those runs alone
 (paired confirmation, README.md). A rejection prints a FAILED_ON line naming
-the failing workloads, the newest workload and the champion, which
-eval_policy.sh reads to start the confirmation.
+the failing workloads, the newest workload, the champion, and whether rule 1
+passed, which eval_policy.sh reads to start the confirmation.
 Exit status 0 means pass, 1 means fail; the numbers are always printed.
 """
 
@@ -60,7 +60,9 @@ def data():
 def paired_index(new, champ, wid):
     """Rows of a paired confirmation (run.py --paired) of new against champ on
     wid, from the latest generation that has paired runs of both, else None."""
-    rows = [r for r in S.latest(S.load_rows("summary.csv"))
+    # every generation, not only the latest: a later re-run of either policy
+    # must not hide the pairing
+    rows = [r for r in S.load_rows("summary.csv")
             if r["workload"] == wid and PAIRED.search(r["run_id"])]
     gens = [{r["gen"] for r in rows if r["policy"] == p} for p in (new, champ)]
     common = gens[0] & gens[1]
@@ -124,6 +126,7 @@ def accept(args):
     newest = args.newest or [w for w in ids if workloads[w].get("status") != "superseded"][-1]
     ok = True
     failed = []
+    score_ok = [True]  # rule 1 on the newest workload
     print("policy %s vs champion %s; newest workload %s" % (new, champ, newest))
     def check(wid):
         s = workloads[wid]
@@ -161,6 +164,7 @@ def accept(args):
                       S.fmt(ta), S.fmt(tb), 100 * (ta / tb - 1), "ok" if good else "FAIL (5)"))
         elif wid == newest:
             good = a <= 0.9 * b or b - a >= 10
+            score_ok[0] = good
             print("  %s (newest): score %s vs %s (%+.1f%%) -> %s" % (
                 wid, S.fmt(a), S.fmt(b), 100 * rel, "ok" if good else "FAIL (1)"))
         else:
@@ -208,7 +212,8 @@ def accept(args):
             failed.append(wid)
     if failed:
         # machine-readable, for eval_policy.sh's paired confirmation
-        print("FAILED_ON: %s NEWEST: %s CHAMPION: %s" % (" ".join(failed), newest, champ))
+        print("FAILED_ON: %s NEWEST: %s CHAMPION: %s SCORE: %s" % (
+            " ".join(failed), newest, champ, "ok" if score_ok[0] else "fail"))
     print("ACCEPT" if ok else "REJECT")
     return 0 if ok else 1
 

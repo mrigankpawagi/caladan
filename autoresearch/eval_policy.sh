@@ -10,10 +10,11 @@
 #
 # Paired confirmation: the champion's numbers on older workloads come from an
 # earlier session, and deadline-met drifts by about 1.5 points between
-# sessions (README). If the judge rejects the policy only on older workloads,
-# the policy and the champion are re-measured back to back on those workloads
-# at the same levels (run.py --paired) and the judge decides them from those
-# paired runs.
+# sessions (README). If the judge rejects the policy although its score on
+# the newest workload improved enough (rule 1), the policy and the champion
+# are re-measured back to back on every failing workload at the same levels
+# (run.py --paired; the full sweep for the newest workload) and the judge
+# decides those workloads from the paired runs.
 set -e
 G=$1; P=$2
 cd "$(dirname "$0")"
@@ -60,9 +61,10 @@ LINE="$(grep '^FAILED_ON:' <<<"$OUT")"
 [ $EXIT -eq 0 ] || [ -z "$LINE" ] && exit 0
 FAILED="$(sed 's/^FAILED_ON: \(.*\) NEWEST: .*/\1/' <<<"$LINE")"
 NEWEST="$(sed 's/.* NEWEST: \([^ ]*\) .*/\1/' <<<"$LINE")"
-CHAMP="$(sed 's/.* CHAMPION: //' <<<"$LINE")"
-if [[ " $FAILED " == *" $NEWEST "* ]]; then
-    echo "failed on the newest workload: no paired confirmation"
+CHAMP="$(sed 's/.* CHAMPION: \([^ ]*\) .*/\1/' <<<"$LINE")"
+SCORE="$(sed 's/.* SCORE: //' <<<"$LINE")"
+if [ "$SCORE" != ok ]; then
+    echo "the score on $NEWEST did not improve enough: no paired confirmation"
     exit 0
 fi
 set -e

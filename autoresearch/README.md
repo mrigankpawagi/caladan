@@ -102,13 +102,13 @@ measured in an earlier session, and some quantities drift between sessions
 more than the rules allow: in gen 6, a policy whose decisions on w5 are
 identical to the champion's measured 86.5% query deadline-met against the
 champion's 88.1% from gen 4, while repeats inside one session agree within
-about 0.3 points. So when the judge rejects a policy only on older
-workloads, `eval_policy.sh` re-measures the policy and the champion back to
-back on those workloads at the same levels (`run.py --paired`, runs labelled
-p1, p2, ... and alternating between the two policies), and the judge decides
-those workloads from the paired runs alone. A policy that fails on the newest
-workload is rejected without confirmation: both were measured there in the
-same generation.
+about 0.3 points. So when the judge rejects a policy whose score on the
+newest workload did improve enough (rule 1), `eval_policy.sh` re-measures the
+policy and the champion back to back on every failing workload at the same
+levels (`run.py --paired`, runs labelled p1, p2, ... and alternating between
+the two policies; the full sweep for the newest workload), and the judge
+decides those workloads from the paired runs alone. A policy that misses
+rule 1 is rejected without confirmation.
 
 Nothing is ever overwritten. Workloads, policies, and results only accumulate;
 a broken workload gets a new revised file. The only regenerated file is
