@@ -141,10 +141,9 @@ def accept(args):
             print("  %s: decided from the paired confirmation runs" % wid)
         a, b = score(widx, s, new, head), score(widx, s, champ, head)
         if wid != "w0" and (a is None or b is None):
-            print("  %s: missing data (%s=%s, %s=%s)" % (wid, new, a, champ, b))
-            if wid == newest or wid == "w0":
-                ok = False
-            return ok
+            # a workload without data is a failure, never a silent pass
+            print("  %s: missing data (%s=%s, %s=%s) -> FAIL" % (wid, new, a, champ, b))
+            return False
         rel = a / b - 1 if (a is not None and b) else 0
         if wid == "w0":
             loads = s["load_rps"]

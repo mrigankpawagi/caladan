@@ -51,7 +51,8 @@ done <<<"$PLAN"
 ./run.py --gen $G $ARGS --policy $P
 while read -r kind wid f lv; do
     [ "$kind" = full ] && continue
-    ./run.py --gen $G --workload $f --policy $P --levels $lv
+    # no stdin for run.py: its ssh sessions would swallow the rest of the plan
+    ./run.py --gen $G --workload $f --policy $P --levels $lv </dev/null
 done <<<"$PLAN"
 ./summarize.py --gen $G
 set +e
@@ -72,7 +73,7 @@ echo "paired confirmation of $P against $CHAMP on: $FAILED"
 for wid in $FAILED; do
     read -r kind _ f lv <<<"$(awk -v w="$wid" '$2 == w' <<<"$PLAN")"
     [ "$lv" = all ] && LV="" || LV="--levels $lv"
-    ./run.py --gen $G --workload $f --policy $CHAMP,$P $LV --paired
+    ./run.py --gen $G --workload $f --policy $CHAMP,$P $LV --paired </dev/null
 done
 ./summarize.py --gen $G
 set +e
