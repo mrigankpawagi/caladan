@@ -46,8 +46,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 | p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
+| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -72,8 +72,8 @@ req p99 by offered load (req/s):
 | sjf_unit | hints | hints |  |  | 72.0 |  |  | inf |
 | sjf_upper | hints | hints |  |  | 72.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 | fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
+| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -775,7 +775,7 @@ Score: `point` p99. Headline load: 155,000 req/s.
 | p0 fifo | hints | hints | 649.0 (648.0–650.0) | +0% | 99.75 | 683.0 | 636.0 | 686.0 | 682.5 | 154135 | 79.28 | 79.62 | 2 | 15 |
 | p1 prio | hints | hints | 305.0 (303.0–307.0) | -53% | 100.00 | 340.5 | 302.5 | 1089 | 1465 | 153582 | 25.99 | 119.48 | 2 | 15 |
 | p3 sjf_guard | hints | hints | 520.5 (520.0–521.0) | -20% | 99.97 | 321.0 | 636.5 | 1102 | 1468 | 153583 | 37.00 | 118.42 | 2 | 15 |
-| p15 sjf_overrun | hints | hints | 483.0 | -26% | 100.00 | 298.0 | 606.0 | 1126 | 1517 | 153347 | 36.83 | 121.41 | 1 | 15 |
+| p15 sjf_overrun | hints | hints | 486.0 (483.0–489.0) | -25% | 100.00 | 299.0 | 608.5 | 1116 | 1506 | 153939 | 37.22 | 122.49 | 2 | 15 |
 | p0 fifo | ignore | hints | 625.5 (617.0–634.0) | -4% | 99.80 | 659.0 | 622.0 | 659.5 | 663.5 | 153888 | - | 76.06 | 2 | 15 |
 
 Best with hints applied: **prio** (305.0 µs).
@@ -788,7 +788,7 @@ point p99 by offered load (req/s):
 | fifo | hints | hints | 28.0 | 145.5 | 433.5 | 535.5 | 588.0 | 649.0 |
 | prio | hints | hints | 27.5 | 110.5 | 229.0 | 255.5 | 281.0 | 305.0 |
 | sjf_guard | hints | hints | 27.0 | 155.0 | 419.5 | 459.5 | 491.5 | 520.5 |
-| sjf_overrun | hints | hints | 28.0 | 161.0 | 407.0 | 447.0 | 473.0 | 483.0 |
+| sjf_overrun | hints | hints | 28.0 | 154.0 | 406.5 | 448.5 | 470.5 | 486.0 |
 | fifo | ignore | hints | 28.5 | 146.0 | 439.0 | 524.0 | 577.5 | 625.5 |
 
 Superseded workloads (kept with their results, not scored): w4.
