@@ -11,7 +11,7 @@ Mode `ignore` means the server did not apply hints; build `stock` is Caladan wit
 | [p0](policies/p0-fifo.md) | `fifo` | 0 | baseline | Stock Caladan order: always run the thread that became ready first; hints are ignored. |
 | [p1](policies/p1-prio.md) | `prio` | 0 | baseline | Look through the whole queue and run the highest priority class first (helpers, HIGH, NORMAL, LOW); oldest first within a class. |
 | [p10](policies/p10-sjf_mixed.md) | `sjf_mixed` | 9 | accepted | p9 plus: when two capped labels are ranked against their measurements (the one whose learned run time is longer has the smaller cap, so it counts shorter), both count one shared length, 4 µs below the smaller cap (on w10, gets with multigets and puts with syncs both count 9 µs instead of 14 and 13); every other length, and order, slack, rescue, timing and learning keys, unchanged |
-| [p11](policies/p11-sjf_unit.md) | `sjf_unit` | 10 | candidate | p10 plus: each core reads a time unit from the tightest relative deadline of the HIGH threads it runs (nearest multiple of 100 µs, at least 1; it takes the last learning slot, leaving four), multiplies the 250 µs deadline split and the 50 µs drop-limit allowance by it, and grows the 8 µs cap allowance, the 17 µs blank length and the 4 µs shared-length drop by half a step per unit; per-request cost, too-late line, order, slack, rescue and timing unchanged (unit 1 on w1–w10, so p10's decisions; 4 on w11, where the cap allowance is 20 µs) |
+| [p11](policies/p11-sjf_unit.md) | `sjf_unit` | 10 | rejected | p10 plus: each core reads a time unit from the tightest relative deadline of the HIGH threads it runs (nearest multiple of 100 µs, at least 1; it takes the last learning slot, leaving four), multiplies the 250 µs deadline split and the 50 µs drop-limit allowance by it, and grows the 8 µs cap allowance, the 17 µs blank length and the 4 µs shared-length drop by half a step per unit; per-request cost, too-late line, order, slack, rescue and timing unchanged (unit 1 on w1–w10, so p10's decisions; 4 on w11, where the cap allowance is 20 µs) |
 | [p2](policies/p2-edf_high.md) | `edf_high` | 1 | accepted | p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready) |
 | [p3](policies/p3-sjf_guard.md) | `sjf_guard` | 2 | accepted | p2 plus: among HIGH threads, one that must start within 20 µs to finish by its deadline runs first (most urgent first; a thread that can no longer finish in time is not urgent), and the others run in order of deadline plus 8 times their expected run time instead of deadline alone |
 | [p4](policies/p4-sjf_rescue.md) | `sjf_rescue` | 3 | rejected | p3 with two changes among HIGH threads: one with less than 13 µs to spare before it must start (p3: less than 0) counts as too late to save, so it is never urgent and waits for any shorter HIGH thread; and p3's fixed 20 µs urgency guard is replaced by a check against the thread p3's order would run: the savable HIGH thread with the least time to spare runs first only if waiting for that thread (its expected run time plus 4 µs) would leave it less than 13 µs |
@@ -42,8 +42,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 | p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
+| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -64,8 +64,8 @@ req p99 by offered load (req/s):
 | sjf_timed | hints | hints |  |  | 69.0 |  |  | inf |
 | sjf_unit | hints | hints |  |  | 72.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 | fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
+| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -526,6 +526,36 @@ get p99 by offered load (req/s):
 | sjf_pair | hints | hints | 22.0 | 94.5 | 238.0 | 310.0 | 393.0 | 6462 |
 | sjf_unit | hints | hints | 22.0 | 93.5 | 259.0 | 304.0 | 368.5 | 14155 |
 | fifo | ignore | hints | 22.0 | 155.5 | 652.0 | 817.5 | 1030 | 3089 |
+
+## w12: The fourfold multiget key-value mix plus fast lease renewals, two time scales at once
+
+[workloads/w12-two-timescales.json](workloads/w12-two-timescales.json). The same bursty key-value front end as w11, where every request runs four times longer than in w9 and most latency-critical requests have 400 us to finish, plus lease renewals from a coordination service: 10% of traffic, about 2 us of work each, latency-critical with a 100 us deadline, still on w9's time scale. The server therefore runs requests on two time scales at once. A scheduler that reads one time scale per core from the tightest deadline it sees picks the leases' small scale for everything, so it again discards the 120 us syncs and flushes hiding behind the puts' 4 us run-time hint and lumps multigets together with lookups, and lookups wait behind puts and syncs as they did on w11.
+
+Score: `get` p99. Headline load: 100,000 req/s.
+
+![get p99 by offered load on w12](plots/w12-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w12](plots/w12-wait.svg)
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | lease p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 676.0 (669.0–683.0) | +0% | 92.73 | 820.5 | 751.0 | 1102 | 1096 | 755.5 | 753.0 | 668.5 | 99680 | 85.12 | 83.20 | 2 | 11 |
+| p1 prio | hints | hints | 560.0 (555.0–565.0) | -17% | 95.96 | 706.5 | 636.0 | 981.0 | 965.5 | 1042 | 1124 | 555.5 | 99463 | 65.78 | 132.83 | 2 | 11 |
+| p10 sjf_mixed | hints | hints | 236.5 (229.0–244.0) | -65% | 99.94 | 348.5 | 866.0 | 450.5 | 857.0 | 1102 | 1177 | 131.5 | 99378 | 45.41 | 135.38 | 2 | 11 |
+| p11 sjf_unit | hints | hints | 243.0 (239.0–247.0) | -64% | 99.89 | 335.5 | 864.0 | 438.5 | 841.0 | 1100 | 1173 | 132.5 | 99506 | 45.19 | 137.30 | 2 | 11 |
+| p0 fifo | ignore | hints | 667.0 (662.0–672.0) | -1% | 93.40 | 807.5 | 744.0 | 1102 | 1099 | 751.0 | 749.0 | 666.5 | 99333 | - | 81.78 | 2 | 11 |
+
+Best with hints applied: **sjf_mixed** (236.5 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 35,000 | 70,000 | 95,000 | 100,000 | 105,000 | 110,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 23.5 | 186.5 | 578.5 | 676.0 | 775.0 | 914.0 |
+| prio | hints | hints | 25.5 | 181.5 | 478.5 | 560.0 | 647.0 | 742.0 |
+| sjf_mixed | hints | hints | 27.5 | 101.5 | 210.5 | 236.5 | 282.0 | 327.5 |
+| sjf_unit | hints | hints | 25.0 | 102.5 | 209.0 | 243.0 | 284.5 | 319.5 |
+| fifo | ignore | hints | 26.0 | 184.5 | 569.5 | 667.0 | 774.5 | 919.0 |
 
 Superseded workloads (kept with their results, not scored): w4.
 
