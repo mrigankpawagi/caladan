@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p8
 - changed_from_previous: p8 plus: each core learns run times per pair of run-time hint and coarse deadline (whether the deadline is more than 250 µs after the thread became ready) instead of per run-time hint alone, so kinds that share a hint but not a deadline class keep separate estimates; order, caps, slack and timing unchanged
-- commit: (filled by orchestrator)
+- commit: f67badb
 
 ## What it does
 Like sjf_capped, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads it puts shorter requests first and learns from its own timings how long requests really take. sjf_capped keeps one learned length per run-time hint, so two kinds that share a hint have their run times averaged together. sjf_pair also asks how far off a request's deadline is: requests whose deadline is more than 250 µs away when they join the queue are learned apart from requests with the same hint and a nearer deadline. On w9 this keeps the 2 µs lookups' learned length short, while the 30 µs multigets, which borrowed the lookups' hint but carry a 300 µs deadline, get their own long estimate; on every earlier workload no request has so distant a deadline, so sjf_pair makes exactly sjf_capped's choices.
