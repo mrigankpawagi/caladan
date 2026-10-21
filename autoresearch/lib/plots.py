@@ -252,6 +252,7 @@ def generations(title, subtitle, bars, colors, threshold):
     of each candidate's change against the champion it faced; a reference
     line marks the acceptance threshold."""
     W, H, L, R, T, B = 720, 396, 60, 24, 86, 316
+    W = max(W, L + R + 80 * len(bars))  # room for each bar's labels
     vals = [b[2] for b in bars if b[2] is not None] + [threshold, 0]
     lo, hi = min(vals), max(vals)
     lo_t = -_nice_ticks(-lo * 1.1)[-1] if lo < 0 else 0
