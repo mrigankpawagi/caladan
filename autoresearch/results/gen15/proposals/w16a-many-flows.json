@@ -1,0 +1,152 @@
+{
+  "id": "w16a",
+  "slug": "many-flows",
+  "generation": 15,
+  "title": "The large-value key-value mix over 48 client connections instead of 16",
+  "description": "The same bursty key-value front end on six cores as w15 (lookups, one in a hundred returning a value 100 times larger, puts with occasional flushes, replica syncs, queries due in 300 us, multigets, batch, scans and lease renewals), with the same hints, but the requests now arrive over 48 client connections instead of 16, as when many application servers each keep their own flow to a cache server. The network card sends each connection to one core by a hash, and on six cores the hash cannot split 48 flows evenly: one core receives about a quarter more than its share and is busier than it can serve during the periodic bursts, so requests pile up in its own queue, where the order the scheduler picks decides how long a lookup waits. A scheduler that lets large lookups, flush-carrying puts or syncs run before waiting lookups on that core costs them more than when no core is overloaded.",
+  "changed_from_previous": "w15 with 48 client connections instead of 16; mix, work, hints, deadlines, bursts, 6 cores and load levels (same load per core) unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 3,
+    "classes": 9,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 6,
+    "time_scale": [
+      1,
+      4
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 6,
+    "spinning_kthreads": 6,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:680",
+      "weight": 0.13365,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "bigget",
+      "service": "constant:68000",
+      "weight": 0.00135,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:400:12000",
+      "weight": 0.09,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:6800",
+      "weight": 0.405,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 68
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 68
+      }
+    },
+    {
+      "name": "lease",
+      "service": "constant:170",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    }
+  ],
+  "load_rps": [
+    26000,
+    51500,
+    66500,
+    70000,
+    72000,
+    73750
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. Many flows: a cache server is reached by every front-end server that uses it, each over its own UDP flow (memcache at Facebook, Nishtala et al., NSDI 2013: web servers send gets over UDP straight to each cache server; mcrouter exists because per-server connection counts grow large), and the NIC spreads flows over cores by an RSS hash of the 5-tuple. 48 is the ladder's next step, not a measured count (invented). The mix is w15's, unchanged: Facebook ETC-like long-tailed value sizes (Atikoglu et al., SIGMETRICS 2012; Yang et al., OSDI 2020) approximated as 99% lookups at 680 iterations and 1% at 68000 under one hint, puts with 15% log flushes (RocksDB, Cao et al., FAST 2020), Raft-style syncs through the put path, multigets through the lookup path, Chubby-style leases (Burrows, OSDI 2006); weights and work sizes were invented in w2-w15. Why w15a (48 connections on 4 cores) left only 28% of the champion's tail in the runqueue, and why this keeps 6 cores: loadgen gives connection i source port 100+i and every connection samples the whole mix, so connections cannot carry particular kinds; they only decide how traffic splits over cores. The IOKernel sends a flow to core (RSS hash mod kthreads) (iokernel/rx.c). The Toeplitz hash is linear in the port bits, so consecutive ports split exactly evenly over a power-of-two core count: computed with the mlx5 default RSS key for 192.168.1.20 -> 192.168.1.10:5000, 48 flows on 4 cores give 12/12/12/12 and 16 flows on 8 cores 2 each, so no core is hot and a lookup mostly waits in its core's receive queue for the running request (outside the runqueue, about 120 us at p99 as for leases). Mod 6 is not linear: 16 flows on 6 cores give 3/4/1/2/4/2 (two cores take 25% each, 1.5 times their share; that hot-core queueing is where w14's and w15's in-runqueue tail came from, with 21-22% of picks stolen), and 48 flows give 9/11/6/5/9/8 (the busiest core 22.9%, 1.375 times its share; the quietest 10.4%). If the NIC key differs, the exact split differs, but mod 6 stays uneven. Capacity (unchanged from w15): at 99.6 iterations per us (calibration.json) mean work = 5450.3 iterations = 54.72 us, 6 / 54.72 us = 109.6k req/s; from w15's measured light-load medians (83 iterations per us plus 1 us per request; w15 fifo get 17, query 90, lease 11 us at 26k) 5450.3 / 83 + 1 = 66.67 us, 6 / 66.67 us = 90.0k req/s. Levels are w15's (same load per core): 26k/51.5k/66.5k/70k/72k/73.75k = 28.9/57.2/73.9/77.8/80.0/81.9% of 90.0k; busy-phase rate at 73.75k is 118k req/s. At 73.75k the busiest core is offered 0.819 x 1.375 = 1.13 of its capacity on average and 1.80 during a burst (w15: two cores at 1.23 and 1.97), so it relies on steals and its runqueue stays deep through every burst. Headline rule: w15 fifo overall median 90 at 26k, 112 at 72k, 120 at 73.75k (limit 135); a less uneven split should not raise it (expect 105-122 at the two busiest levels). Bursts and deadlines as in w15 (4000 us, duty 0.25, factor 2; leases 100 us, queries 300, gets, puts 400, multigets 1200, all at least 3x their work). FIFO penalty: lookups wait behind queries, syncs, flushes, multigets and large lookups (w15 fifo get p99 812.5 vs 42 at 26k). Considered and not used: factor-3 bursts would deepen every core's queue but, in a central-queue model fitted to w15's fifo medians, pass the headline rule only up to about 61.5k (68% of 90.0k), against the rule of three levels at 70% or more. Prediction at 73.75k: fifo get p99 750-850 us; sjf_ratio get p99 300-360 us with get runqueue-wait p99 220-280 (share 0.70-0.78; w15 0.78), p15 sjf_overrun about 15% lower with share 0.65-0.72; steals below w15's 21.8% of picks; hinted_overflow under 100; lease wait p99 about 5-6 us; at 26k every policy's get p99 40-50 us. Server hint map unchanged (bigget = high:400:8, as get). No run.py changes are needed; concentrating long kinds on a few flows would need per-connection kind mixes in loadgen and run.py."
+}
