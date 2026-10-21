@@ -1922,6 +1922,174 @@ static uint32_t choose_sjf_scale(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p13: p12's running estimate of the relative deadlines (deadline minus
+ * ready time) of the HIGH threads a core runs, kept in the same bits of
+ * k->policy_state[1], but stepping POLICY_UPPER_UP times further up than
+ * down: it settles where a quarter of the HIGH picks lie above it (an upper
+ * quartile) instead of half. w13: 61% of picks carry at most 300 us (leases,
+ * 300 us queries, re-queued remnants), 39% at least 400 us, 10% about
+ * 1000-1200 us (multigets and their remnants), so it settles at 400 us;
+ * w11, w12: also 400 us; w1-w10: every deadline is at most 300 us, and the
+ * estimate never passes the largest value seen, so the unit stays 1.
+ */
+#define POLICY_UPPER_UP		3
+
+/*
+ * p13: p12's scale_observe() with the upper-quartile step and hysteresis:
+ * from a unit of 1 the unit rises when the estimate reaches
+ * POLICY_SCALE_MIN_US (as p12); a unit above 1 is kept until the estimate
+ * is a whole POLICY_UNIT_US away from it (w13: kept from 300 to 500 us), so
+ * a run of short-deadline picks cannot flip it and clear the table.
+ */
+static void upper_observe(uint64_t *ps, const thread_t *th)
+{
+	uint64_t w = ps[1] >> 32, m = (w & 0xffffffULL) << POLICY_SCALE_SHIFT;
+	uint64_t step = (uint64_t)POLICY_SCALE_STEP_US * cycles_per_us;
+	uint64_t unit = (uint64_t)POLICY_UNIT_US * cycles_per_us;
+	uint64_t min = (uint64_t)POLICY_SCALE_MIN_US * cycles_per_us;
+	uint64_t top = 0xffffffULL << POLICY_SCALE_SHIFT, r, u, cur;
+	int64_t rel;
+	int i;
+
+	if (!th->deadline_tsc)
+		return;
+	rel = (int64_t)(th->deadline_tsc - th->ready_tsc);
+	if (rel <= 0)
+		return;
+	r = (uint64_t)rel < top ? (uint64_t)rel : top;
+	if (!w)
+		m = r;
+	else if (r > m)
+		m += MIN(POLICY_UPPER_UP * step, r - m);
+	else
+		m -= MIN(step, m - r);
+	cur = scale_get(ps);
+	u = cur;
+	if (cur == 1 ? m >= min :
+	    m + unit < cur * unit || m >= (cur + 1) * unit) {
+		u = 1;
+		if (m >= min)
+			u = MIN((m + unit / 2) / unit, 0xffULL);
+	}
+	if (u != cur) {
+		for (i = POLICY_LEARN_FIRST;
+		     i < POLICY_LEARN_FIRST + POLICY_LEARN_SLOTS; i++)
+			ps[i] = 0;
+	}
+	ps[1] = (u << 56) | ((m >> POLICY_SCALE_SHIFT) << 32) |
+		(ps[1] & 0xffffffffULL);
+}
+
+/*
+ * p13 "sjf_upper": p12's sjf_scale (see choose_sjf_scale()) with the time
+ * unit read from an upper quartile of the relative deadlines of the HIGH
+ * threads each core runs instead of their median, with hysteresis
+ * (upper_observe()). On w13 half the HIGH picks are 300 us queries, so
+ * p12's median sits at 300 us and its unit is 1, which makes p10's
+ * decisions: syncs and flushes hide behind the puts' hint and run ahead of
+ * gets, and gets share a label with multigets. The upper quartile sits at
+ * the 400 us that gets, puts and syncs carry, so the unit is 4 as on w12
+ * and leases still turn first. On w11 and w12 the unit is 4 and on w1-w10
+ * it is 1, as under p12. The clock is read at most once per pick. Without
+ * HIGH threads this is p4's path and the clock is never read.
+ */
+static uint32_t choose_sjf_upper(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	uint64_t lc[POLICY_LEARN_SLOTS], u = scale_get(ps);
+	thread_t *th, *bth, *uth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0;
+	bool two_high = false;
+
+	/* close the sample of this core's previous timed pick (as in p9) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				scale_update(ps, ps[1] & 0xffffffffULL,
+					     now - ps[0], u);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the labels, then
+				 * the first thread */
+				two_high = true;
+				learn_clock(&now);
+				scale_costs(ps, lc, u);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = scale_cost(ps, lc, bth, u);
+				bs = capped_slack(bth, bc, now);
+				if (bs >= late) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+				}
+			}
+			c = scale_cost(ps, lc, th, u);
+			s = capped_slack(th, c, now);
+			/* least slack among the threads not too late */
+			if (s >= late && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+			}
+			if (learn_before(th, c, s < late, bth, bc, bs < late)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+			}
+		}
+	}
+
+	/* p4's rescue check, with the length of the chosen thread */
+	if (uth && uth != bth && us < late + (int64_t)bc) {
+		best = ubest;
+		bth = uth;
+	}
+
+	if (bth->prio_class != THREAD_PRIO_HIGH)
+		return best;
+
+	/* fold the chosen thread's deadline into the quartile and the unit */
+	upper_observe(ps, bth);
+
+	/* time this pick (as in p9), under the chosen thread's learning key */
+	if (bth->service_tsc && n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = (ps[1] & ~0xffffffffULL) |
+			scale_key(bth, sjf_service(bth), scale_get(ps));
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -1939,6 +2107,7 @@ static const struct {
 	{ "sjf_mixed",	choose_sjf_mixed },
 	{ "sjf_unit",	choose_sjf_unit },
 	{ "sjf_scale",	choose_sjf_scale },
+	{ "sjf_upper",	choose_sjf_upper },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
