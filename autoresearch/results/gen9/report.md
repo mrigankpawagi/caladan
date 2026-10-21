@@ -68,7 +68,7 @@ No counter shows the learned lengths, so the cap is inferred, not measured.
 ## 5. Anomalies
 
 - **The headline load moved.** It fell to 345k (w9: 370k) because fifo's light-load median went from 30.0 to 29.0 µs. That made 370k's 45.0 µs 1.55 times the light-load value, over the 1.5 limit. Compare w9 and w10 at equal load.
-- **Clean runs:** 10 runs, one sha (f67badb), no failed or saturated levels, adherence at least 99.77%. Kind and class rows agree within 3 req/s.
+- **Clean runs:** 10 runs, one sha (b666cb1), no failed or saturated levels, adherence at least 99.77%. Kind and class rows agree within 3 req/s.
 - **Overflow repeats disagree:** sjf_pair's hinted overflow at 345k was 1 in one repeat and 234 in the other, both under 0.03% of HIGH picks.
 - **The champion was hurt more than the workload agent predicted.** At 370k:
 

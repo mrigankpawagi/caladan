@@ -60,7 +60,7 @@ Median wait is 0.4–0.7 µs for every kind and policy.
 
 ## 5. Anomalies
 
-- **Clean runs:** no failed or saturated levels, one code version (a7105b6), adherence of at least 99.78%, and zero drops. Kind and class rows match (class:high 310,078 = get+put+query 310,077).
+- **Clean runs:** no failed or saturated levels, one code version (65e0924), adherence of at least 99.78%, and zero drops. Kind and class rows match (class:high 310,078 = get+put+query 310,077).
 - **Built-in checks pass:** fifo's get p99 is 192, against 189 on w4b. Every policy's get p99 at 100k is 14.0 µs.
 - **The intended mechanism is mostly absent:** the champion lost only 4.5 µs, which is within noise.
 - **sjf_rescue now lowers query met** (−0.83 points). On w4b it raised it (+0.76). It also overflows more (336 hinted threads), though that is still only 0.04%.

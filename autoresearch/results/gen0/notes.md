@@ -46,7 +46,7 @@ compiled out), each repeated twice; plus a fake-work calibration.
 ## Addendum: overhead follow-up (between gen 0 and gen 1)
 
 Finding 4 above blamed the per-pick counters. To test that, the counters
-were made switchable (`runtime_sched_stats`, commit 82c4fe9) and w0 was
+were made switchable (`runtime_sched_stats`, commit 810cfbf) and w0 was
 re-run in one session, fifo, two repeats per condition:
 
 | Condition | 300k p99 (µs) | 350k median (µs) | Saturated throughput |

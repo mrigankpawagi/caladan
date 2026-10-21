@@ -56,7 +56,7 @@
     "summary": "The hint-enabled build is about 1% slower than stock Caladan at saturation on w0 (376k vs 380k req/s answered) and about 2 us slower in median latency and 5% in p99 near saturation; identical at light load.",
     "cause": "Not the per-pick counters and not the hints mode: switching both off (runtime_sched_stats 0, --ignore-hints) changes nothing measurable. It is the hint build's general pick mechanism (indirect policy call, gap closing) versus stock's one-line pop.",
     "consequence": "All policies share it, so policy comparisons are fair; experiments keep the counters on.",
-    "evidence": "results/gen0/notes.md, addendum; runs w0__fifo__*__{hints r3-r4, hints-nostats r1-r2, stock r3-r4}, code 82c4fe9",
+    "evidence": "results/gen0/notes.md, addendum; runs w0__fifo__*__{hints r3-r4, hints-nostats r1-r2, stock r3-r4}, code 810cfbf",
     "open_item": "Possible fix: inlined fast path in sched_pop_next when only one thread is queued."
   }
 }

@@ -35,7 +35,7 @@ Batch p99 rose 21% and NORMAL wait went from 4.59 to 7.06 µs. At 440k, batch p9
 
 ## 5. Anomalies
 
-- No errors and no failed or saturated levels. All runs used code 82c4fe9.
+- No errors and no failed or saturated levels. All runs used code 810cfbf.
 - Kind and class rows match (class:high 318,491 vs get + query 318,490), so hints reached the scheduler.
 - fifo on w2 reproduces fifo on w1 (100.5 vs 95.5), as the workload predicted.
 - At 440k, which is not scored, the fifo/ignore repeats differ by 20% (274, 330). prio also pushed 2.3x more hinted threads past the queue than fifo (4,340 vs 1,866) and stole less (30% vs 38%). Both are unexplained.

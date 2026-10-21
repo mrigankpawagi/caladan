@@ -21,7 +21,7 @@
 ## Orchestrator fixes this generation (outside the agents' work)
 
 - **Headline load rule tightened** from "median within 2x of light load" to
-  1.5x (commit c5778f8). At 440k, where the 2x rule landed, fifo with hints
+  1.5x (commit 5270261). At 440k, where the 2x rule landed, fifo with hints
   applied and fifo with hints ignored, which schedule identically, differed by
   11%, so the 10% acceptance threshold would not have been reliable. Gen 0's
   headline loads are unchanged.

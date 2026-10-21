@@ -48,7 +48,7 @@ Each cell is p99 in µs / runqueue-wait p99 in µs / deadline met %.
 
 ## 5. Anomalies
 
-- **Clean runs:** no failed or saturated levels, one code sha (23c4704), adherence at least 99.76%. The class:high row equals get + put + query + sync within 1 req/s.
+- **Clean runs:** no failed or saturated levels, one code sha (ff0143a), adherence at least 99.76%. The class:high row equals get + put + query + sync within 1 req/s.
 - **Repeats that disagree:** fifo on hinted overflow (460 vs 27) and on p99.9 (357 vs 294 µs); sjf_timed on batch p99 (323 vs 298 µs, 8%).
 - **Prediction missed:** the champion's get wait p99 (96.0 µs) is above w7's predicted 65–90. Its get p99 (139.0) falls inside the predicted 120–145.
 

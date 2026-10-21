@@ -131,8 +131,9 @@ nodes.json.example   node settings; copy to nodes.json (ignored by git)
 workloads/           one JSON file per workload, plus README.md (format)
 policies/            one card per policy, plus README.md (format, code contract)
 prompts/             the three agent prompts and CHANGELOG.md
-results/genN/        summary.csv, counters.csv, meta/*.json, raw/*/rps*.out,
-                     ledger.json (node time used), tables.md, report.md, notes.md
+results/genN/        report.md and notes.md (committed); summary.csv, counters.csv,
+                     meta/*.json, raw/*/rps*.out, ledger.json (node time used) and
+                     tables.md stay on the machine that ran them (git-ignored)
 ```
 
 ## Running
@@ -159,6 +160,13 @@ Every row in `results/genN/summary.csv` has a `run_id`
 `results/genN/meta/<run_id>.json` records the code sha, the workload file and
 its hash, the nodes, and timings. The workload and policy cards name the
 generation and commit that introduced them.
+
+The measurement data (CSVs, run metadata, raw client output, tables and
+ledgers) is not in git, to keep the repository and its pull requests
+reviewable; it lives in `results/` on the machine that ran the loop, and
+`summarize.py` and `judge.py` need it there. History was rewritten on
+2026-10-21 to remove it from earlier commits; run metadata from before then
+records the old commit hashes.
 
 ## Budget
 

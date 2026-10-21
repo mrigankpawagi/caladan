@@ -1,6 +1,13 @@
 # local node settings (hostnames change with every CloudLab experiment)
 nodes.json
-# bulky or noisy run artifacts; the parsed csv/json/md and filtered .out files are kept
+# measurement data stays on the machine that ran it (not in git): raw client
+# output, run metadata, result CSVs and the tables and ledgers built from
+# them; reports and notes in results/genN/ are committed
 results/**/*.log
 results/**/*.err
+results/**/raw/
+results/**/meta/
+results/**/*.csv
+results/**/tables.md
+results/**/ledger.json
 __pycache__/

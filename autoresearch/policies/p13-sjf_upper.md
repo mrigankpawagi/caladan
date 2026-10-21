@@ -6,7 +6,7 @@
 - status: accepted
 - builds_on: p12
 - changed_from_previous: p12 plus: the per-core deadline estimate steps 3× further up than down, so it tracks the upper quartile of HIGH relative deadlines instead of the median, and a unit above 1 is kept until that estimate is a whole 100 µs away from it; the 350 µs threshold, the scaled constants, and the order, slack, rescue, timing and learning are p12's (unit 4 on w11–w13, 1 on w1–w10)
-- commit: 12cb1b2
+- commit: 6410d92
 
 ## What it does
 Like sjf_scale, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads it runs shorter requests first, using run times it learns per label and measured on a time scale it reads from the deadlines it sees. sjf_scale reads that scale from the deadline carried by the middle of its HIGH work. sjf_upper reads it from the deadline carried by the longer-deadline quarter, and it does not switch scale on a brief dip. On w13, half the HIGH work is 300 µs queries, but lookups, puts and syncs carry 400 µs. The scale is therefore 4, as on w12: slow syncs and flushes no longer hide behind the puts' short hint, and lookups again run ahead of them. Leases keep running first.

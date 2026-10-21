@@ -65,7 +65,7 @@ The numbers follow this. sjf_learn's get wait p99 stays near sjf_guard's while b
 
 ## 5. Anomalies
 
-- **Clean runs:** no failed or saturated levels, one code version (103c554), adherence of at least 99.76%. Kind and class rows match within 2 req/s.
+- **Clean runs:** no failed or saturated levels, one code version (11aeffa), adherence of at least 99.76%. Kind and class rows match within 2 req/s.
 - **The champion only wins at the top level.** At 300k its gets do worse than fifo's: p99 95.5 vs 83.0 µs (prio 77.0), wait p99 62.6 vs 47.5. It beats prio only at 390k; at 365k the gap (133.5 vs 137.0) is noise.
 
 ## 6. Hypotheses for the policy agent

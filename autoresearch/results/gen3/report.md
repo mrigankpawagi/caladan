@@ -44,7 +44,7 @@ Bursts raise the champion's get p99 from 55.0 (w3 at 400k) to 86.0, at a lower l
 
 ## 5. Anomalies
 
-- **Clean runs:** no failed or saturated levels, one code version (31c94fd), and adherence of at least 99.77%. Kind and class rows match (class:high 296,047 = get 73,943 + query 222,104).
+- **Clean runs:** no failed or saturated levels, one code version (dd905ce), and adherence of at least 99.77%. Kind and class rows match (class:high 296,047 = get 73,943 + query 222,104).
 - **New: client sends below nominal.** With bursts, the client sends 2.5–6.3% fewer requests than the nominal rate. That is 93.7k at 100k and 370.5k at 380k; on w3 it was within 0.6%. It affects every policy equally.
 - **Model overshot:** the workload's corrected predictions were 118–123 µs for sjf_guard and 220–225 for fifo. Measured: 86 and 167.
 - **Built-in check passes:** get p99 at 100k is 13.0–14.0 µs, as on w3.

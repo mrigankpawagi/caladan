@@ -39,7 +39,7 @@ Conclusion: gets queue behind older queries. The only difference from w2 is whic
 
 ## 5. Anomalies
 
-- No errors and no failed or saturated levels. Adherence is at least 99.85%. All runs used code 8ea008e.
+- No errors and no failed or saturated levels. Adherence is at least 99.85%. All runs used code 561241d.
 - Kind and class rows match, so hints reached the scheduler: class:high 318,670 vs get + query 318,669; class:low equals scan and class:normal equals batch.
 - fifo reproduces w2 as w3 predicted (94.5 vs 100.5).
 - edf_high should match prio, but in both repeats it has a worse query p99 (107/107 vs 100/106) and more overflow (192/113 vs 36/23). The gap is small and unexplained.

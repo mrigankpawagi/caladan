@@ -73,7 +73,7 @@ The estimator moves up 1/16 and down 1/64 of the gap. With 1 multiget in 4 sampl
 
 ## 5. Anomalies
 
-- **Clean runs:** 10 runs, one code sha (dbbe26c), no failed or saturated levels, adherence at least 99.78%. Kind and class rows agree within 2 req/s.
+- **Clean runs:** 10 runs, one code sha (119471c), no failed or saturated levels, adherence at least 99.78%. Kind and class rows agree within 2 req/s.
 - **Prediction misses:**
   - champion get p99 95.0 (predicted 125–150);
   - champion get wait p99 40.9 (predicted 80–110);

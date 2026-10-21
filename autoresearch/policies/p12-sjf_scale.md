@@ -6,7 +6,7 @@
 - status: accepted
 - builds_on: p10
 - changed_from_previous: p10 plus: each core keeps a time unit from the median relative deadline of the HIGH threads it runs (1 below 350 µs, else that median in 100 µs, rounded; stored beside the pending pick's key, so all five learning slots stay), multiplies the 50 µs drop-limit allowance by it, and grows the 250 µs deadline split, the 8 µs cap allowance, the 17 µs blank length and the 4 µs shared-length drop by half a step per unit (p11's scaling, but with the split also in half steps and the unit from the median, not the tightest deadline); order, slack, rescue, timing and learning keys otherwise unchanged (unit 1 on w1–w10, so p10's decisions; 4 on w11 and w12)
-- commit: 97beb97
+- commit: 4151389
 
 ## What it does
 Like sjf_mixed, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads it runs shorter requests first, using run times it learns per label. sjf_mixed's learning rules use fixed microsecond limits tuned to 100 µs deadlines. sjf_scale reads each core's time scale from the deadline that most of its HIGH work carries (a running median), not from the tightest one. On w1–w10 that median is at most 200 µs, the scale stays 1, and it decides exactly as sjf_mixed. On w11 and w12 the median is 400 µs. The scale becomes 4, so lookups again count shorter than puts and syncs, and multigets are learned apart from lookups. Leases keep running first.

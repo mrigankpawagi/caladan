@@ -86,7 +86,7 @@ Each cell is p99 in µs / runqueue-wait p99 in µs / deadline met %.
 
 ## 5. Anomalies
 
-- **Clean runs:** no failed or saturated levels. All runs used one code sha (7f53df7), adherence was at least 99.78%, and kind and class rows agree within 3 req/s.
+- **Clean runs:** no failed or saturated levels. All runs used one code sha (d0ae8e4), adherence was at least 99.78%, and kind and class rows agree within 3 req/s.
 - **Predictions in the w8 notes that missed:**
   - champion get p99 145.0 (predicted 125–140);
   - champion get wait p99 97.3 (predicted 85–96);

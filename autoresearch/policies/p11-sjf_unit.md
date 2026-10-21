@@ -6,7 +6,7 @@
 - status: rejected
 - builds_on: p10
 - changed_from_previous: p10 plus: each core reads a time unit from the tightest relative deadline of the HIGH threads it runs (nearest multiple of 100 µs, at least 1; it takes the last learning slot, leaving four), multiplies the 250 µs deadline split and the 50 µs drop-limit allowance by it, and grows the 8 µs cap allowance, the 17 µs blank length and the 4 µs shared-length drop by half a step per unit; per-request cost, too-late line, order, slack, rescue and timing unchanged (unit 1 on w1–w10, so p10's decisions; 4 on w11, where the cap allowance is 20 µs)
-- commit: b9b2fc8
+- commit: 7365bc0
 
 ## What it does
 Like sjf_mixed, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads it runs shorter requests first, using run times it learns per label. sjf_mixed's learning rules used fixed microsecond limits tuned to 100 µs deadlines. sjf_unit reads the time scale from the deadlines it sees: the tightest one, in units of 100 µs. It stretches its limits by that unit. On w1–w10 the unit is 1, so it decides exactly as sjf_mixed. On w11 the unit is 4, so it again sees that the "4 µs" label hides 120 µs syncs and flushes, ranks that label behind lookups, and learns multigets apart from lookups.

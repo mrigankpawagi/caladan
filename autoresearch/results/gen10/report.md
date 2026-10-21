@@ -97,7 +97,7 @@ No counter reports learned lengths or dropped samples, so these lengths are infe
   - Repeats disagree: sjf_pair get p99 is 10,589 against 2,335.
   - sjf_mixed degrades most: get p99 14–18 ms, against 3.4–5.0 ms for fifo.
 - **Clean runs:**
-  - one sha (2aab7d9), no failed or saturated levels;
+  - one sha (635c52d), no failed or saturated levels;
   - class rows match kind rows (class:high 71,648 against 71,647);
   - the client's adherence warning appears at every level, as on w10, with adherence at least 99.83%.
 

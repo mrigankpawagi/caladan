@@ -6,7 +6,7 @@
 - status: rejected
 - builds_on: p4
 - changed_from_previous: p4 plus: each core learns, for each run-time hint value, how long its HIGH threads really run (timed between consecutive picks, leaning toward the long runs), and uses the larger of that and p4's hint plus 4 µs as a HIGH thread's length, both for ordering and for the rescue check
-- commit: 103c554
+- commit: 11aeffa
 
 ## What it does
 Like sjf_rescue, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads a short request normally goes first, and sjf_rescue's rules still apply to requests near their deadline. The change is where a HIGH request's length comes from. Each core now times the requests it runs and remembers how long requests with each run-time hint really take. A kind whose hint is honest keeps exactly sjf_rescue's order. A kind that runs longer than its hint says, like puts that sometimes flush, is ranked by how long it was seen to take: on w5 lookups (about 6 µs) now go ahead of puts (seen at roughly 10–15 µs), and puts still go ahead of queries (about 21 µs).

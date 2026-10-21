@@ -6,7 +6,7 @@
 - status: accepted
 - builds_on: p1
 - changed_from_previous: p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready)
-- commit: 7281afd
+- commit: 100ca01
 
 ## What it does
 Like prio, each core runs runtime helper threads first, then HIGH, then NORMAL, then LOW. The change is inside the HIGH class. Instead of the HIGH thread that has waited longest, the core runs the one whose deadline is soonest. So a quick lookup due in 60 µs goes ahead of a long query due in 200 µs, even if the query arrived first. A HIGH thread with no deadline counts as due 1 ms after it became ready, so it cannot be passed forever. NORMAL and LOW threads, including every unhinted one, keep prio's oldest-first order.
@@ -39,7 +39,7 @@ These two limits are outside the policy region and are for the owner to decide:
 | w0 | req p99 and throughput at 350k | flat | 178.5 µs within 6%; throughput within 0.2% |
 
 ## Results
-Accepted in generation 1 (judge.py, results/gen1/, commit 2f1080c), against
+Accepted in generation 1 (judge.py, results/gen1/, commit 3eb277a), against
 the champion p1 prio, two repeats each at each workload's headline load:
 
 | Workload | Score (prio) | Score (edf_high) | Change | Other kinds |
