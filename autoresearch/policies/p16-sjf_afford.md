@@ -3,7 +3,7 @@
 - id: p16
 - config: sjf_afford
 - generation: 15
-- status: candidate
+- status: accepted
 - builds_on: p15
 - changed_from_previous: p15 plus: after the order has chosen a HIGH thread, the shortest waiting HIGH thread (not overrun) runs first instead if it is at most a third as long (p14's ratio), due at least twice as late relative to when each became ready but within p9's deadline split, and the chosen thread would still keep 40% of its relative deadline as slack after it (on w16 points and health checks pass fanouts that have time to spare); on w1–w15 no such thread exists outside rare multiget cases, so decisions are p15's
 - commit: bb79c96
@@ -38,4 +38,21 @@ Like sjf_overrun, each core runs helper threads first, then HIGH, NORMAL and LOW
 | w0 | p99 and saturated throughput | unchanged (no HIGH threads) |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 15 (judge.py, results/gen15/) against the champion
+p15 sjf_overrun, on every rule and every workload, without a paired
+confirmation.
+
+| Workload | sjf_overrun | sjf_afford | Change | Notes |
+|---|---|---|---|---|
+| w16 | point p99 486.0 µs | 255.0 µs | −47.5% | predicted −17 to −32%; better than prio (305.0) |
+| w16 | fanout p99 / met | 299.0 µs / 99.04% | 321.5 µs / 98.53% | +7.5% / −0.51 points (predicted +5 to +17%, −0.3 to −0.7) |
+| w16 | health p99 | 608.5 µs | 178.0 µs | −70.7% (predicted −45 to −60%) |
+| w15 | get p99 261.0 µs | 262.5 µs | +0.6% | bigget p99 +16.5% (limit 25%): a 1%-of-lookups kind, few samples at p99 |
+| w14 | 197.5 µs | 192.5 µs | −2.5% | |
+| w1–w13 | | | within noise | p15's decisions |
+
+On the first workload outside the key-value family, the champion line had
+fallen behind plain priority classes; one guarded rule (a much shorter,
+much later-due request may pass when the chosen one keeps 40% of its
+deadline window as slack) put it ahead of prio on the score while keeping
+more of the fanouts' deadlines than prio does.
