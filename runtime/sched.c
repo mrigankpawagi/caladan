@@ -1378,6 +1378,281 @@ static uint32_t choose_sjf_mixed(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p11: k->policy_state[POLICY_UNIT_SLOT] holds this core's time unit: the
+ * tightest relative deadline (deadline minus ready time) of the HIGH
+ * threads it has run, in cycles, in the low 32 bits, and that many
+ * POLICY_UNIT_US rounded to the nearest whole number, at least 1, in the
+ * high 32 bits (0 = nothing seen yet, which counts as 1). p5's learning
+ * table keeps the slots from POLICY_LEARN_FIRST up to POLICY_UNIT_SLOT - 1.
+ */
+#define POLICY_UNIT_SLOT	7
+#define POLICY_UNIT_LEARN_SLOTS	(POLICY_UNIT_SLOT - POLICY_LEARN_FIRST)
+/* p11: one time unit per this many us of the tightest relative deadline:
+ * 1 on w1-w10 (60 and 100 us), 4 on w11 (400 us) */
+#define POLICY_UNIT_US		100
+/* p11: a looser deadline raises the remembered tightest one by 1/2^8 of
+ * the gap (a tighter one lowers it at once), so one thread that was
+ * readied late cannot hold the unit down for good */
+#define POLICY_UNIT_RISE_SHIFT	8
+
+/* p11: this core's time unit (see POLICY_UNIT_SLOT) */
+static inline uint64_t unit_get(const uint64_t *ps)
+{
+	uint64_t u = ps[POLICY_UNIT_SLOT] >> 32;
+
+	return u ? u : 1;
+}
+
+/*
+ * p11: folds the relative deadline of HIGH thread @th, which this core is
+ * about to run, into its tightest relative deadline. If that moves the time
+ * unit, the learning table is cleared: its keys, limits and caps belong to
+ * the old unit (in practice this happens once per core, at startup).
+ */
+static void unit_observe(uint64_t *ps, const thread_t *th)
+{
+	uint64_t w = ps[POLICY_UNIT_SLOT], m = w & 0xffffffffULL, r, u;
+	uint64_t unit = (uint64_t)POLICY_UNIT_US * cycles_per_us;
+	int64_t rel;
+	int i;
+
+	if (!th->deadline_tsc)
+		return;
+	rel = (int64_t)(th->deadline_tsc - th->ready_tsc);
+	if (rel <= 0)
+		return;
+	r = rel < 0xffffffffLL ? (uint64_t)rel : 0xffffffffULL;
+	if (!w || r < m)
+		m = r;
+	else
+		m += (r - m) >> POLICY_UNIT_RISE_SHIFT;
+	u = (m + unit / 2) / unit;
+	if (!u)
+		u = 1;
+	if (u != unit_get(ps)) {
+		for (i = POLICY_LEARN_FIRST; i < POLICY_UNIT_SLOT; i++)
+			ps[i] = 0;
+	}
+	ps[POLICY_UNIT_SLOT] = (u << 32) | m;
+}
+
+/* p11: @us microseconds of run-time allowance in unit @u, in cycles: @us
+ * at a unit of 1, and half of @us more for each further unit (w11: 2.5
+ * times), so a capped label stays well below the queries' length */
+static inline uint64_t unit_allow(uint64_t us, uint64_t u)
+{
+	return us * (u + 1) / 2 * cycles_per_us;
+}
+
+/* p11: p9's pair_key() with the split at @u times POLICY_PAIR_SPLIT_US */
+static inline uint64_t unit_key(const thread_t *th, uint64_t hint, uint64_t u)
+{
+	if (th->deadline_tsc &&
+	    (int64_t)(th->deadline_tsc - th->ready_tsc) >
+	    (int64_t)(POLICY_PAIR_SPLIT_US * u) * cycles_per_us)
+		return hint | POLICY_PAIR_RELAXED;
+	return hint;
+}
+
+/* p11: p9's pair_update() with the drop limit's allowance at @u times
+ * POLICY_LEARN_CAP_US, over the learning slots below POLICY_UNIT_SLOT */
+static void unit_update(uint64_t *ps, uint64_t key, uint64_t sample,
+			uint64_t u)
+{
+	uint64_t fl = learn_floor(key & ~POLICY_PAIR_RELAXED), e;
+	int i, slot = -1;
+
+	if (sample > 2 * fl + POLICY_LEARN_CAP_US * u * cycles_per_us)
+		return;
+	for (i = POLICY_LEARN_FIRST; i < POLICY_UNIT_SLOT; i++) {
+		if ((ps[i] >> 32) == key) {
+			slot = i;
+			break;
+		}
+		if (!ps[i] && slot < 0)
+			slot = i;
+	}
+	if (slot < 0)
+		return;
+	e = ps[slot] ? (ps[slot] & 0xffffffffULL) : fl;
+	if (sample > e)
+		e += (sample - e) >> POLICY_LEARN_UP_SHIFT;
+	else
+		e -= (e - sample) >> POLICY_LEARN_DOWN_SHIFT;
+	ps[slot] = (key << 32) | e;
+}
+
+/* p11: p10's mixed_costs() with the cap allowance unit_allow() of
+ * POLICY_CAP_UP_US and the shared length unit_allow() of
+ * POLICY_MIXED_DROP_US below the smaller cap, over the learning slots below
+ * POLICY_UNIT_SLOT */
+static void unit_costs(const uint64_t *ps, uint64_t *lc, uint64_t u)
+{
+	uint64_t raw[POLICY_UNIT_LEARN_SLOTS], cap[POLICY_UNIT_LEARN_SLOTS];
+	uint64_t up = unit_allow(POLICY_CAP_UP_US, u), shared;
+	int a, b, capped = 0;
+
+	for (a = 0; a < POLICY_UNIT_LEARN_SLOTS; a++) {
+		raw[a] = ps[POLICY_LEARN_FIRST + a] & 0xffffffffULL;
+		cap[a] = learn_floor((ps[POLICY_LEARN_FIRST + a] >> 32) &
+				     ~POLICY_PAIR_RELAXED) + up;
+		if (raw[a] > cap[a]) {
+			lc[a] = cap[a];
+			capped++;
+		} else {
+			lc[a] = raw[a];
+		}
+	}
+	if (capped < 2)
+		return;
+	for (a = 0; a < POLICY_UNIT_LEARN_SLOTS; a++) {
+		for (b = 0; b < POLICY_UNIT_LEARN_SLOTS; b++) {
+			/* both capped, b measured longer but counts shorter */
+			if (raw[a] <= cap[a] || raw[b] <= cap[b] ||
+			    raw[b] <= raw[a] || cap[b] >= cap[a])
+				continue;
+			shared = cap[b] - unit_allow(POLICY_MIXED_DROP_US, u);
+			if (shared < lc[a])
+				lc[a] = shared;
+			if (shared < lc[b])
+				lc[b] = shared;
+		}
+	}
+}
+
+/* p11: p10's mixed_cost() under unit_key(), with a thread without a
+ * run-time hint counting unit_allow() of POLICY_CAP_BLANK_US */
+static inline uint64_t unit_cost(const uint64_t *ps, const uint64_t *lc,
+				 const thread_t *th, uint64_t u)
+{
+	uint64_t hint = sjf_service(th), key;
+	int i;
+
+	if (!hint)
+		return unit_allow(POLICY_CAP_BLANK_US, u);
+	key = unit_key(th, hint, u);
+	for (i = 0; i < POLICY_UNIT_LEARN_SLOTS; i++) {
+		if ((ps[POLICY_LEARN_FIRST + i] >> 32) == key)
+			return lc[i];
+	}
+	return learn_floor(hint);
+}
+
+/*
+ * p11 "sjf_unit": p10's order, timing, learning and lengths (see
+ * choose_sjf_mixed()), with every constant that compares run times measured
+ * in a time unit that each core reads from the deadlines it sees: the
+ * tightest relative deadline of the HIGH threads it runs, in multiples of
+ * POLICY_UNIT_US (unit_observe()). Spans of time are multiplied by the
+ * unit: the deadline split between learning keys (POLICY_PAIR_SPLIT_US)
+ * and the drop limit's allowance for long samples (POLICY_LEARN_CAP_US).
+ * Allowances on a length grow by half a step per unit (unit_allow()): the
+ * cap above a hint (POLICY_CAP_UP_US), the length of a thread without a
+ * run-time hint (POLICY_CAP_BLANK_US) and p10's shared-length drop
+ * (POLICY_MIXED_DROP_US). The per-request cost and the too-late line stay
+ * in us: they are network and runtime time, which does not scale with the
+ * requests. On w1-w10 the unit is 1 and every decision is p10's; on w11
+ * (400 us deadlines) it is 4, so 120 us syncs and flushes are no longer
+ * dropped as glitches, the '4 us' label counts its 28 us cap behind gets
+ * (about 10 us), and multigets (1200 us) are learned apart from gets
+ * (400 us). The clock is read at most once per pick. Without HIGH threads
+ * this is p4's path and the clock is never read.
+ */
+static uint32_t choose_sjf_unit(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	uint64_t lc[POLICY_UNIT_LEARN_SLOTS], u = unit_get(ps);
+	thread_t *th, *bth, *uth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0;
+	bool two_high = false;
+
+	/* close the sample of this core's previous timed pick (as in p9) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				unit_update(ps, ps[1], now - ps[0], u);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the labels, then
+				 * the first thread */
+				two_high = true;
+				learn_clock(&now);
+				unit_costs(ps, lc, u);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = unit_cost(ps, lc, bth, u);
+				bs = capped_slack(bth, bc, now);
+				if (bs >= late) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+				}
+			}
+			c = unit_cost(ps, lc, th, u);
+			s = capped_slack(th, c, now);
+			/* least slack among the threads not too late */
+			if (s >= late && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+			}
+			if (learn_before(th, c, s < late, bth, bc, bs < late)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+			}
+		}
+	}
+
+	/* p4's rescue check, with the length of the chosen thread */
+	if (uth && uth != bth && us < late + (int64_t)bc) {
+		best = ubest;
+		bth = uth;
+	}
+
+	if (bth->prio_class != THREAD_PRIO_HIGH)
+		return best;
+
+	/* learn the unit from the chosen thread's deadline */
+	unit_observe(ps, bth);
+
+	/* time this pick (as in p9), under the chosen thread's learning key */
+	if (bth->service_tsc && n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = unit_key(bth, sjf_service(bth), unit_get(ps));
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -1393,6 +1668,7 @@ static const struct {
 	{ "sjf_capped",	choose_sjf_capped },
 	{ "sjf_pair",	choose_sjf_pair },
 	{ "sjf_mixed",	choose_sjf_mixed },
+	{ "sjf_unit",	choose_sjf_unit },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
