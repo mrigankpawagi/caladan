@@ -831,6 +831,74 @@ static uint32_t choose_sjf_timed(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/* p7: run time assumed for a HIGH thread without a run-time hint: longer
+ * than the short hinted kinds (1-2 us), shorter than the long ones (17 us) */
+#define POLICY_NOHINT_US	8
+
+/* p7: expected run time of HIGH thread @th in cycles: its hint as in p3
+ * (sjf_service()), or POLICY_NOHINT_US if it carries none */
+static inline uint64_t nohint_cost(const thread_t *th)
+{
+	uint64_t c = sjf_service(th);
+
+	return c ? c : (uint64_t)POLICY_NOHINT_US * cycles_per_us;
+}
+
+/*
+ * p7 "sjf_nohint": p3's order (helper threads, then HIGH, NORMAL, LOW;
+ * NORMAL and LOW oldest first; among HIGH, a thread that must start within
+ * POLICY_SJF_GUARD_US to finish by its due time runs first, least slack
+ * first, and the others go by due time plus POLICY_SJF_WEIGHT times their
+ * run time). The one change: a HIGH thread without a run-time hint counts
+ * as POLICY_NOHINT_US long, both in its turn and in the urgency test (p3
+ * counts it as zero-length, ahead of every short hinted thread). p6's
+ * timed_urgent() and timed_before() are p3's tests with the run time passed
+ * in, so a thread with a hint is ranked exactly as in p3. Ties keep the
+ * oldest. The clock is read at most once, and only when two HIGH threads
+ * are queued; k->policy_state[] is not used.
+ */
+static uint32_t choose_sjf_nohint(struct kthread *k, uint32_t n)
+{
+	thread_t *th = sched_rq_at(k, 0), *bth = th;
+	uint8_t r, rank = prio_rank[th->prio_class];
+	bool have_now = false, bu = false, u;
+	uint32_t i, best = 0;
+	uint64_t now = 0, c, bc = 0;
+
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!have_now) {
+				/* a second HIGH thread: read the clock once */
+				now = rdtsc();
+				have_now = true;
+				bc = nohint_cost(bth);
+				bu = timed_urgent(bth, bc, now);
+			}
+			c = nohint_cost(th);
+			u = timed_urgent(th, c, now);
+			if (timed_before(th, c, u, bth, bc, bu)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bu = u;
+			}
+		}
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -842,6 +910,7 @@ static const struct {
 	{ "sjf_rescue",	choose_sjf_rescue },
 	{ "sjf_learn",	choose_sjf_learn },
 	{ "sjf_timed",	choose_sjf_timed },
+	{ "sjf_nohint",	choose_sjf_nohint },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
