@@ -699,6 +699,138 @@ static uint32_t choose_sjf_learn(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p6: expected cost of HIGH thread @th: the run time this core has learned
+ * for its run-time hint value in p5's table (k->policy_state[]), whether
+ * that is below the hint or above it; before any run with that hint has
+ * been timed, the hint plus POLICY_RESCUE_COST_US, where p5's estimate
+ * starts
+ */
+static inline uint64_t timed_cost(const uint64_t *ps, const thread_t *th)
+{
+	uint64_t key = sjf_service(th);
+	int i;
+
+	if (key) {
+		for (i = POLICY_LEARN_FIRST;
+		     i < POLICY_LEARN_FIRST + POLICY_LEARN_SLOTS; i++) {
+			if ((ps[i] >> 32) == key)
+				return ps[i] & 0xffffffffULL;
+		}
+	}
+	return learn_floor(key);
+}
+
+/*
+ * p6: p3's sjf_urgent() with cost @c in place of the hint: true if @th can
+ * still finish by its due time, but only if it starts within
+ * POLICY_SJF_GUARD_US of @now; once its latest start has passed, the
+ * unsigned difference wraps to a huge value and the test fails
+ */
+static inline bool timed_urgent(const thread_t *th, uint64_t c, uint64_t now)
+{
+	return edf_due(th) - c - now <
+	       (uint64_t)POLICY_SJF_GUARD_US * cycles_per_us;
+}
+
+/*
+ * p6: p3's sjf_before() with costs in place of hints: true if HIGH thread
+ * @a (cost @ca, urgent if @ua) runs before HIGH thread @b (cost @cb, urgent
+ * if @ub): urgent ones first, the one whose latest start comes first among
+ * them, otherwise the earlier of due time plus POLICY_SJF_WEIGHT times cost
+ */
+static inline bool timed_before(const thread_t *a, uint64_t ca, bool ua,
+				const thread_t *b, uint64_t cb, bool ub)
+{
+	if (ua != ub)
+		return ua;
+	if (ua)
+		return (int64_t)((edf_due(a) - ca) - (edf_due(b) - cb)) < 0;
+	return (int64_t)((edf_due(a) + POLICY_SJF_WEIGHT * ca) -
+			 (edf_due(b) + POLICY_SJF_WEIGHT * cb)) < 0;
+}
+
+/*
+ * p6 "sjf_timed": p3's order (helper threads, then HIGH, NORMAL, LOW; NORMAL
+ * and LOW oldest first; among HIGH, a thread that must start within
+ * POLICY_SJF_GUARD_US to finish by its due time runs first, least slack
+ * first, and the others go by due time plus POLICY_SJF_WEIGHT times their
+ * length). The one change is that each HIGH thread's length comes from
+ * timed_cost() instead of its hint. Lengths are learned as in p5: each core
+ * times the hinted HIGH threads it runs, from their pick to the next pick,
+ * and folds each run into learn_update()'s per-hint estimate. Unlike p5,
+ * the estimate is used without a floor, so a hint that is too long gets
+ * corrected as well as one that is too short. p4's too-late rule and rescue
+ * check are left out: a thread that can no longer finish in time keeps its
+ * normal turn and does not yield to newer work. Ties keep the oldest. The
+ * clock is read at most once per pick. Without HIGH threads this is p3's
+ * path and the clock is never read.
+ */
+static uint32_t choose_sjf_timed(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	thread_t *th, *bth;
+	uint8_t r, rank;
+	uint32_t i, best = 0;
+	uint64_t now = 0, c, bc = 0;
+	bool two_high = false, bu = false, u;
+
+	/* close the sample of this core's previous timed pick (as in p5) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				learn_update(ps, ps[1], now - ps[0]);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the first one */
+				two_high = true;
+				learn_clock(&now);
+				bc = timed_cost(ps, bth);
+				bu = timed_urgent(bth, bc, now);
+			}
+			c = timed_cost(ps, th);
+			u = timed_urgent(th, c, now);
+			if (timed_before(th, c, u, bth, bc, bu)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bu = u;
+			}
+		}
+	}
+
+	/* time this pick (as in p5): mark the newest thread it leaves queued */
+	if (bth->prio_class == THREAD_PRIO_HIGH && bth->service_tsc &&
+	    n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = sjf_service(bth);
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -709,6 +841,7 @@ static const struct {
 	{ "sjf_guard",	choose_sjf_guard },
 	{ "sjf_rescue",	choose_sjf_rescue },
 	{ "sjf_learn",	choose_sjf_learn },
+	{ "sjf_timed",	choose_sjf_timed },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
