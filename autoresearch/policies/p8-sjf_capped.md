@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p5
 - changed_from_previous: p5 plus: a HIGH thread's length is the run time learned for its run-time hint without p5's floor (so it can fall below the hint, as in p6) and at most 8 µs above p5's starting value of hint plus 4 µs; a HIGH thread without a run-time hint counts as 17 µs (p5: 4 µs); and the too-late rule and rescue check measure slack with that length, too late meaning less than 9 µs to spare (p5: slack from the hint, less than 13 µs)
-- commit: (filled by orchestrator)
+- commit: dbbe26c
 
 ## What it does
 Like sjf_learn, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads the shorter request normally goes first, a request that can no longer make its deadline steps aside for shorter ones, and one about to become too late is let in just in time. Each core also times the requests it runs and learns how long requests with each run-time hint really take. What changes is how far the core trusts those timings. It accepts that a kind is quicker than its hint, so w6's lookups labelled 20 µs count as the 6 µs they take. But it lets a kind count as at most 8 µs slower than sjf_learn's starting guess, so w8's "1 µs" label, shared by quick puts and 30 µs syncs, ranks as 13 µs: behind lookups and still ahead of queries. A request with no run-time hint, like w7's syncs, counts as 17 µs, just behind that, and each request's time to spare is measured with the same length it is ranked by.
