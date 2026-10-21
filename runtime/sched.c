@@ -498,6 +498,207 @@ static uint32_t choose_sjf_rescue(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p5: per-core learned run times in k->policy_state[]:
+ *  [0] when the timed pick was made (0 = none pending)
+ *  [1] the run-time hint (sjf_service()) of the thread it chose
+ *  [2] learn_mark() of a thread it left queued
+ *  [POLICY_LEARN_FIRST..7] one slot per hint value: the hint in the high 32
+ *  bits, the learned run time in cycles in the low 32 bits (0 = free slot)
+ */
+#define POLICY_LEARN_FIRST	3
+#define POLICY_LEARN_SLOTS	5
+/* p5: a run longer than the estimate pulls it up by 1/2^4 of the gap and a
+ * shorter one pulls it down by 1/2^6, so the estimate leans to long runs */
+#define POLICY_LEARN_UP_SHIFT	4
+#define POLICY_LEARN_DOWN_SHIFT	6
+/* p5: a sample longer than twice learn_floor() plus this many us is not one
+ * run (the core was parked or the thread blocked) and is dropped */
+#define POLICY_LEARN_CAP_US	50
+/* p5: a pick is timed only if it leaves at least this many threads queued;
+ * with one left, the next pick reaches the policy only when the watchdog
+ * adds a helper thread, which would favour long runs */
+#define POLICY_LEARN_MIN_LEFT	2
+
+/* p5: reads the clock at most once per pick (0 in @now = not read yet) */
+static inline uint64_t learn_clock(uint64_t *now)
+{
+	if (!*now)
+		*now = rdtsc();
+	return *now;
+}
+
+/* p5: the least a HIGH thread with run-time hint @key (0 = none) is taken
+ * to cost: the hint plus p4's per-request overhead */
+static inline uint64_t learn_floor(uint64_t key)
+{
+	return key + (uint64_t)POLICY_RESCUE_COST_US * cycles_per_us;
+}
+
+/* p5: identifies @th while it stays queued; a freed thread struct that is
+ * reused gets a new ready time, and so a new mark */
+static inline uint64_t learn_mark(const thread_t *th)
+{
+	return (uint64_t)(uintptr_t)th ^ th->ready_tsc;
+}
+
+/* p5: expected cost of HIGH thread @th: the run time learned for its hint
+ * value, but never less than learn_floor() */
+static inline uint64_t learn_cost(const uint64_t *ps, const thread_t *th)
+{
+	uint64_t key = sjf_service(th), fl = learn_floor(key), e;
+	int i;
+
+	if (!key)
+		return fl;
+	for (i = POLICY_LEARN_FIRST;
+	     i < POLICY_LEARN_FIRST + POLICY_LEARN_SLOTS; i++) {
+		if ((ps[i] >> 32) == key) {
+			e = ps[i] & 0xffffffffULL;
+			return e > fl ? e : fl;
+		}
+	}
+	return fl;
+}
+
+/* p5: folds one observed run time @sample of a HIGH thread with hint @key
+ * into that hint's slot, claiming a free slot the first time */
+static void learn_update(uint64_t *ps, uint64_t key, uint64_t sample)
+{
+	uint64_t fl = learn_floor(key), e;
+	int i, slot = -1;
+
+	if (sample > 2 * fl + (uint64_t)POLICY_LEARN_CAP_US * cycles_per_us)
+		return;
+	for (i = POLICY_LEARN_FIRST;
+	     i < POLICY_LEARN_FIRST + POLICY_LEARN_SLOTS; i++) {
+		if ((ps[i] >> 32) == key) {
+			slot = i;
+			break;
+		}
+		if (!ps[i] && slot < 0)
+			slot = i;
+	}
+	if (slot < 0)
+		return;
+	e = ps[slot] ? (ps[slot] & 0xffffffffULL) : fl;
+	if (sample > e)
+		e += (sample - e) >> POLICY_LEARN_UP_SHIFT;
+	else
+		e -= (e - sample) >> POLICY_LEARN_DOWN_SHIFT;
+	ps[slot] = (key << 32) | e;
+}
+
+/* p5: true if HIGH thread @a (cost @ca, too late if @al) goes before HIGH
+ * thread @b (cost @cb, too late if @bl): p4's rescue_before() with learned
+ * costs in place of hints */
+static inline bool learn_before(const thread_t *a, uint64_t ca, bool al,
+				const thread_t *b, uint64_t cb, bool bl)
+{
+	if ((al || bl) && ca != cb)
+		return ca < cb;
+	return (int64_t)((edf_due(a) + POLICY_SJF_WEIGHT * ca) -
+			 (edf_due(b) + POLICY_SJF_WEIGHT * cb)) < 0;
+}
+
+/*
+ * p5 "sjf_learn": p4's order (helper threads, then HIGH, NORMAL, LOW; NORMAL
+ * and LOW oldest first; among HIGH, a too-late thread waits for shorter
+ * ones, the others go by deadline plus POLICY_SJF_WEIGHT times their cost,
+ * then p4's rescue check), with each HIGH thread's cost from learn_cost()
+ * instead of its hint plus POLICY_RESCUE_COST_US. Each core times the
+ * hinted HIGH threads it runs: the policy sees every pick from a queue of
+ * two or more, so if the next pick still finds a thread this pick left
+ * queued, nothing else ran in between and the time between the two picks
+ * is the chosen thread's run time. A hint value whose threads run within
+ * their hint plus POLICY_RESCUE_COST_US keeps p4's decisions exactly. The
+ * clock is read at most once per pick.
+ */
+static uint32_t choose_sjf_learn(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	thread_t *th, *bth, *uth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0;
+	bool two_high = false;
+
+	/* close the sample of this core's previous timed pick */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				learn_update(ps, ps[1], now - ps[0]);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: as in p4 */
+				two_high = true;
+				learn_clock(&now);
+				late = (int64_t)POLICY_RESCUE_LATE_US *
+				       cycles_per_us;
+				bc = learn_cost(ps, bth);
+				bs = rescue_slack(bth, now);
+				if (bs >= late) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+				}
+			}
+			c = learn_cost(ps, th);
+			s = rescue_slack(th, now);
+			/* least slack among the threads not too late */
+			if (s >= late && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+			}
+			if (learn_before(th, c, s < late, bth, bc, bs < late)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+			}
+		}
+	}
+
+	/* p4's rescue check, with the learned cost of the chosen thread */
+	if (uth && uth != bth && us < late + (int64_t)bc) {
+		best = ubest;
+		bth = uth;
+	}
+
+	/* time this pick: mark the newest thread it leaves queued */
+	if (bth->prio_class == THREAD_PRIO_HIGH && bth->service_tsc &&
+	    n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = sjf_service(bth);
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -507,6 +708,7 @@ static const struct {
 	{ "edf_high",	choose_edf_high },
 	{ "sjf_guard",	choose_sjf_guard },
 	{ "sjf_rescue",	choose_sjf_rescue },
+	{ "sjf_learn",	choose_sjf_learn },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
