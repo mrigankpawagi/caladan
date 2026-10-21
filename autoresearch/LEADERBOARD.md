@@ -199,5 +199,33 @@ get p99 by offered load (req/s):
 | sjf_rescue | hints | hints | 14.0 | 22.0 | 56.0 | 76.5 | 86.5 | 94.0 |
 | fifo | ignore | hints | 14.0 | 25.0 | 81.0 | 125.0 | 152.0 | 193.0 |
 
+## w6: Lookups with a stale, too-long run-time hint, arriving in bursts
+
+[workloads/w6-stale-get-hint.json](workloads/w6-stale-get-hint.json). The same bursty key-value front end as w5: quick lookups, puts that sometimes flush, and ten-times-longer queries are all HIGH with one shared 100 us deadline, batch is NORMAL and bulk scans are LOW. The server's table of expected run times is out of date: it still says a lookup takes 20 us, as when lookups read from flash, although they now come from memory and take about 2 us. A scheduler that trusts this hint now runs lookups after the queries instead of before them, so during each burst a lookup waits through the whole backlog; only one that notices from observed run times that these '20 us' requests finish in a few microseconds can let them go first again.
+
+Score: `get` p99. Headline load: 390,000 req/s.
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 165.5 (163.0–168.0) | -16% | 92.68 | 173.5 | 185.0 | 281.0 | 307.0 | 389080 | 15.14 | 29.55 | 2 | 5 |
+| p0 fifo | hints | hints | 197.5 (194.0–201.0) | +0% | 89.85 | 203.5 | 216.0 | 217.0 | 216.0 | 388338 | 18.73 | 18.72 | 2 | 5 |
+| p1 prio | hints | hints | 161.0 (160.0–162.0) | -18% | 93.05 | 169.0 | 181.5 | 275.0 | 297.5 | 388711 | 14.62 | 28.32 | 2 | 5 |
+| p3 sjf_guard | hints | hints | 143.0 (142.0–144.0) | -28% | 89.34 | 112.5 | 198.5 | 292.0 | 314.5 | 389367 | 15.11 | 30.29 | 2 | 5 |
+| p5 sjf_learn | hints | hints | 200.0 (200.0–200.0) | +1% | 90.22 | 104.5 | 193.0 | 280.0 | 301.5 | 388788 | 15.23 | 30.02 | 2 | 5 |
+| p0 fifo | ignore | hints | 192.5 (188.0–197.0) | -3% | 90.17 | 201.5 | 212.0 | 213.0 | 211.0 | 388973 | - | 18.27 | 2 | 5 |
+
+Best with hints applied: **sjf_guard** (143.0 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 340,000 | 365,000 | 390,000 |
+|---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 14.0 | 23.5 | 76.0 | 113.0 | 137.0 | 165.5 |
+| fifo | hints | hints | 14.0 | 25.5 | 83.0 | 135.5 | 164.0 | 197.5 |
+| prio | hints | hints | 14.0 | 24.0 | 77.0 | 109.0 | 137.0 | 161.0 |
+| sjf_guard | hints | hints | 14.0 | 26.0 | 95.5 | 122.0 | 133.5 | 143.0 |
+| sjf_learn | hints | hints | 14.0 | 26.5 | 93.0 | 124.5 | 158.0 | 200.0 |
+| fifo | ignore | hints | 14.0 | 24.0 | 86.5 | 129.0 | 158.0 | 192.5 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
