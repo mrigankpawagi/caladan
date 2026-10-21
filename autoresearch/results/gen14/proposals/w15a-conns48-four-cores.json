@@ -1,0 +1,141 @@
+{
+  "id": "w15a",
+  "slug": "conns48-four-cores",
+  "generation": 14,
+  "title": "The tight-query key-value mix over 48 client connections on four server cores",
+  "description": "The same bursty key-value front end as w14 (lookups, puts with occasional 120 us flushes, replica syncs routed through the put path, 68 us queries due in 300 us, 120 us multigets, batch, scans and 2 us lease renewals), with the same hints, but the traffic now comes over 48 client connections instead of 16 and the service runs on 4 cores instead of 6, as when many application servers each keep their own connection to a cache tier whose allocation was shrunk again; traffic is scaled so each core is exactly as busy as before. The network card sends each connection to one core, so each core keeps its own queue of waiting requests, and with only four cores a lookup more often waits on its own core while long requests, or queries and syncs close to their deadline, are run before it. A scheduler that lets such requests pass a waiting lookup costs it more than on w14.",
+  "changed_from_previous": "w14 with 48 client connections instead of 16 and 4 server cores instead of 6 (guaranteed and spinning 4), with every load level multiplied by 4/6 so the load per core is unchanged; mix, work, hints, deadlines and bursts unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 8,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 4,
+    "time_scale": [
+      1,
+      4
+    ]
+  },
+  "server": {
+    "kthreads": 4,
+    "guaranteed_kthreads": 4,
+    "spinning_kthreads": 4,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:680",
+      "weight": 0.135,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:400:12000",
+      "weight": 0.09,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:6800",
+      "weight": 0.405,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 68
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 68
+      }
+    },
+    {
+      "name": "lease",
+      "service": "constant:170",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    }
+  ],
+  "load_rps": [
+    17500,
+    35000,
+    45000,
+    47500,
+    48750,
+    50000
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shapes. Many connections: a cache server is reached by every application server that uses it, each over its own connection or UDP flow (memcache at Facebook, Nishtala et al., NSDI 2013, where front-end servers send gets over UDP to many cache servers; mcrouter exists because per-server connection counts grow into the thousands). 48 is the ladder's next step, not a measured count (invented). Fewer cores: cluster managers right-size a latency-critical service's CPU allocation (Google Autopilot, Rzadca et al., EuroSys 2020) or lend its cores to batch work (Heracles, Lo et al., ISCA 2015; Caladan, Fried et al., OSDI 2020). The mix is w14's (= w13's), unchanged: lookups and batched multigets (memcache), writes that occasionally wait for a log flush (RocksDB, Cao et al., FAST 2020), Raft-style replica syncs (etcd), and lease renewals (Chubby KeepAlives, Burrows, OSDI 2006); its weights, work sizes and the 10x query-to-lookup ratio were invented in w2-w13, and real long-tailed service is approximated by constant kinds plus the puts' bimodal flushes. Hints are w14's; no relabelling. How connections matter: the client is open loop and each UDP connection is one flow, which the IOKernel steers to one server core by flow hash (iokernel/rx.c, hash % thread_count); the handler thread is created on that core. 48 flows on 4 cores give each core 12 +- 3 flows instead of 4 +- 1.7, so arrivals per core are more even and steals should fall, while each core still serves its own queue; beyond 32 queued threads a core's extra threads go to the overflow list the policy cannot see (hinted_overflow). Capacity, at 99.6 iterations per us (calibration.json): fake work per request get 0.922 + put 1.934 + query 27.651 + sync 5.422 + multiget 5.422 + batch 6.145 + scan 6.145 + lease 0.171 = 53.81 us (5359.4 iterations); 4 / 53.81 us = 74.3k req/s (69.2k with the calibrated 4 us per request). Levels are sized from w14's measured light-load medians (gen 10 lesson; w14's lightest-level medians, get 17, query 91, lease 11 us, match w13's, so 83 iterations per us plus 1 us still holds): 5359.4 / 83 + 1 = 65.57 us per request, 4 / 65.57 us = 61.0k req/s. The levels are w14's times 4/6 (w14 26.25k/52.5k/67.5k/71.25k/73.125k/75k): 17.5k/35k/45k/47.5k/48.75k/50k = 28.7/57.4/73.8/77.9/79.9/82.0% of 61.0k, so 50k is w13's and w14's headline load per core. Headline rule (fifo overall median at most 1.5 x its lightest-level value, about 136.5 us): on w14 fifo's median was 91 at 26.25k, 110.5 at 73.125k and 120.5 at 75k. A central-queue simulation (100 us time slice, bursts, 85 iterations per us plus 0.5 us, fitted to w14's fifo medians within 5 us) gives 4 cores at matched load per core 5-10 us higher: about 125 us at 50k and 117 at 48.75k, so both busiest levels should pass with about 10 us to spare. Bursts as in w14 (4000 us, duty 0.25, factor 2; busy-phase rate at 50k is 80k req/s). Deadlines as in w14: leases 100 us, queries 300 (4.4x), gets, puts and syncs 400, multigets 1200; all at least 3x the kind's work. FIFO penalty: gets wait behind queries, syncs, flushes and multigets (w14 fifo get p99 804 vs 40.5 at light load). Headroom: on w14 the move from 8 to 6 cores left HIGH wait means flat but grew the champion's get runqueue-wait p99 by 33% (125.4 -> 166.3 us) with the part outside the runqueue flat at about 81 us, raising the runqueue share from 0.60 to 0.67; the same simulation puts the next step, 6 -> 4 cores, at +35-40% on the lookups' unavoidable wait p99 (44 -> 61 us). Prediction at 50k (headline): fifo get p99 about 900-1000 us, fifo overall median about 120-130 us (48.75k: 112-122); sjf_upper get p99 about 280-325 us with get runqueue-wait p99 about 195-240, a runqueue share of about 0.70-0.74; if sjf_ratio is champion, its get wait p99 about 145-185 and share about 0.63-0.68; steals below w14's 21% of picks; champion hinted_overflow under 20. At 17.5k every policy's get p99 about 40-55 us. Server hint map unchanged. No run.py changes are needed."
+}

@@ -1,0 +1,152 @@
+{
+  "id": "w15",
+  "slug": "large-values",
+  "generation": 14,
+  "title": "The six-core key-value mix where one lookup in a hundred returns a value 100 times larger",
+  "description": "The same bursty key-value front end on six cores as w14, except that about one lookup in a hundred returns a large value and takes 100 times the usual work (about 0.7 ms instead of 7 us), as in caches whose value sizes have a long tail. The server sets a lookup's hints before it knows the value's size, so large lookups carry exactly the hints of ordinary ones and no scheduler can tell them apart in advance. A large lookup is interrupted every 100 us and put back in the queue, where a scheduler that trusts the lookup label lets it run ahead of the ordinary lookups waiting behind it, and the slow runs it times under that label make every lookup look longer. The score is the ordinary lookups' tail; the large ones are recorded as their own kind.",
+  "changed_from_previous": "w14 with 1% of lookups (weight 0.00135 of 0.135) made 100 times longer (68000 instead of 680 iterations) as a separate client kind, bigget, that carries the lookups' exact hints and no client deadline; load levels scaled by 0.984 for the added work; every other kind, hint, deadline, the burst shape, 6 cores and 16 connections unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 3,
+    "classes": 9,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 6,
+    "time_scale": [
+      1,
+      4
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 6,
+    "spinning_kthreads": 6,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:680",
+      "weight": 0.13365,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "bigget",
+      "service": "constant:68000",
+      "weight": 0.00135,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:400:12000",
+      "weight": 0.09,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:6800",
+      "weight": 0.405,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 68
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 68
+      }
+    },
+    {
+      "name": "lease",
+      "service": "constant:170",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    }
+  ],
+  "load_rps": [
+    26000,
+    51500,
+    66500,
+    70000,
+    72000,
+    73750
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. Value sizes in production key-value caches have a long tail: in Facebook's memcache ETC pool most values are a few hundred bytes but some reach about 1 MB (Atikoglu et al., SIGMETRICS 2012), Twitter's cache clusters show the same spread (Yang et al., OSDI 2020), and Redis' latency guide warns that single commands on big keys stall a server. Copying and serializing a value costs work in proportion to its size, and the handler learns the size only after the lookup, so a server sets one hint for every lookup. Approximation: loadgen has no Pareto shape, so the lookup work is bimodal 100x: 99% at 680 iterations (6.8 us) and 1% at 68000 (683 us at 99.6 per us; about 820 us at the 83 per us measured for long requests). The 1% and the exact 100x are invented to fit that shape. The bimodal lookup is written as two client kinds that the server maps to one hint (high:400:8, w14's lookup entry), so the score (get p99) is the ordinary lookups' tail, which ordering can change, and not the large lookups' own run time, which it cannot; with both in one kind, 1% of large lookups would put the score at the large lookups' own run time (a simulation with 0.8% gave 551 us against 260 for the ordinary ones). bigget has no client deadline (deadline_us 0, like w14's syncs): no 400 us SLO can hold for 683 us of work, so the 3x deadline rule is met by the lookup handler's hint (400 us against 13.6 us of mean lookup work, 0.99 x 6.8 + 0.01 x 683) and the judge's 25% p99 rule protects the large lookups. Everything else is w14's: lookups, puts with occasional 120 us flushes, syncs through the put path, 68 us queries due in 300 us, multigets, batch, scans and 2 us lease renewals; its weights, work sizes and labels were invented in w2-w14, not taken from a trace. Capacity, at 99.6 iterations per us (calibration.json): mean work per request = w14's 5359.4 iterations - 0.00135 x 680 + 0.00135 x 68000 = 5450.3 iterations = 54.72 us; 6 / 54.72 us = 109.6k req/s (102.2k with the calibrated 4 us per request). Sized from w14's measured light-load medians (gen 10 lesson: 83 iterations per us plus 1 us per request): 5450.3 / 83 + 1 = 66.67 us, 6 / 66.67 us = 90.0k req/s. Levels 26k/51.5k/66.5k/70k/72k/73.75k are 28.9/57.2/73.9/77.8/80.0/81.9% of 90.0k, w14's per-core load (w14's 26.25k...75k times 65.57/66.67 = 0.984); busy-phase rate at 73.75k is 118k req/s. Headline rule: w14's fifo overall median was 91 us at the lightest level, 110.5 at 73.125k and 120.5 at 75k (limit 136.5); the large lookups raise the second moment of service time by about 15-19%, which adds about 4-7 us of median queueing, so both busy levels should pass (about 125 at 73.75k, 115 at 72k). Why the champion has headroom. Under every hint-reading policy a large lookup is a lookup: (1) after each 100 us time slice it is readied again with its old deadline, so it ranks ahead of the ordinary lookups queued behind it (same length, earlier deadline), even once it is too late, and holds its core for about 7-8 slices; fifo and prio send it to the back instead; (2) its 100 us slices are timed under the lookup label (below the 224 us drop limit at unit 4), so the label is learned at about 30 us, up to its 32 us cap, past the put label's 28 us cap, and puts, syncs and flushes again run ahead of lookups. Both are visible to the policy region (ready time against deadline marks a re-queued thread; the label's samples are bimodal). A queueing simulation with the real policy region (6 cores, 100 us slice, bursts, stealing; it under-reads w14's waits by about a third) gives sjf_upper an ordinary-lookup p99 of 281 against 168 on w14 (wait p99 189 against 108, share 0.67 against 0.64) and sjf_ratio 227 against 140 (wait 150 against 49, share 0.66 against 0.35); demoting only re-queued large lookups (an oracle) brings sjf_upper to 201 and sjf_ratio to 176, with put, sync and query p99 flat or lower and bigget p99 +70-80%. Prediction at 73.75k (headline): fifo get p99 about 800-880 us; sjf_upper get p99 about 320-420 (w14 247.5), get runqueue-wait p99 about 240-300 (w14 166.3), share about 0.70-0.75; sjf_ratio about 270-330 with wait p99 about 190-240; lease wait p99 stays about 5.5 us; time-slice yields per HIGH pick about 8% (w14 7.1%); bigget p99 about 1.3-1.7 ms under sjf_upper and about 2.2-2.6 ms under fifo. At 26k every policy's get p99 about 38-45 us. Server hint map: bigget = high:400:8, identical to get. No run.py changes are needed."
+}
