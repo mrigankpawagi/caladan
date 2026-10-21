@@ -285,5 +285,33 @@ get p99 by offered load (req/s):
 | sjf_timed | hints | hints | 14.0 | 24.5 | 62.5 | 75.5 | 87.5 | 96.5 |
 | fifo | ignore | hints | 14.0 | 27.0 | 95.5 | 128.5 | 167.0 | 197.5 |
 
+## w8: Replica syncs labeled as puts, arriving in bursts
+
+[workloads/w8-syncs-as-puts.json](workloads/w8-syncs-as-puts.json). The same bursty key-value front end as w7: quick lookups, puts that sometimes flush, ten-times-longer queries and replica syncs, all HIGH with one shared 100 us deadline, plus NORMAL batch and LOW scans. The server has now filled in the syncs' missing run-time entry by copying the puts' entry, because a sync is a write from a peer replica, so a sync claims to take 1 us although it takes about 30 us, and syncs and puts carry exactly the same hints. A scheduler that trusts the hint again runs syncs ahead of waiting lookups, and no rule that reads only the hints can tell a sync from a put: observed run times show that '1 us' requests average about 18 us, but moving all of them back makes the real puts, most of which are quick, wait behind long queries instead.
+
+Score: `get` p99. Headline load: 380,000 req/s.
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 210.5 (205.0–216.0) | +0% | 87.88 | 217.5 | 229.5 | 244.0 | 227.5 | 230.0 | 378694 | 21.17 | 20.96 | 2 | 7 |
+| p1 prio | hints | hints | 175.5 (173.0–178.0) | -17% | 91.25 | 184.0 | 195.0 | 210.0 | 294.5 | 319.0 | 378770 | 16.80 | 32.50 | 2 | 7 |
+| p5 sjf_learn | hints | hints | 89.5 (89.0–90.0) | -57% | 99.71 | 252.0 | 209.5 | 283.5 | 319.5 | 348.5 | 379184 | 16.00 | 35.69 | 2 | 7 |
+| p7 sjf_nohint | hints | hints | 145.0 (143.0–147.0) | -31% | 95.79 | 133.5 | 225.5 | 159.5 | 311.5 | 333.5 | 378708 | 15.54 | 34.59 | 2 | 7 |
+| p6 sjf_timed | hints | hints | 96.5 (96.0–97.0) | -54% | 99.36 | 196.0 | 206.5 | 221.0 | 300.0 | 320.5 | 378940 | 15.48 | 34.07 | 2 | 7 |
+| p0 fifo | ignore | hints | 205.0 (201.0–209.0) | -3% | 88.58 | 211.5 | 224.5 | 239.5 | 225.0 | 224.0 | 378416 | - | 20.58 | 2 | 7 |
+
+Best with hints applied: **sjf_learn** (89.5 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 330,000 | 355,000 | 380,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 14.0 | 27.0 | 99.5 | 139.0 | 177.0 | 210.5 |
+| prio | hints | hints | 14.0 | 26.0 | 89.0 | 123.5 | 147.5 | 175.5 |
+| sjf_learn | hints | hints | 14.0 | 23.5 | 61.0 | 73.5 | 81.5 | 89.5 |
+| sjf_nohint | hints | hints | 14.0 | 25.0 | 77.5 | 100.5 | 123.5 | 145.0 |
+| sjf_timed | hints | hints | 14.0 | 24.0 | 64.0 | 78.0 | 90.5 | 96.5 |
+| fifo | ignore | hints | 13.5 | 28.0 | 97.5 | 131.0 | 169.0 | 205.0 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
