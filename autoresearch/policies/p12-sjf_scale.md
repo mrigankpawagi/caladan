@@ -3,7 +3,7 @@
 - id: p12
 - config: sjf_scale
 - generation: 11
-- status: candidate
+- status: accepted
 - builds_on: p10
 - changed_from_previous: p10 plus: each core keeps a time unit from the median relative deadline of the HIGH threads it runs (1 below 350 µs, else that median in 100 µs, rounded; stored beside the pending pick's key, so all five learning slots stay), multiplies the 50 µs drop-limit allowance by it, and grows the 250 µs deadline split, the 8 µs cap allowance, the 17 µs blank length and the 4 µs shared-length drop by half a step per unit (p11's scaling, but with the split also in half steps and the unit from the median, not the tightest deadline); order, slack, rescue, timing and learning keys otherwise unchanged (unit 1 on w1–w10, so p10's decisions; 4 on w11 and w12)
 - commit: 97beb97
@@ -93,4 +93,21 @@ For the owner:
 | w0 | p99 one level below the headline / sustained throughput | flat (no HIGH threads: p10's path plus one word read) | within noise; within 1% |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 11 (judge.py, results/gen11/) against the champion
+p10 sjf_mixed, on every rule and every workload, without a paired
+confirmation.
+
+| Workload | sjf_mixed | sjf_scale | Change | Notes |
+|---|---|---|---|---|
+| w12 | get p99 236.5 µs | 184.0 µs | −22.2% | predicted 170–205; get wait p99 161.8 → 84.5 µs (predicted 95–130) |
+| w12 | put / sync p99 | 348.5 / 450.5 µs | 364.5 / 495.0 µs | +4.6% / +9.9%, as predicted |
+| w12 | put / query / lease met | 99.51 / 90.81 / 94.89% | 99.31 / 91.89 / 95.22% | queries and leases gain |
+| w12 | multiget p99 / met | 857.0 µs / 100.00% | 870.5 µs / 99.97% | +1.6% (predicted the main risk) |
+| w11 | get p99 242.0 µs | 179.5 µs | −25.8% | get wait p99 162.3 → 83.1 µs |
+| w1–w10 | | | −5.4 to +1.2% | unit 1, p10's decisions |
+| w0 | p99 at 300k 71.0 µs | 68.0 µs | −4.2% | sustained throughput +0.86% |
+
+Every line of the prediction held, most inside the predicted range. Read
+from the median deadline, the unit survives the time-slice re-queues that
+broke p11, and the gets' runqueue wait on w11 and w12 falls to about 84 µs,
+at or below the four-times floor the reports estimated (95.6 µs).
