@@ -1205,6 +1205,179 @@ static uint32_t choose_sjf_pair(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/* p10: two capped labels in the wrong order (see mixed_costs()) both count
+ * this many us less than the smaller of their caps */
+#define POLICY_MIXED_DROP_US	4
+
+/*
+ * p10: the length of each label in p5's table (k->policy_state[]), in slot
+ * order, into @lc. Each starts as p9's capped length: the run time learned
+ * for the label, at most POLICY_CAP_UP_US above its hint plus
+ * POLICY_RESCUE_COST_US. Two capped labels are in the wrong order when the
+ * one that measured longer has the smaller cap, so it counts shorter than a
+ * label that measured shorter (w10: puts and syncs at 13 us, gets and
+ * multigets at 14 us). Both are then mixes of quick and long requests that
+ * the caps cannot rank, and both count the same length, POLICY_MIXED_DROP_US
+ * below the smaller cap. Unless two labels are capped and in the wrong
+ * order, every length is p9's.
+ */
+static void mixed_costs(const uint64_t *ps, uint64_t *lc)
+{
+	uint64_t raw[POLICY_LEARN_SLOTS], cap[POLICY_LEARN_SLOTS], shared;
+	uint64_t up = (uint64_t)POLICY_CAP_UP_US * cycles_per_us;
+	int a, b, capped = 0;
+
+	for (a = 0; a < POLICY_LEARN_SLOTS; a++) {
+		raw[a] = ps[POLICY_LEARN_FIRST + a] & 0xffffffffULL;
+		cap[a] = learn_floor((ps[POLICY_LEARN_FIRST + a] >> 32) &
+				     ~POLICY_PAIR_RELAXED) + up;
+		if (raw[a] > cap[a]) {
+			lc[a] = cap[a];
+			capped++;
+		} else {
+			lc[a] = raw[a];
+		}
+	}
+	if (capped < 2)
+		return;
+	for (a = 0; a < POLICY_LEARN_SLOTS; a++) {
+		for (b = 0; b < POLICY_LEARN_SLOTS; b++) {
+			/* both capped, b measured longer but counts shorter */
+			if (raw[a] <= cap[a] || raw[b] <= cap[b] ||
+			    raw[b] <= raw[a] || cap[b] >= cap[a])
+				continue;
+			shared = cap[b] - (uint64_t)POLICY_MIXED_DROP_US *
+					  cycles_per_us;
+			if (shared < lc[a])
+				lc[a] = shared;
+			if (shared < lc[b])
+				lc[b] = shared;
+		}
+	}
+}
+
+/* p10: expected length of HIGH thread @th: p9's pair_cost(), with the
+ * length of its label taken from @lc (filled by mixed_costs()) */
+static inline uint64_t mixed_cost(const uint64_t *ps, const uint64_t *lc,
+				  const thread_t *th)
+{
+	uint64_t hint = sjf_service(th), key;
+	int i;
+
+	if (!hint)
+		return (uint64_t)POLICY_CAP_BLANK_US * cycles_per_us;
+	key = pair_key(th, hint);
+	for (i = 0; i < POLICY_LEARN_SLOTS; i++) {
+		if ((ps[POLICY_LEARN_FIRST + i] >> 32) == key)
+			return lc[i];
+	}
+	return learn_floor(hint);
+}
+
+/*
+ * p10 "sjf_mixed": p9's order, timing, learning keys and capped lengths (see
+ * choose_sjf_pair()), with one change, in mixed_costs(): two capped labels
+ * whose caps rank them against what was measured count one shared length,
+ * POLICY_MIXED_DROP_US below the smaller cap. On w10, gets share their label
+ * with 30 us multigets, as puts share theirs with 30 us syncs; p9 caps the
+ * first at 14 us and the second at 13 us, so gets wait behind puts and
+ * syncs, and once too late they also step aside for them. With both labels
+ * at 9 us, gets and puts take turns by deadline, and both move further
+ * ahead of queries. Where no two capped labels are in the wrong order
+ * (w1-w9), every length, and so every decision, is p9's. Lengths are worked
+ * out once per pick, only when two HIGH threads are queued; the clock is
+ * read at most once per pick. Without HIGH threads this is p4's path and the
+ * clock is never read.
+ */
+static uint32_t choose_sjf_mixed(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	uint64_t lc[POLICY_LEARN_SLOTS];
+	thread_t *th, *bth, *uth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0;
+	bool two_high = false;
+
+	/* close the sample of this core's previous timed pick (as in p9) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				pair_update(ps, ps[1], now - ps[0]);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the labels, then
+				 * the first thread */
+				two_high = true;
+				learn_clock(&now);
+				mixed_costs(ps, lc);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = mixed_cost(ps, lc, bth);
+				bs = capped_slack(bth, bc, now);
+				if (bs >= late) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+				}
+			}
+			c = mixed_cost(ps, lc, th);
+			s = capped_slack(th, c, now);
+			/* least slack among the threads not too late */
+			if (s >= late && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+			}
+			if (learn_before(th, c, s < late, bth, bc, bs < late)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+			}
+		}
+	}
+
+	/* p4's rescue check, with the length of the chosen thread */
+	if (uth && uth != bth && us < late + (int64_t)bc) {
+		best = ubest;
+		bth = uth;
+	}
+
+	/* time this pick (as in p9), under the chosen thread's learning key */
+	if (bth->prio_class == THREAD_PRIO_HIGH && bth->service_tsc &&
+	    n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = pair_key(bth, sjf_service(bth));
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -1219,6 +1392,7 @@ static const struct {
 	{ "sjf_nohint",	choose_sjf_nohint },
 	{ "sjf_capped",	choose_sjf_capped },
 	{ "sjf_pair",	choose_sjf_pair },
+	{ "sjf_mixed",	choose_sjf_mixed },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
