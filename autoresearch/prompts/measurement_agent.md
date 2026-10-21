@@ -82,3 +82,4 @@ about code you have not been shown.
 - gen9: When two labels are capped, compare their measured averages with their caps, and say which kinds would trade waiting if the order changed; on w10 the accepted policy evened waiting out (all four kinds about 80 µs) rather than removing it.
 - gen10: When a candidate's numbers match the champion's within noise on the workload it targeted, say so first: it most likely never changed its decisions there, and the report should name the counter that would show why.
 - gen11: The raw .out files hold counters the summary does not (for example preemptions=, the time-slice yields); when a policy's behaviour is unexplained, grep them, as the gen 11 policy agent did to find why p11 failed.
+- gen12: Report the remaining margin under each rule for the kinds that keep paying (here syncs at +20.9% of a 25% limit), so the next policy agent knows where it has no room.

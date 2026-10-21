@@ -3,7 +3,7 @@
 - id: p13
 - config: sjf_upper
 - generation: 12
-- status: candidate
+- status: accepted
 - builds_on: p12
 - changed_from_previous: p12 plus: the per-core deadline estimate steps 3× further up than down, so it tracks the upper quartile of HIGH relative deadlines instead of the median, and a unit above 1 is kept until that estimate is a whole 100 µs away from it; the 350 µs threshold, the scaled constants, and the order, slack, rescue, timing and learning are p12's (unit 4 on w11–w13, 1 on w1–w10)
 - commit: 12cb1b2
@@ -47,4 +47,22 @@ Like sjf_scale, each core runs helper threads first, then HIGH, NORMAL and LOW t
 | w1–w10, w0 | all | identical decisions (unit 1, or no HIGH threads); noise only |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 12 (judge.py, results/gen12/) against the champion
+p12 sjf_scale, after a paired confirmation. The first verdict rejected p13
+on rule 6: query deadline-met fell 1.1–1.3 points on w6, w7, w9 and w10,
+where p13 decides exactly as p12 (unit 1). Re-measured alternately in one
+session, those workloads passed, and the judge accepted.
+
+| Workload | sjf_scale | sjf_upper | Change | Notes |
+|---|---|---|---|---|
+| w13 | get p99 259.0 µs | 208.5 µs | −19.5% | predicted 185–210; get wait p99 178.1 → 125.4 µs (predicted 85–110) |
+| w13 | put p99 / met | 362.0 µs / 99.41% | 411.0 µs / 98.89% | +13.5%, −0.52 points (predicted +0–8%, −0.1 to −0.4) |
+| w13 | sync p99 | 468.5 µs | 566.5 µs | +20.9% (limit 25%; predicted +5–12%) |
+| w13 | query / multiget / lease met | 84.72 / 100.00 / 95.17% | 84.00 / 99.98 / 94.84% | within the 1-point rule |
+| w11 / w12 | get p99 179.5 / 184.0 µs | 185.0 / 186.0 µs | +3.1% / +1.1% | same unit 4, within noise |
+| w1–w10 | | | paired where needed | unit 1, p12's decisions |
+
+The direction held on every line; puts and syncs paid more than predicted
+(sync p99 +20.9%, near the 25% limit), and gets gained less (get wait p99
+125.4 µs against 84.5 on w12): the 300 µs queries now turn urgent earlier
+and pass gets, a cost the gen 12 report estimated at about 24 µs.

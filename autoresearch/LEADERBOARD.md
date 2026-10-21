@@ -13,7 +13,7 @@ Mode `ignore` means the server did not apply hints; build `stock` is Caladan wit
 | [p10](policies/p10-sjf_mixed.md) | `sjf_mixed` | 9 | accepted | p9 plus: when two capped labels are ranked against their measurements (the one whose learned run time is longer has the smaller cap, so it counts shorter), both count one shared length, 4 µs below the smaller cap (on w10, gets with multigets and puts with syncs both count 9 µs instead of 14 and 13); every other length, and order, slack, rescue, timing and learning keys, unchanged |
 | [p11](policies/p11-sjf_unit.md) | `sjf_unit` | 10 | rejected | p10 plus: each core reads a time unit from the tightest relative deadline of the HIGH threads it runs (nearest multiple of 100 µs, at least 1; it takes the last learning slot, leaving four), multiplies the 250 µs deadline split and the 50 µs drop-limit allowance by it, and grows the 8 µs cap allowance, the 17 µs blank length and the 4 µs shared-length drop by half a step per unit; per-request cost, too-late line, order, slack, rescue and timing unchanged (unit 1 on w1–w10, so p10's decisions; 4 on w11, where the cap allowance is 20 µs) |
 | [p12](policies/p12-sjf_scale.md) | `sjf_scale` | 11 | accepted | p10 plus: each core keeps a time unit from the median relative deadline of the HIGH threads it runs (1 below 350 µs, else that median in 100 µs, rounded; stored beside the pending pick's key, so all five learning slots stay), multiplies the 50 µs drop-limit allowance by it, and grows the 250 µs deadline split, the 8 µs cap allowance, the 17 µs blank length and the 4 µs shared-length drop by half a step per unit (p11's scaling, but with the split also in half steps and the unit from the median, not the tightest deadline); order, slack, rescue, timing and learning keys otherwise unchanged (unit 1 on w1–w10, so p10's decisions; 4 on w11 and w12) |
-| [p13](policies/p13-sjf_upper.md) | `sjf_upper` | 12 | candidate | p12 plus: the per-core deadline estimate steps 3× further up than down, so it tracks the upper quartile of HIGH relative deadlines instead of the median, and a unit above 1 is kept until that estimate is a whole 100 µs away from it; the 350 µs threshold, the scaled constants, and the order, slack, rescue, timing and learning are p12's (unit 4 on w11–w13, 1 on w1–w10) |
+| [p13](policies/p13-sjf_upper.md) | `sjf_upper` | 12 | accepted | p12 plus: the per-core deadline estimate steps 3× further up than down, so it tracks the upper quartile of HIGH relative deadlines instead of the median, and a unit above 1 is kept until that estimate is a whole 100 µs away from it; the 350 µs threshold, the scaled constants, and the order, slack, rescue, timing and learning are p12's (unit 4 on w11–w13, 1 on w1–w10) |
 | [p2](policies/p2-edf_high.md) | `edf_high` | 1 | accepted | p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready) |
 | [p3](policies/p3-sjf_guard.md) | `sjf_guard` | 2 | accepted | p2 plus: among HIGH threads, one that must start within 20 µs to finish by its deadline runs first (most urgent first; a thread that can no longer finish in time is not urgent), and the others run in order of deadline plus 8 times their expected run time instead of deadline alone |
 | [p4](policies/p4-sjf_rescue.md) | `sjf_rescue` | 3 | rejected | p3 with two changes among HIGH threads: one with less than 13 µs to spare before it must start (p3: less than 0) counts as too late to save, so it is never urgent and waits for any shorter HIGH thread; and p3's fixed 20 µs urgency guard is replaced by a check against the thread p3's order would run: the savable HIGH thread with the least time to spare runs first only if waiting for that thread (its expected run time plus 4 µs) would leave it less than 13 µs |
@@ -44,8 +44,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 | p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
+| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -68,8 +68,8 @@ req p99 by offered load (req/s):
 | sjf_unit | hints | hints |  |  | 72.0 |  |  | inf |
 | sjf_upper | hints | hints |  |  | 72.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 | fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
+| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
