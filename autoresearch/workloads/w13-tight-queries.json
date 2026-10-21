@@ -1,0 +1,141 @@
+{
+  "id": "w13",
+  "slug": "tight-queries",
+  "generation": 12,
+  "title": "The two-timescale key-value mix with interactive queries due in 300 us",
+  "description": "The same bursty key-value front end as w12 (lookups, puts with occasional 120 us flushes, replica syncs labeled as puts, 120 us multigets, batch, scans and 2 us lease renewals), except that the 68 us queries are now interactive and must answer within 300 us instead of 400 us. Queries are about half of all latency-critical requests, so the typical latency-critical deadline the server sees is now 300 us, between the leases' 100 us and the 400 us that lookups, puts and syncs carry. A scheduler that reads one time scale per core from the typical deadline therefore picks the small scale again, stops seeing the slow syncs and flushes hidden behind the puts' 4 us hint, and lets them run ahead of waiting lookups, as on w11 before that was fixed.",
+  "changed_from_previous": "w12 with the queries' deadline (client and hint) cut from 400 to 300 us; every work, weight, run-time hint, other deadline, the burst shape and the load levels unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 8,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8,
+    "time_scale": [
+      1,
+      4
+    ]
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:680",
+      "weight": 0.135,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:400:12000",
+      "weight": 0.09,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:6800",
+      "weight": 0.405,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 68
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 68
+      }
+    },
+    {
+      "name": "lease",
+      "service": "constant:170",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    }
+  ],
+  "load_rps": [
+    35000,
+    70000,
+    95000,
+    100000,
+    105000,
+    110000
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, at 99.6 iterations per us (calibration.json): the mix is w12's, so fake work per request is unchanged: get 0.922 + put 1.934 + query 27.651 + sync 5.422 + multiget 5.422 + batch 6.145 + scan 6.145 + lease 0.171 = 53.81 us; 8 / 53.81 us = 148.7k req/s (138.4k with the calibrated 4 us per request). Levels are sized, as for w12, from w11's measured light-load medians (gen 10 lesson): 5359.4 iterations / 83 per us + 1 us = 65.57 us per request, 8 / 65.57 us = 122.0k req/s; 35k/70k/95k/100k/105k/110k are 28.7/57.4/77.9/82.0/86.1/90.2% of it, and w12 measured headline 100k with these exact levels. fifo, prio and fifo/ignore read no deadlines, so they repeat w12 (fifo light-load overall median 91 us, a query; limit 136.5 us; headline 100k). Bursts as in w12 (4000 us, duty 0.25, factor 2; busy-phase rate at 110k is 176k req/s). Deadlines: queries 300 us, client and hint (4.4x their 68 us of work; above the 3x rule); leases 100, gets, puts and syncs 400, multigets 1200, as in w12. Ladder: no ladder dimension moves against w12 (the champion's best workload after w11); the change is the deadline mix: HIGH picks with a relative deadline under 350 us go from 12% (leases) to 62% (leases 0.10 + queries 0.405 of 0.82 HIGH), plus re-queued sync and flush remnants (about 300 us left after a 100 us time slice). Why the champion suffers: p12 sjf_scale reads each core's unit from the running median relative deadline of the HIGH threads it runs, 1 below 350 us. Fresh HIGH picks: leases 12.2% at 100 us, queries 49.4% at 300, gets 16.5%, puts 11.0%, syncs 5.5% at 400, multigets 5.5% at 1200; the median is a point mass at 300 us (cumulative 12% to 62%), so the unit is 1 on every core and stays there, and p12 makes p10's decisions: the 50 us drop allowance (limit 66 us for the '4 us' label) hides the 145 us syncs and flushes, puts and syncs count about 6-8 us against gets' about 10-12 and turn ahead of them (+456 against +488 us), and the 250 us split lumps gets with multigets. That is p10's and p11's measured w12 state (get p99 236.5 and 243.0 against p12's 184.0; get runqueue-wait p99 161.8 against 84.5). Why the policy region can fix it: each label's own deadline gives the right scale (puts and syncs 400 us, gets 400, multigets 1200, queries 300, leases 100), so a unit per label, or one read from the deadline the capped labels carry, restores p12's w12 order (gets +480-520, puts and syncs +624, queries 300 + 8 x 83 = +964, multigets +1456) and keeps leases first; on w1-w10 every label's deadline is below 350 us, so a per-label unit with p12's threshold decides as p12 there (w11-w12 must be judged again, e.g. the multigets' 1200 us label). Side effect of the tighter query deadline under the sjf policies: queries become urgent (slack under 20 us) after about 197 us of waiting instead of 297, so somewhat more queries jump ahead of gets; this hits every hint-reading policy alike. Prediction at 100k: sjf_scale within 6% of sjf_mixed on every kind; both get p99 about 225-260 us (w12: 236.5 for sjf_mixed), get runqueue-wait p99 about 150-180 us; at 105k get p99 about 270-310. A policy with the right unit for the 400 us labels: get p99 about 180-210 us, get wait p99 about 85-110. fifo get p99 about 640-720, prio about 530-590, all as on w12. Query deadline-met (300 us) at 100k: fifo about 80-86%, sjf policies about 84-90%; query p99 unchanged from w12 within 6%. Leases as on w12 (p99 about 125-140 under the sjf policies, outside the runqueue). Not removable by ordering: a running 82-145 us request (about 95 us of get wait p99, w12) and about 100 us outside the runqueue. Server hint map entry for query is high:300:68. No run.py changes are needed."
+}
