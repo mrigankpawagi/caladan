@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p3
 - changed_from_previous: p3 plus: a HIGH thread's expected run time is the run time this core has measured for threads with the same run-time hint (p5's timing and estimate, without p5's floor, so it can end up below the hint as well as above it; the hint plus 4 µs until measured), used both in the thread's turn (deadline plus 8 times the run time) and in the 20 µs urgency test
-- commit: (filled by orchestrator)
+- commit: 23c4704
 
 ## What it does
 Like sjf_guard, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads a short request normally goes ahead of a long one, and a request that must start within 20 µs to make its deadline goes first. The change is where a HIGH request's length comes from. Each core times the requests it runs, remembers how long requests with each run-time hint really take, and uses that instead of the hint, whether it is shorter or longer. Lookups that the server still calls 20 µs jobs, but that finish in a few microseconds, go ahead of queries again; puts, whose occasional flushes make them slower than their 1 µs hint, go after lookups; and a request that is already too late keeps its usual place instead of being pushed behind newer work.
