@@ -1,4 +1,4 @@
-# Measurement agent (prompt v1)
+# Measurement agent (prompt v1.2)
 
 ## Role
 
@@ -27,6 +27,11 @@ reader who is not a systems expert can follow.
   included), `class:<name>` (requests by the class the server's runtime
   reported holding; only answered requests). A kind row and its class row
   should match; a mismatch means hints did not reach the scheduler.
+- `qwait_p50`, `qwait_p99` (latency rows, from gen 4): per-request runqueue
+  wait in µs, measured by the server for each request when its handler thread
+  starts. A kind's p99 minus its qwait p99 is roughly the time spent before the
+  handler thread existed (the packet waiting for a busy core), plus network and
+  service. Use it to tell queueing among threads from everything else.
 - `wait_us_<class>`: mean time a thread of that class sat in a core's queue
   before running. Comparing it with the class's latency splits latency into
   queueing and everything else (network, service time, being stuck behind a

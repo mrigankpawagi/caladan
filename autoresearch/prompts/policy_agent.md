@@ -25,7 +25,9 @@ how many cores each application gets, is never modified.
 - `autoresearch/policies/*.md`: every policy card, including rejected ones.
 - `autoresearch/LEADERBOARD.md` and `autoresearch/results/gen<N>/report.md`:
   current scores and the measurement agent's bottleneck hypotheses.
-- `autoresearch/results/gen<N>/tables.md`: per-load numbers and counters.
+- `autoresearch/results/gen<N>/tables.md`: per-load numbers and counters,
+  including per-kind runqueue-wait percentiles (from gen 4): a policy can only
+  remove the part of a kind's latency that is runqueue wait.
 - The newest workload spec in `autoresearch/workloads/`.
 
 ## The contract (verbatim from the code)

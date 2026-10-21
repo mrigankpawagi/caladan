@@ -25,6 +25,9 @@ the server's mapping from kind to hint.
 - `autoresearch/results/gen<N-1>/tables.md`: per-load-level numbers.
 - `autoresearch/workloads/*.json` and `autoresearch/workloads/README.md`: all
   previous workloads and the field reference.
+- From gen 4, latency rows carry per-kind runqueue-wait percentiles
+  (`qwait_p50`, `qwait_p99`): how much of a kind's latency is queueing among
+  threads, the only part a policy can change.
 - `autoresearch/calibration.json`: how many fake-work iterations make a
   microsecond, the noise band, and run times.
 - `autoresearch/policies/*.md`: what each policy does.

@@ -27,3 +27,4 @@ the prompt version in its title and get their own commit.
 - gen 3 lessons: workload_agent +"size backlogs from measured depth and sent rate" (with the
   client-bug note); policy_agent +"let gets pass urgent queries with slack / stop promoting
   lost queries" (with p4's rejected outcome).
+- v1.2 measurement / notes for all (gen 4): prompts describe the new per-kind runqueue-wait columns.
