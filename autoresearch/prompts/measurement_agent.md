@@ -83,3 +83,4 @@ about code you have not been shown.
 - gen10: When a candidate's numbers match the champion's within noise on the workload it targeted, say so first: it most likely never changed its decisions there, and the report should name the counter that would show why.
 - gen11: The raw .out files hold counters the summary does not (for example preemptions=, the time-slice yields); when a policy's behaviour is unexplained, grep them, as the gen 11 policy agent did to find why p11 failed.
 - gen12: Report the remaining margin under each rule for the kinds that keep paying (here syncs at +20.9% of a 25% limit), so the next policy agent knows where it has no room.
+- gen13: Compare a changed workload with its parent at matched load per core and say which of means and tails moved; on w14 only the tails did, which pointed the policy agent at what passes gets rather than at overall load.

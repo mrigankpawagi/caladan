@@ -3,7 +3,7 @@
 - id: p14
 - config: sjf_ratio
 - generation: 13
-- status: candidate
+- status: accepted
 - builds_on: p13
 - changed_from_previous: p13 plus: when the core's time unit is above 1, p4's rescue check lets an urgent HIGH thread run ahead of the chosen one only if its learned length is at most 3 times the chosen one's (urgent 68 µs queries no longer pass 7 µs gets or 2 µs leases, but still pass puts, syncs and multigets); at unit 1 (w1–w10) every decision is p13's; order, lengths, slack, unit, timing and learning unchanged
 - commit: c5e5ffa
@@ -50,4 +50,20 @@ Like sjf_upper, each core runs helper threads first, then HIGH, NORMAL and LOW t
 | w0 | p99 one level below headline, overloaded throughput | identical path (no HIGH threads); noise only |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 13 (judge.py, results/gen13/) against the champion
+p13 sjf_upper, on every rule and every workload, without a paired
+confirmation.
+
+| Workload | sjf_upper | sjf_ratio | Change | Notes |
+|---|---|---|---|---|
+| w14 | get p99 247.5 µs | 204.5 µs | −17.4% | predicted 195–220 |
+| w14 | query / lease / put met | 85.72 / 95.09 / 98.92% | 85.94 / 95.48 / 99.06% | all gain slightly |
+| w14 | query / sync / lease p99 | 1074 / 560.5 / 132.0 µs | 1108 / 534.0 / 127.0 µs | +3.1% / −4.7% / −3.8% |
+| w13 | get p99 208.5 µs | 176.5 µs | −15.3% | predicted 170–195; sync p99 −10.1% |
+| w12 / w11 | 186.0 / 185.0 µs | 172.0 / 169.5 µs | −7.5% / −8.4% | predicted −3 to −12% |
+| w1–w10 | | | −1.8 to +0% | unit 1, p13's decisions |
+| w0 | p99 at 300k 72.0 µs | 71.0 µs | −1.4% | sustained throughput +0.05% |
+
+Every prediction held. The one-condition change helped the scored kind on
+w11–w14 and cost no kind with a deadline anything; it is the first accepted
+policy since p9 whose gain came without another kind paying.
