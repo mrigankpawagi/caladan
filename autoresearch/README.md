@@ -108,6 +108,7 @@ calibration.json     gen 0 measurements: fake-work speed, noise band, timings, b
 run.py               runs experiments on the two nodes (see ./run.py --help)
 summarize.py         builds LEADERBOARD.md and results/genN/tables.md
 judge.py             gate and acceptance decisions, and the current champion
+eval_policy.sh       judge a new policy on every scored workload (reduced sweeps), then judge.py
 lib/                 spec validation, ssh helpers, output parsing
 nodes.json.example   node settings; copy to nodes.json (ignored by git)
 workloads/           one JSON file per workload, plus README.md (format)
