@@ -29,11 +29,17 @@ accept: (1) the newest workload's score improves on the champion's by at
         (6) other kinds that have a deadline lose at most 1 percentage point
             of deadline-met at the headline load (so a policy cannot win by
             sacrificing another kind's deadline).
+A workload on which both the policy and the champion have paired runs
+(run.py --paired) in the same generation is decided from those runs alone
+(paired confirmation, README.md). A rejection prints a FAILED_ON line naming
+the failing workloads, the newest workload and the champion, which
+eval_policy.sh reads to start the confirmation.
 Exit status 0 means pass, 1 means fail; the numbers are always printed.
 """
 
 import argparse
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -43,9 +49,25 @@ import summarize as S  # noqa: E402
 NOISE = 0.06
 
 
+PAIRED = re.compile(r"__p\d+$")
+
+
 def data():
     rows = S.latest(S.load_rows("summary.csv"))
     return S.index(rows), S.load_cards(), S.load_workloads()
+
+
+def paired_index(new, champ, wid):
+    """Rows of a paired confirmation (run.py --paired) of new against champ on
+    wid, from the latest generation that has paired runs of both, else None."""
+    rows = [r for r in S.latest(S.load_rows("summary.csv"))
+            if r["workload"] == wid and PAIRED.search(r["run_id"])]
+    gens = [{r["gen"] for r in rows if r["policy"] == p} for p in (new, champ)]
+    common = gens[0] & gens[1]
+    if not common:
+        return None
+    g = max(common, key=int)
+    return S.index([r for r in rows if r["gen"] == g and r["policy"] in (new, champ)])
 
 
 def champion(cards):
@@ -101,32 +123,37 @@ def accept(args):
     ids = sorted(workloads, key=lambda w: (int(w[1:].rstrip("abcdefghij")), w))
     newest = args.newest or [w for w in ids if workloads[w].get("status") != "superseded"][-1]
     ok = True
+    failed = []
     print("policy %s vs champion %s; newest workload %s" % (new, champ, newest))
-    for wid in ids:
+    def check(wid):
         s = workloads[wid]
-        if s.get("status") == "superseded":
-            continue
+        ok = True
+        widx = idx
         head = S.headline_load(idx, wid, s["load_rps"])
         if not head:
-            continue
-        a, b = score(idx, s, new, head), score(idx, s, champ, head)
+            return ok
+        pidx = paired_index(new, champ, wid)
+        if pidx and all(any(k[1] == p for k in pidx) for p in (new, champ)):
+            widx = pidx
+            print("  %s: decided from the paired confirmation runs" % wid)
+        a, b = score(widx, s, new, head), score(widx, s, champ, head)
         if wid != "w0" and (a is None or b is None):
             print("  %s: missing data (%s=%s, %s=%s)" % (wid, new, a, champ, b))
             if wid == newest or wid == "w0":
                 ok = False
-            continue
+            return ok
         rel = a / b - 1 if (a is not None and b) else 0
         if wid == "w0":
             loads = s["load_rps"]
             below = max([l for l in loads if l < head], default=head)
-            pa, _ = S.metric(idx, wid, (new, "hints", "hints"), below, "all", "p99")
-            pb, _ = S.metric(idx, wid, (champ, "hints", "hints"), below, "all", "p99")
-            ta, _ = S.metric(idx, wid, (new, "hints", "hints"), loads[-1], "all", "resp_rps")
-            tb, _ = S.metric(idx, wid, (champ, "hints", "hints"), loads[-1], "all", "resp_rps")
+            pa, _ = S.metric(widx, wid, (new, "hints", "hints"), below, "all", "p99")
+            pb, _ = S.metric(widx, wid, (champ, "hints", "hints"), below, "all", "p99")
+            ta, _ = S.metric(widx, wid, (new, "hints", "hints"), loads[-1], "all", "resp_rps")
+            tb, _ = S.metric(widx, wid, (champ, "hints", "hints"), loads[-1], "all", "resp_rps")
             if None in (pa, pb, ta, tb):
                 print("  %s (overhead): missing data" % wid)
                 ok = False
-                continue
+                return ok
             good = pa <= (1 + NOISE) * pb and ta >= 0.99 * tb
             print("  %s (overhead): p99 at %d %s vs %s (%+.1f%%), sustained throughput at "
                   "%d %s vs %s (%+.2f%%) -> %s" % (
@@ -144,8 +171,8 @@ def accept(args):
         for k in s["kinds"]:
             if k["name"] == s["score"]["kind"] or wid == "w0":
                 continue
-            pa, _ = S.metric(idx, wid, (new, "hints", "hints"), head, "kind:" + k["name"], "p99")
-            pb, _ = S.metric(idx, wid, (champ, "hints", "hints"), head, "kind:" + k["name"], "p99")
+            pa, _ = S.metric(widx, wid, (new, "hints", "hints"), head, "kind:" + k["name"], "p99")
+            pb, _ = S.metric(widx, wid, (champ, "hints", "hints"), head, "kind:" + k["name"], "p99")
             if pa is not None and pb:
                 good = pa <= 1.25 * pb
                 print("    %s p99 %s vs %s (%+.1f%%) -> %s" % (
@@ -153,9 +180,9 @@ def accept(args):
                     "ok" if good else "FAIL (3)"))
                 ok &= good
             if k.get("deadline_us", 0) > 0:
-                da, _ = S.metric(idx, wid, (new, "hints", "hints"), head, "kind:" + k["name"],
+                da, _ = S.metric(widx, wid, (new, "hints", "hints"), head, "kind:" + k["name"],
                                  "deadline_met")
-                db, _ = S.metric(idx, wid, (champ, "hints", "hints"), head,
+                db, _ = S.metric(widx, wid, (champ, "hints", "hints"), head,
                                  "kind:" + k["name"], "deadline_met")
                 if da is not None and db is not None:
                     good = da >= db - 1.0
@@ -164,13 +191,24 @@ def accept(args):
                     ok &= good
             if k.get("hint", {}).get("class") == "low":
                 for l in [x for x in s["load_rps"] if x <= head]:
-                    rs = idx.get((wid, new, "hints", "hints", l, "kind:" + k["name"]), [])
+                    rs = widx.get((wid, new, "hints", "hints", l, "kind:" + k["name"]), [])
                     frac = S.med([S.fnum(r["resp_rps"]) / max(S.fnum(r["sent_rps"]), 1)
                                   for r in rs])
                     if frac is not None and frac < 0.9:
                         print("    %s answered %.1f%% at %d -> FAIL (4)" % (k["name"],
                                                                          100 * frac, l))
                         ok = False
+        return ok
+
+    for wid in ids:
+        if workloads[wid].get("status") == "superseded":
+            continue
+        if not check(wid):
+            ok = False
+            failed.append(wid)
+    if failed:
+        # machine-readable, for eval_policy.sh's paired confirmation
+        print("FAILED_ON: %s NEWEST: %s CHAMPION: %s" % (" ".join(failed), newest, champ))
     print("ACCEPT" if ok else "REJECT")
     return 0 if ok else 1
 

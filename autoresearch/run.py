@@ -201,7 +201,7 @@ def append_csv(path, fields, rows):
 
 def experiment(args, cfg, server, client, spec, spec_path, policy, mode, repeat, sha):
     wid = spec["id"]
-    run_id = "%s__%s__%s__%s__r%d" % (wid, policy, mode, args.label, repeat)
+    run_id = "%s__%s__%s__%s__%s%d" % (wid, policy, mode, args.label, args.rtag, repeat)
     gen_dir = os.path.join(HERE, "results", "gen%d" % args.gen)
     raw_dir = os.path.join(gen_dir, "raw", run_id)
     os.makedirs(raw_dir, exist_ok=True)
@@ -283,11 +283,17 @@ def main():
     ap.add_argument("--levels", help="comma-separated subset of the workload's load_rps "
                     "to run (e.g. only the headline load when judging a policy on an "
                     "older workload)")
+    ap.add_argument("--paired", action="store_true",
+                    help="paired confirmation: alternate the given policies repeat by "
+                         "repeat and label the runs p1, p2, ... instead of r1, r2, ...; "
+                         "judge.py decides a workload from paired runs when both the "
+                         "candidate and the champion have them in the same generation")
     ap.add_argument("--nodes", default=os.path.join(HERE, "nodes.json"))
     ap.add_argument("--dry-run", action="store_true", help="validate and print the plan")
     args = ap.parse_args()
 
     cfg = json.load(open(args.nodes))
+    args.rtag = "p" if args.paired else "r"
     args.label = args.build + ("-nostats" if args.sched_stats == "off" and
                                args.build == "hints" else "")
     policies = args.policy.split(",")
@@ -300,20 +306,25 @@ def main():
     def first_repeat(wid, pol, mode):
         """Repeat numbers continue from earlier runs in this generation, so a
         re-run never overwrites an earlier run's files."""
-        prefix = "%s__%s__%s__%s__r" % (wid, pol, mode, args.label)
+        prefix = "%s__%s__%s__%s__%s" % (wid, pol, mode, args.label, args.rtag)
         done = [int(f[len(prefix):-5]) for f in (os.listdir(meta_dir)
                 if os.path.isdir(meta_dir) else []) if f.startswith(prefix)]
         return max(done, default=0) + 1
 
     plan = []
     for path, s in loaded:
-        for pol in policies:
-            for mode in modes:
-                r0 = first_repeat(s["id"], pol, mode)
-                n = args.repeats or s.get("repeats", 1)
-                plan += [(path, s, pol, mode, r) for r in range(r0, r0 + n)]
+        n = args.repeats or s.get("repeats", 1)
+        for mode in modes:
+            r0 = {pol: first_repeat(s["id"], pol, mode) for pol in policies}
+            if args.paired:
+                # alternate the policies so each pair shares the same time window
+                plan += [(path, s, pol, mode, r0[pol] + i)
+                         for i in range(n) for pol in policies]
+            else:
+                plan += [(path, s, pol, mode, r0[pol] + i)
+                         for pol in policies for i in range(n)]
     for path, s, pol, mode, r in plan:
-        log("plan: %s %s %s r%d (%d levels)" % (s["id"], pol, mode, r,
+        log("plan: %s %s %s %s%d (%d levels)" % (s["id"], pol, mode, args.rtag, r,
                                                  len(levels_for(args, s))))
     if args.dry_run:
         for _, s, *_ in plan[:1]:

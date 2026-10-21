@@ -97,6 +97,19 @@ level; the newest workload gets the full sweep (`eval_policy.sh` does all of
 this).
 Headline loads come from fifo's full sweeps, which every workload has.
 
+**Paired confirmation.** On older workloads the champion's numbers were
+measured in an earlier session, and some quantities drift between sessions
+more than the rules allow: in gen 6, a policy whose decisions on w5 are
+identical to the champion's measured 86.5% query deadline-met against the
+champion's 88.1% from gen 4, while repeats inside one session agree within
+about 0.3 points. So when the judge rejects a policy only on older
+workloads, `eval_policy.sh` re-measures the policy and the champion back to
+back on those workloads at the same levels (`run.py --paired`, runs labelled
+p1, p2, ... and alternating between the two policies), and the judge decides
+those workloads from the paired runs alone. A policy that fails on the newest
+workload is rejected without confirmation: both were measured there in the
+same generation.
+
 Nothing is ever overwritten. Workloads, policies, and results only accumulate;
 a broken workload gets a new revised file. The only regenerated file is
 `LEADERBOARD.md`, and its history is in git.
