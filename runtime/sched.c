@@ -2210,6 +2210,146 @@ static uint32_t choose_sjf_ratio(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p15: a HIGH thread readied with more than this many us of run time behind
+ * it has been yielded at the IOKernel's 100 us time slice at least twice. On
+ * w11-w15 syncs, flushes and multigets (about 145 us) are yielded once at
+ * most, with about 100 us run; only w15's large lookups (about 825 us), which
+ * carry the ordinary lookups' label, are readied again past this.
+ */
+#define POLICY_OVERRUN_US	150
+
+/* p15: true if @th has run more than POLICY_OVERRUN_US in total; the
+ * runtime adds each run to total_cycles before it re-queues the thread */
+static inline bool overrun(const thread_t *th)
+{
+	return th->total_cycles >
+	       (uint64_t)POLICY_OVERRUN_US * cycles_per_us;
+}
+
+/*
+ * p15 "sjf_overrun": p14's sjf_ratio (see choose_sjf_ratio()) with two
+ * changes for a HIGH thread that has overrun (see overrun()): it runs after
+ * every waiting HIGH thread with the same label (learning key) that has not,
+ * and it is never rescued ahead of the order's choice. Everything else about
+ * its place is unchanged, so it still runs ahead of longer or later threads.
+ * On w15 a large lookup, readied after each time slice with the lookups'
+ * label and its first deadline, otherwise runs again ahead of the ordinary
+ * lookups queued behind it. No HIGH thread on w1-w14 runs that long, so there
+ * every decision is p14's. The clock is read at most once per pick. Without
+ * HIGH threads this is p4's path and the clock is never read.
+ */
+static uint32_t choose_sjf_overrun(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	uint64_t lc[POLICY_LEARN_SLOTS], u = scale_get(ps);
+	thread_t *th, *bth, *uth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0, uc = 0;
+	bool two_high = false, o, bo = false, first;
+
+	/* close the sample of this core's previous timed pick (as in p9) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				scale_update(ps, ps[1] & 0xffffffffULL,
+					     now - ps[0], u);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the labels, then
+				 * the first thread */
+				two_high = true;
+				learn_clock(&now);
+				scale_costs(ps, lc, u);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = scale_cost(ps, lc, bth, u);
+				bs = capped_slack(bth, bc, now);
+				bo = overrun(bth);
+				if (bs >= late && !bo) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+					uc = bc;
+				}
+			}
+			c = scale_cost(ps, lc, th, u);
+			s = capped_slack(th, c, now);
+			o = overrun(th);
+			/* least slack among the threads not too late or overrun */
+			if (s >= late && !o && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+				uc = c;
+			}
+			/* of two threads with one label, one overrun, the
+			 * other goes first; otherwise p14's order */
+			if (o != bo &&
+			    scale_key(th, sjf_service(th), u) ==
+			    scale_key(bth, sjf_service(bth), u))
+				first = bo;
+			else
+				first = learn_before(th, c, s < late,
+						     bth, bc, bs < late);
+			if (first) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+				bo = o;
+			}
+		}
+	}
+
+	/* p14's rescue check (see choose_sjf_ratio()) */
+	if (uth && uth != bth && us < late + (int64_t)bc &&
+	    (u == 1 || uc <= POLICY_RATIO_MAX * bc)) {
+		best = ubest;
+		bth = uth;
+	}
+
+	if (bth->prio_class != THREAD_PRIO_HIGH)
+		return best;
+
+	/* fold the chosen thread's deadline into the quartile and the unit */
+	upper_observe(ps, bth);
+
+	/* time this pick (as in p9), under the chosen thread's learning key */
+	if (bth->service_tsc && n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = (ps[1] & ~0xffffffffULL) |
+			scale_key(bth, sjf_service(bth), scale_get(ps));
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -2229,6 +2369,7 @@ static const struct {
 	{ "sjf_scale",	choose_sjf_scale },
 	{ "sjf_upper",	choose_sjf_upper },
 	{ "sjf_ratio",	choose_sjf_ratio },
+	{ "sjf_overrun",	choose_sjf_overrun },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
