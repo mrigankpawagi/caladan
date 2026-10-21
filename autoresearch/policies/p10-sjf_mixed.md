@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p9
 - changed_from_previous: p9 plus: when two capped labels are ranked against their measurements (the one whose learned run time is longer has the smaller cap, so it counts shorter), both count one shared length, 4 µs below the smaller cap (on w10, gets with multigets and puts with syncs both count 9 µs instead of 14 and 13); every other length, and order, slack, rescue, timing and learning keys, unchanged
-- commit: (filled by orchestrator)
+- commit: 2aab7d9
 
 ## What it does
 Like sjf_pair, each core runs helper threads first, then HIGH, NORMAL and LOW threads. Among HIGH threads it runs shorter requests first. It learns from its own timings how long requests with each label really take, and a label may count at most 8 µs more than its hint plus 4 µs. On w10 two labels hit that limit: lookups share theirs with 30 µs multigets, and puts share theirs with 30 µs syncs. Because the lookups' hint is 1 µs larger, lookups count as longer even though they measured shorter, so they wait behind puts and syncs. sjf_mixed notices when two capped labels are ranked against what was measured. It then counts both at one shared length, 4 µs below the smaller limit (9 µs on w10), so lookups and puts take turns by deadline instead of one always giving way to the other, and both move a little further ahead of the long queries. When no two capped labels are in the wrong order, as on every earlier workload, it makes exactly sjf_pair's choices.
