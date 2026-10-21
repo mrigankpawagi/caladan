@@ -27,8 +27,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 | p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
+| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -42,8 +42,8 @@ req p99 by offered load (req/s):
 | sjf_guard | hints | hints | 33.0 | 39.0 | 69.5 | 163.0 | inf | inf |
 | sjf_rescue | hints | hints |  |  | 69.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 | fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
+| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -158,6 +158,34 @@ get p99 by offered load (req/s):
 | sjf_guard | hints | hints | 13.0 | 22.5 | 57.5 | 72.0 | 83.5 | 94.0 |
 | sjf_rescue | hints | hints | 14.0 | 22.0 | 55.0 | 70.5 | 77.0 | 86.5 |
 | fifo | ignore | hints | 13.0 | 26.0 | 90.5 | 125.0 | 154.5 | 187.0 |
+
+## w5: Quick-looking puts that sometimes flush, arriving in bursts
+
+[workloads/w5-hidden-slow-puts.json](workloads/w5-hidden-slow-puts.json). The same bursty key-value front end as w4b, plus a new kind of request: puts (writes). The server marks them HIGH with the shared 100 us deadline and an expected run time of 1 us, because most puts only append to an in-memory log. About one put in seven must first flush that log and takes 30 us, and the server cannot tell beforehand which one it is. A scheduler that trusts the run-time hint runs every put ahead of waiting lookups, so a lookup sometimes waits behind a 30 us flush that the hint called a 1 us job; one that learned from observed run times that a '1 us' put really averages about 5 us would let lookups go first.
+
+Score: `get` p99. Headline load: 390,000 req/s.
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p2 edf_high | hints | hints | 161.5 (159.0–164.0) | -16% | 93.28 | 170.0 | 181.0 | 272.0 | 295.5 | 389016 | 14.21 | 27.47 | 2 | 4 |
+| p0 fifo | hints | hints | 192.0 (188.0–196.0) | +0% | 90.48 | 199.0 | 210.0 | 210.0 | 209.5 | 388930 | 17.86 | 17.83 | 2 | 4 |
+| p1 prio | hints | hints | 159.0 (158.0–160.0) | -17% | 93.57 | 167.0 | 177.5 | 271.0 | 292.5 | 388709 | 14.05 | 27.54 | 2 | 4 |
+| p3 sjf_guard | hints | hints | 98.5 (98.0–99.0) | -49% | 99.09 | 103.5 | 187.0 | 270.5 | 291.5 | 387884 | 11.51 | 27.57 | 2 | 4 |
+| p4 sjf_rescue | hints | hints | 94.0 (94.0–94.0) | -51% | 99.43 | 98.5 | 198.0 | 286.5 | 311.5 | 389346 | 12.08 | 29.49 | 2 | 4 |
+| p0 fifo | ignore | hints | 193.0 (191.0–195.0) | +1% | 90.75 | 201.0 | 212.0 | 212.5 | 210.5 | 388682 | - | 17.64 | 2 | 4 |
+
+Best with hints applied: **sjf_rescue** (94.0 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 340,000 | 365,000 | 390,000 |
+|---|---|---|---|---|---|---|---|---|
+| edf_high | hints | hints | 14.0 | 23.5 | 76.0 | 110.5 | 133.5 | 161.5 |
+| fifo | hints | hints | 14.0 | 25.5 | 81.5 | 121.5 | 151.0 | 192.0 |
+| prio | hints | hints | 14.0 | 25.0 | 76.0 | 109.0 | 129.5 | 159.0 |
+| sjf_guard | hints | hints | 14.0 | 22.0 | 55.5 | 76.5 | 91.0 | 98.5 |
+| sjf_rescue | hints | hints | 14.0 | 22.0 | 56.0 | 76.5 | 86.5 | 94.0 |
+| fifo | ignore | hints | 14.0 | 25.0 | 81.0 | 125.0 | 152.0 | 193.0 |
 
 Superseded workloads (kept with their results, not scored): w4.
 
