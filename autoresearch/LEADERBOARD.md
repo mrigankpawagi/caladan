@@ -17,7 +17,7 @@ Mode `ignore` means the server did not apply hints; build `stock` is Caladan wit
 | [p6](policies/p6-sjf_timed.md) | `sjf_timed` | 5 | rejected | p3 plus: a HIGH thread's expected run time is the run time this core has measured for threads with the same run-time hint (p5's timing and estimate, without p5's floor, so it can end up below the hint as well as above it; the hint plus 4 µs until measured), used both in the thread's turn (deadline plus 8 times the run time) and in the 20 µs urgency test |
 | [p7](policies/p7-sjf_nohint.md) | `sjf_nohint` | 6 | accepted | p3 plus: a HIGH thread without a run-time hint counts as 8 µs long instead of 0, both in its turn (deadline plus 8 times its run time) and in the 20 µs urgency test; threads that carry a run-time hint are ranked exactly as in p3 |
 | [p8](policies/p8-sjf_capped.md) | `sjf_capped` | 7 | accepted | p5 plus: a HIGH thread's length is the run time learned for its run-time hint without p5's floor (so it can fall below the hint, as in p6) and at most 8 µs above p5's starting value of hint plus 4 µs; a HIGH thread without a run-time hint counts as 17 µs (p5: 4 µs); and the too-late rule and rescue check measure slack with that length, too late meaning less than 9 µs to spare (p5: slack from the hint, less than 13 µs) |
-| [p9](policies/p9-sjf_pair.md) | `sjf_pair` | 8 | candidate | p8 plus: each core learns run times per pair of run-time hint and coarse deadline (whether the deadline is more than 250 µs after the thread became ready) instead of per run-time hint alone, so kinds that share a hint but not a deadline class keep separate estimates; order, caps, slack and timing unchanged |
+| [p9](policies/p9-sjf_pair.md) | `sjf_pair` | 8 | accepted | p8 plus: each core learns run times per pair of run-time hint and coarse deadline (whether the deadline is more than 250 µs after the thread became ready) instead of per run-time hint alone, so kinds that share a hint but not a deadline class keep separate estimates; order, caps, slack and timing unchanged |
 
 ## Progress
 
@@ -40,8 +40,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 | p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
+| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -60,8 +60,8 @@ req p99 by offered load (req/s):
 | sjf_rescue | hints | hints |  |  | 69.0 |  |  | inf |
 | sjf_timed | hints | hints |  |  | 69.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 | fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
+| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 

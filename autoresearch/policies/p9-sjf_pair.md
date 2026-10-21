@@ -3,7 +3,7 @@
 - id: p9
 - config: sjf_pair
 - generation: 8
-- status: candidate
+- status: accepted
 - builds_on: p8
 - changed_from_previous: p8 plus: each core learns run times per pair of run-time hint and coarse deadline (whether the deadline is more than 250 µs after the thread became ready) instead of per run-time hint alone, so kinds that share a hint but not a deadline class keep separate estimates; order, caps, slack and timing unchanged
 - commit: f67badb
@@ -60,4 +60,22 @@ Unchanged from p8, for the owner: preemption (a get cannot pass a running 30 µs
 | w0 | p99 one level below the headline / sustained throughput | flat (p8's path) | within noise; within 0.5% |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 8 (judge.py, results/gen8/) against the champion p8
+sjf_capped, after a paired confirmation. The first verdict rejected p9 on
+rule 6: query deadline-met on w8 (82.33% vs 83.49%), where p9 makes p8's
+decisions, and on w9 (82.70% vs 83.81%), against champion runs from earlier
+sessions. Re-measured alternately in one session, queries matched on both,
+and the judge accepted.
+
+| Workload | sjf_capped | sjf_pair | Change | Notes |
+|---|---|---|---|---|
+| w9 (paired) | get p99 99.0 µs | 86.0 µs | −13.1% | predicted 78–88; get wait p99 42.95 → 25.7 µs (predicted 22–32) |
+| w9 (paired) | query met / put met | 82.52% / 96.69% | 82.52% / 96.75% | flat |
+| w9 (paired) | multiget p99 / met | 254.0 µs / 99.74% | 265.5 µs / 99.67% | +4.5%, as predicted (slightly up) |
+| w9 (first pass) | get p99 95.0 µs | 85.5 µs | −10.0% | exactly at the threshold |
+| w8 (paired) | get p99 84.5 µs | 84.5 µs | 0% | identical decisions |
+| w1–w7 | | | −0.6 to +6.6% | identical decisions; w3 scan p99 +22.1% (limit 25%) is drift between sessions |
+| w0 | p99 at 300k 69.5 µs | 72.0 µs | +3.6% | sustained throughput −0.70% |
+
+The prediction held: learned apart, multigets no longer inflate the gets'
+length, and get runqueue wait returns to the w8 floor of about 25 µs.
