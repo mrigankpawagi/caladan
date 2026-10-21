@@ -202,7 +202,7 @@ def append_csv(path, fields, rows):
 def experiment(args, cfg, server, client, spec, spec_path, policy, mode, repeat, sha):
     wid = spec["id"]
     run_id = "%s__%s__%s__%s__%s%d" % (wid, policy, mode, args.label, args.rtag, repeat)
-    gen_dir = os.path.join(HERE, "results", "gen%d" % args.gen)
+    gen_dir = os.path.join(HERE, "results", "gen%d" % args.gen, *(["probe"] if args.probe else []))
     raw_dir = os.path.join(gen_dir, "raw", run_id)
     os.makedirs(raw_dir, exist_ok=True)
     os.makedirs(os.path.join(gen_dir, "meta"), exist_ok=True)
@@ -288,6 +288,9 @@ def main():
                          "repeat and label the runs p1, p2, ... instead of r1, r2, ...; "
                          "judge.py decides a workload from paired runs when both the "
                          "candidate and the champion have them in the same generation")
+    ap.add_argument("--probe", action="store_true",
+                    help="quick probe of a workload proposal: results go to "
+                         "results/gen<N>/probe/, which summarize.py and judge.py ignore")
     ap.add_argument("--nodes", default=os.path.join(HERE, "nodes.json"))
     ap.add_argument("--dry-run", action="store_true", help="validate and print the plan")
     args = ap.parse_args()
@@ -301,7 +304,8 @@ def main():
     if args.build == "stock" and (policies != ["fifo"] or modes != ["ignore"]):
         sys.exit("a stock build only supports --policy fifo --mode ignore")
     loaded = [(p, specs.load(p)) for p in args.workload]
-    meta_dir = os.path.join(HERE, "results", "gen%d" % args.gen, "meta")
+    meta_dir = os.path.join(HERE, "results", "gen%d" % args.gen,
+                            *(["probe"] if args.probe else []), "meta")
 
     def first_repeat(wid, pol, mode):
         """Repeat numbers continue from earlier runs in this generation, so a

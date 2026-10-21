@@ -65,7 +65,8 @@ IOKernel, which decides how many cores each application gets, is untouched.
 
 | Step | Who | Output | Commit message |
 |---|---|---|---|
-| 1. Propose a harder workload | workload agent (`prompts/workload_agent.md`) | `workloads/wN-*.json` | `autoresearch gen N: workload wN <slug>` |
+| 1. Propose harder workloads (from gen 13: two or three agents, each assigned an untouched difficulty dimension) | workload agents (`prompts/workload_agent.md`) | proposals in `results/genN/proposals/` | (with the chosen workload) |
+| 1b. Probe the proposals and keep the one whose champion spends the largest share of its tail in the runqueue | orchestrator, `probe.py` | `results/genN/probe/` (local) | `autoresearch gen N: workload wN <slug>` |
 | 2. Gate it: baseline not trivially overloaded, a FIFO penalty exists, the best policy leaves headroom | orchestrator, `run.py` | results in `results/genN/` | (with step 3) |
 | 3. Measure every policy on the new workload, hints and ignore | `run.py` | `results/genN/summary.csv`, `counters.csv` | `autoresearch gen N: results for wN` |
 | 4. Bottleneck report | measurement agent | `results/genN/report.md` | `autoresearch gen N: measurement report` |
@@ -123,6 +124,7 @@ plots/               generated SVG plots shown in LEADERBOARD.md
 calibration.json     gen 0 measurements: fake-work speed, noise band, timings, budget
 run.py               runs experiments on the two nodes (see ./run.py --help)
 summarize.py         builds LEADERBOARD.md, plots/, and results/genN/tables.md
+probe.py             quick probes of workload proposals (results/genN/probe/)
 lib/plots.py         the plots (plain SVG, no plotting library)
 judge.py             gate and acceptance decisions, and the current champion
 eval_policy.sh       judge a new policy on every scored workload (reduced sweeps), then judge.py
@@ -180,3 +182,8 @@ this order: re-measure only baseline and accepted policies on the new workload,
 drop the two lightest load levels on older workloads, and use one repeat for
 policies more than 15% behind the best. `results/genN/ledger.json` records the
 node time actually used. An 8-hour CloudLab slot fits about 10 generations.
+
+In practice later generations used 25–35 minutes, mostly for the reduced
+evaluation over a growing suite and for paired confirmations. From gen 13 the
+proposal probes add about 3 minutes per proposal. The cap is a guide, not a
+stopping rule: the owner asked the loop to keep running without one.
