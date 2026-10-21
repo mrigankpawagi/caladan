@@ -3,7 +3,7 @@
 - id: p6
 - config: sjf_timed
 - generation: 5
-- status: candidate
+- status: rejected
 - builds_on: p3
 - changed_from_previous: p3 plus: a HIGH thread's expected run time is the run time this core has measured for threads with the same run-time hint (p5's timing and estimate, without p5's floor, so it can end up below the hint as well as above it; the hint plus 4 µs until measured), used both in the thread's turn (deadline plus 8 times the run time) and in the 20 µs urgency test
 - commit: 23c4704
@@ -47,4 +47,20 @@ Outside the policy region, for the owner: exact run times from the scheduler; pa
 | w0 | p99 at 300k / sustained throughput at 450k | flat | p3's path plus one test per pick |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 5 (judge.py, results/gen5/) against the champion p3
+sjf_guard, on rules 3 and 6, both for puts.
+
+| Workload | sjf_guard | sjf_timed | Change | Notes |
+|---|---|---|---|---|
+| w6 | get p99 143.0 µs | 92.0 µs (92/92) | −35.7% | get wait p99 78.8 → 27.4 µs; query met 87.08 → 87.43%; **put met 98.26 → 96.86% (−1.4 points)** |
+| w5 | get p99 98.5 µs | 91.5 µs | −7.1% | query met 88.05 → 87.30% (held); **put p99 103.5 → 134.0 µs (+29.5%), put met 98.84 → 97.15% (−1.7 points)** |
+| w4b | 94.0 µs | 92.5 µs | −1.6% | query met 87.62% |
+| w3 / w2 / w1 | 55.0 / 51.0 / 51.0 µs | 55.5 / 52.5 / 51.5 µs | within noise | |
+| w0 | p99 at 300k 69.5 µs | 69.0 µs | overhead ok | |
+
+Learning in both directions did what the card predicted: on w6 lookups are
+ranked by their real run time again and the stale hint costs them nothing
+(92 µs on both w5 and w6), and queries were protected this time. The cost
+moved to puts: ranked by their flush-inflated learned run time (about 12–16
+µs), they now wait behind lookups and fewer of them pass queries, and they
+lose more than the 1 point of deadline-met rule 6 allows.
