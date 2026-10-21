@@ -697,5 +697,35 @@ get p99 by offered load (req/s):
 | sjf_upper | hints | hints | 37.5 | 114.5 | 169.5 | 198.0 | 220.5 | 247.5 |
 | fifo | ignore | hints | 42.0 | 222.5 | 572.0 | 658.0 | 733.5 | 799.0 |
 
+## w15: The six-core key-value mix where one lookup in a hundred returns a value 100 times larger
+
+[workloads/w15-large-values.json](workloads/w15-large-values.json). The same bursty key-value front end on six cores as w14, except that about one lookup in a hundred returns a large value and takes 100 times the usual work (about 0.7 ms instead of 7 us), as in caches whose value sizes have a long tail. The server sets a lookup's hints before it knows the value's size, so large lookups carry exactly the hints of ordinary ones and no scheduler can tell them apart in advance. A large lookup is interrupted every 100 us and put back in the queue, where a scheduler that trusts the lookup label lets it run ahead of the ordinary lookups waiting behind it, and the slow runs it times under that label make every lookup look longer. The score is the ordinary lookups' tail; the large ones are recorded as their own kind.
+
+Score: `get` p99. Headline load: 73,750 req/s.
+
+![get p99 by offered load on w15](plots/w15-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w15](plots/w15-wait.svg)
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | bigget p99 | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | lease p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 812.5 (775.0–850.0) | +0% | 91.53 | 2498 | 953.5 | 890.0 | 1296 | 1270 | 892.5 | 910.5 | 789.0 | 73226 | 85.86 | 86.36 | 2 | 14 |
+| p1 prio | hints | hints | 661.5 (652.0–671.0) | -19% | 94.47 | 2500 | 783.5 | 734.0 | 1132 | 1164 | 1418 | 1556 | 659.5 | 73110 | 65.34 | 150.21 | 2 | 14 |
+| p14 sjf_ratio | hints | hints | 341.0 (328.0–354.0) | -58% | 99.31 | 1282 | 417.5 | 1144 | 546.0 | 1050 | 1508 | 1592 | 127.5 | 73551 | 48.68 | 162.01 | 2 | 14 |
+| p13 sjf_upper | hints | hints | 385.0 (378.0–392.0) | -53% | 99.12 | 1418 | 445.0 | 1139 | 591.5 | 1084 | 1518 | 1578 | 129.5 | 73220 | 48.66 | 161.13 | 2 | 14 |
+| p0 fifo | ignore | hints | 786.0 (779.0–793.0) | -3% | 91.11 | 2362 | 936.5 | 869.0 | 1298 | 1294 | 862.0 | 862.0 | 792.0 | 73318 | - | 87.93 | 2 | 14 |
+
+Best with hints applied: **sjf_ratio** (341.0 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 26,000 | 51,500 | 66,500 | 70,000 | 72,000 | 73,750 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 42.0 | 235.0 | 575.0 | 675.5 | 742.0 | 812.5 |
+| prio | hints | hints | 41.0 | 207.0 | 486.0 | 559.5 | 607.0 | 661.5 |
+| sjf_ratio | hints | hints | 38.0 | 144.0 | 253.5 | 294.0 | 306.5 | 341.0 |
+| sjf_upper | hints | hints | 38.5 | 135.0 | 271.5 | 330.0 | 364.0 | 385.0 |
+| fifo | ignore | hints | 41.0 | 234.0 | 580.5 | 652.5 | 750.5 | 786.0 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
