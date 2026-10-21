@@ -2090,6 +2090,126 @@ static uint32_t choose_sjf_upper(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p14: at a time unit above 1, p4's rescue check lets an urgent HIGH thread
+ * pass the chosen one only if it is at most this many times as long: w14's
+ * urgent 68 us queries no longer pass 7 us gets (about 6-7 times shorter)
+ * or 2 us leases, but still pass the puts' and syncs' capped label (about
+ * 2.6 times shorter) and multigets
+ */
+#define POLICY_RATIO_MAX	3
+
+/*
+ * p14 "sjf_ratio": p13's sjf_upper (see choose_sjf_upper()) with one change
+ * to p4's rescue check. When the core's time unit is above 1 (w11-w14), a
+ * HIGH thread about to become too late runs ahead of the thread the order
+ * chose only if its length is at most POLICY_RATIO_MAX times the chosen
+ * one's. A rescued 68 us query delays a waiting 7 us get by about six times
+ * what the get would cost the query, and on w13 and w14 such rescues are a
+ * large part of the gets' wait. At a unit of 1 (w1-w10) the check is p13's,
+ * so every decision is p13's. The clock is read at most once per pick.
+ * Without HIGH threads this is p4's path and the clock is never read.
+ */
+static uint32_t choose_sjf_ratio(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	uint64_t lc[POLICY_LEARN_SLOTS], u = scale_get(ps);
+	thread_t *th, *bth, *uth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0, uc = 0;
+	bool two_high = false;
+
+	/* close the sample of this core's previous timed pick (as in p9) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				scale_update(ps, ps[1] & 0xffffffffULL,
+					     now - ps[0], u);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the labels, then
+				 * the first thread */
+				two_high = true;
+				learn_clock(&now);
+				scale_costs(ps, lc, u);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = scale_cost(ps, lc, bth, u);
+				bs = capped_slack(bth, bc, now);
+				if (bs >= late) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+					uc = bc;
+				}
+			}
+			c = scale_cost(ps, lc, th, u);
+			s = capped_slack(th, c, now);
+			/* least slack among the threads not too late */
+			if (s >= late && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+				uc = c;
+			}
+			if (learn_before(th, c, s < late, bth, bc, bs < late)) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+			}
+		}
+	}
+
+	/* p4's rescue check, with the length of the chosen thread; at a unit
+	 * above 1 it never passes a thread under 1/POLICY_RATIO_MAX its length */
+	if (uth && uth != bth && us < late + (int64_t)bc &&
+	    (u == 1 || uc <= POLICY_RATIO_MAX * bc)) {
+		best = ubest;
+		bth = uth;
+	}
+
+	if (bth->prio_class != THREAD_PRIO_HIGH)
+		return best;
+
+	/* fold the chosen thread's deadline into the quartile and the unit */
+	upper_observe(ps, bth);
+
+	/* time this pick (as in p9), under the chosen thread's learning key */
+	if (bth->service_tsc && n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = (ps[1] & ~0xffffffffULL) |
+			scale_key(bth, sjf_service(bth), scale_get(ps));
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -2108,6 +2228,7 @@ static const struct {
 	{ "sjf_unit",	choose_sjf_unit },
 	{ "sjf_scale",	choose_sjf_scale },
 	{ "sjf_upper",	choose_sjf_upper },
+	{ "sjf_ratio",	choose_sjf_ratio },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
