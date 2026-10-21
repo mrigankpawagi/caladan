@@ -1,10 +1,12 @@
 #!/bin/bash
 # eval_policy.sh <gen> <policy>: judge a new policy on every scored workload.
 #
-# Full sweeps for the newest workload and for workloads with a LOW kind
-# (rule 4 checks every level up to the headline); headline level only for
-# the other workloads; w0 at the level below its headline and its top level
-# (the overhead rule). Superseded workloads are skipped. Ends with judge.py.
+# Full sweep for the newest workload; the headline level and the two below it
+# for older workloads with a LOW kind (rule 4 checks the levels up to the
+# headline that were measured; LOW has answered 100% at every level so far);
+# headline level only for the other workloads; w0 at the level below its
+# headline and its top level (the overhead rule). Superseded workloads are
+# skipped. Ends with judge.py.
 set -e
 G=$1; P=$2
 cd "$(dirname "$0")"
@@ -18,13 +20,17 @@ ws = [w for w in ws if w.get('status') != 'superseded']
 num = lambda w: (int(w['id'][1:].rstrip('abcdefghij')), w['id'])
 newest = max(ws, key=num)['id']
 full, head, w0 = [], [], ''
+low = lambda w: any(k.get('hint', {}).get('class') == 'low' for k in w['kinds'])
 for w in ws:
     h = S.headline_load(idx, w['id'], w['load_rps'])
     if w['id'] == 'w0':
         below = max([l for l in w['load_rps'] if l < h])
         w0 = '%s:%d,%d' % (w['_f'], below, w['load_rps'][-1])
-    elif w['id'] == newest or any(k.get('hint', {}).get('class') == 'low' for k in w['kinds']):
+    elif w['id'] == newest:
         full.append(w['_f'])
+    elif low(w):
+        top = [l for l in w['load_rps'] if l <= h][-3:]
+        head.append('%s:%s' % (w['_f'], ';'.join(str(l) for l in top)))
     else:
         head.append('%s:%d' % (w['_f'], h))
 print('|'.join([','.join(full), ','.join(head), w0]))
@@ -33,7 +39,7 @@ PY
 echo "full sweeps: $FULL"; echo "headline only: $HEAD"; echo "overhead: $W0"
 ARGS=""; for f in ${FULL//,/ }; do ARGS="$ARGS --workload $f"; done
 ./run.py --gen $G $ARGS --policy $P
-for wl in ${HEAD//,/ }; do ./run.py --gen $G --workload ${wl%%:*} --policy $P --levels ${wl##*:}; done
+for wl in ${HEAD//,/ }; do lv=${wl##*:}; ./run.py --gen $G --workload ${wl%%:*} --policy $P --levels ${lv//;/,}; done
 ./run.py --gen $G --workload ${W0%%:*} --policy $P --levels ${W0##*:}
 ./summarize.py --gen $G
 set +e

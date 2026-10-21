@@ -90,9 +90,11 @@ other kind with a deadline loses at most 1 percentage point of its
 deadline-met rate. A rejected policy stays in the tree with `status: rejected`.
 
 To save node time, a new policy is judged on *older* workloads at their
-headline load only (`run.py --levels <load>`); w0 runs the level below its
-headline and its top level; the newest workload, and any workload with a LOW
-kind (rule 4 checks every level up to the headline), get the full sweep.
+headline load only (`run.py --levels <load>`), or the headline and the two
+levels below it for workloads with a LOW kind (rule 4 checks the measured
+levels up to the headline); w0 runs the level below its headline and its top
+level; the newest workload gets the full sweep (`eval_policy.sh` does all of
+this).
 Headline loads come from fifo's full sweeps, which every workload has.
 
 Nothing is ever overwritten. Workloads, policies, and results only accumulate;
