@@ -583,5 +583,31 @@ get p99 by offered load (req/s):
 | sjf_unit | hints | hints | 25.0 | 102.5 | 209.0 | 243.0 | 284.5 | 319.5 |
 | fifo | ignore | hints | 26.0 | 184.5 | 569.5 | 667.0 | 774.5 | 919.0 |
 
+## w13: The two-timescale key-value mix with interactive queries due in 300 us
+
+[workloads/w13-tight-queries.json](workloads/w13-tight-queries.json). The same bursty key-value front end as w12 (lookups, puts with occasional 120 us flushes, replica syncs labeled as puts, 120 us multigets, batch, scans and 2 us lease renewals), except that the 68 us queries are now interactive and must answer within 300 us instead of 400 us. Queries are about half of all latency-critical requests, so the typical latency-critical deadline the server sees is now 300 us, between the leases' 100 us and the 400 us that lookups, puts and syncs carry. A scheduler that reads one time scale per core from the typical deadline therefore picks the small scale again, stops seeing the slow syncs and flushes hidden behind the puts' 4 us hint, and lets them run ahead of waiting lookups, as on w11 before that was fixed.
+
+Score: `get` p99. Headline load: 100,000 req/s.
+
+![get p99 by offered load on w13](plots/w13-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w13](plots/w13-wait.svg)
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | lease p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 657.0 (655.0–659.0) | +0% | 93.93 | 785.5 | 732.5 | 1062 | 1074 | 731.0 | 730.5 | 647.5 | 99292 | 78.38 | 76.52 | 2 | 12 |
+| p10 sjf_mixed | hints | hints | 267.5 (260.0–275.0) | -59% | 99.86 | 380.0 | 861.0 | 484.5 | 839.5 | 1106 | 1177 | 132.5 | 99620 | 44.19 | 131.70 | 2 | 12 |
+| p12 sjf_scale | hints | hints | 259.0 (256.0–262.0) | -61% | 99.87 | 362.0 | 853.0 | 468.5 | 819.5 | 1086 | 1150 | 132.5 | 99388 | 42.88 | 127.74 | 2 | 12 |
+
+Best with hints applied: **sjf_scale** (259.0 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 35,000 | 70,000 | 95,000 | 100,000 | 105,000 | 110,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 25.0 | 179.5 | 563.0 | 657.0 | 748.0 | 870.0 |
+| sjf_mixed | hints | hints | 26.0 | 102.0 | 223.0 | 267.5 | 293.5 | 349.0 |
+| sjf_scale | hints | hints | 24.5 | 104.0 | 222.0 | 259.0 | 302.0 | 341.0 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
