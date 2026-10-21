@@ -3,7 +3,7 @@
 - id: p15
 - config: sjf_overrun
 - generation: 14
-- status: candidate
+- status: accepted
 - builds_on: p14
 - changed_from_previous: p14 plus: a HIGH thread readied again after more than 150 µs of total run time (so yielded at the 100 µs time slice at least twice; on w15 only the large lookups) runs after every waiting HIGH thread with the same label that has not run that long, and is never rescued ahead of the order's choice; against every other thread its place is p14's; no HIGH thread on w1–w14 runs that long, so there every decision is p14's
 - commit: ddc13c9
@@ -42,4 +42,19 @@ Like sjf_ratio, each core runs helper threads first, then HIGH, NORMAL and LOW t
 | w1–w10, w0 | every kind | identical decisions; noise only |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 14 (judge.py, results/gen14/) against the champion
+p14 sjf_ratio, on every rule and every workload, without a paired
+confirmation.
+
+| Workload | sjf_ratio | sjf_overrun | Change | Notes |
+|---|---|---|---|---|
+| w15 | get p99 341.0 µs | 261.0 µs | −23.5% | predicted −10 to −18% (280–305) |
+| w15 | bigget p99 | 1282 µs | 1261 µs | −1.7% | predicted +3 to +12%; it did not pay |
+| w15 | put / sync / query p99 | 417.5 / 546.0 / 1144 µs | 408.0 / 563.5 / 1132 µs | −2.3% / +3.2% / −1.0% |
+| w15 | query / lease / put met | 85.50 / 95.31 / 98.88% | 85.12 / 95.37 / 98.94% | within 0.4 points |
+| w14 / w13 | 204.5 / 176.5 µs | 197.5 / 185.5 µs | −3.4% / +5.1% | identical decisions; drift |
+| w1–w12 | | | within noise | identical decisions |
+
+Recognising a request by the run time the runtime records, rather than by
+its hint or ready time, stopped re-queued large lookups from cutting ahead
+of ordinary lookups at no visible cost to the large lookups themselves.
