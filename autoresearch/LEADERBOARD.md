@@ -371,5 +371,35 @@ get p99 by offered load (req/s):
 | sjf_timed | hints | hints | 14.0 | 24.0 | 64.0 | 78.0 | 90.5 | 96.5 |
 | fifo | ignore | hints | 13.5 | 28.0 | 97.5 | 131.0 | 169.0 | 205.0 |
 
+## w9: Multigets sharing the lookups' run-time hint, arriving in bursts
+
+[workloads/w9-multiget-shares-get-hint.json](workloads/w9-multiget-shares-get-hint.json). The same bursty key-value front end as w8 (quick lookups, puts that sometimes flush, ten-times-longer queries and replica syncs labeled as puts, all HIGH with one shared 100 us deadline; NORMAL batch and LOW scans), plus multigets from an analytics client: 5% of traffic, each fetching many keys in about 30 us. The server routes a multiget through the lookup handler, so it inherits the lookup's 2 us run-time hint, but gives it a relaxed 300 us deadline because the analytics client can wait. A scheduler that learns one run time per run-time hint now sees '2 us' requests that often take 30 us, ranks real lookups as long jobs and runs them behind waiting puts and syncs; only one that tells the two apart, for example by their different deadlines, can let lookups go first again.
+
+Score: `get` p99. Headline load: 370,000 req/s.
+
+![get p99 by offered load on w9](plots/w9-load.svg)
+
+![get p99 and its runqueue wait at the headline load on w9](plots/w9-wait.svg)
+
+| Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 210.5 (207.0–214.0) | +0% | 87.12 | 217.5 | 229.5 | 244.5 | 244.5 | 231.0 | 231.0 | 368415 | 22.13 | 22.10 | 2 | 8 |
+| p1 prio | hints | hints | 188.0 (185.0–191.0) | -11% | 90.06 | 196.0 | 207.5 | 224.5 | 224.5 | 316.5 | 341.0 | 369096 | 18.33 | 35.49 | 2 | 8 |
+| p8 sjf_capped | hints | hints | 95.0 (94.0–96.0) | -55% | 99.33 | 130.5 | 252.0 | 157.0 | 249.0 | 326.0 | 347.5 | 368591 | 15.40 | 37.38 | 2 | 8 |
+| p7 sjf_nohint | hints | hints | 142.0 (139.0–145.0) | -33% | 96.03 | 129.5 | 215.5 | 155.5 | 301.5 | 317.5 | 340.5 | 368564 | 15.73 | 36.89 | 2 | 8 |
+| p0 fifo | ignore | hints | 213.5 (213.0–214.0) | +1% | 87.61 | 221.0 | 232.5 | 247.0 | 246.0 | 232.0 | 231.5 | 368330 | - | 21.84 | 2 | 8 |
+
+Best with hints applied: **sjf_capped** (95.0 µs).
+
+get p99 by offered load (req/s):
+
+| Policy | Mode | Build | 100,000 | 200,000 | 290,000 | 320,000 | 345,000 | 370,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 14.0 | 31.0 | 102.5 | 146.5 | 169.5 | 210.5 |
+| prio | hints | hints | 14.0 | 31.5 | 99.0 | 123.5 | 154.5 | 188.0 |
+| sjf_capped | hints | hints | 14.0 | 25.5 | 62.5 | 77.5 | 88.5 | 95.0 |
+| sjf_nohint | hints | hints | 14.0 | 26.5 | 78.0 | 102.5 | 123.5 | 142.0 |
+| fifo | ignore | hints | 14.0 | 29.5 | 104.5 | 135.0 | 171.5 | 213.5 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
