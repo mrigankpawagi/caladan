@@ -3,7 +3,7 @@
 - id: p10
 - config: sjf_mixed
 - generation: 9
-- status: candidate
+- status: accepted
 - builds_on: p9
 - changed_from_previous: p9 plus: when two capped labels are ranked against their measurements (the one whose learned run time is longer has the smaller cap, so it counts shorter), both count one shared length, 4 µs below the smaller cap (on w10, gets with multigets and puts with syncs both count 9 µs instead of 14 and 13); every other length, and order, slack, rescue, timing and learning keys, unchanged
 - commit: 2aab7d9
@@ -96,4 +96,21 @@ Unchanged from p9, for the owner:
 | w0 | p99 one level below the headline / sustained throughput | flat (p9's path, no HIGH threads) | within noise; within 1% |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 9 (judge.py, results/gen9/) against the champion p9
+sjf_pair, on every rule and every workload, without a paired confirmation.
+
+| Workload | sjf_pair | sjf_mixed | Change | Notes |
+|---|---|---|---|---|
+| w10 | get p99 137.5 µs | 114.5 µs | −16.7% | predicted 105–118; at 370k 162.5 → 135.0 |
+| w10 | put p99 / met | 113.0 µs / 98.23% | 123.0 µs / 97.39% | +8.8%, −0.84 points (predicted 115–128, 97.8–98.2); close to the 1-point limit |
+| w10 | sync / multiget p99 | 136.5 / 173.5 µs | 148.5 / 148.5 µs | +8.8% / −14.4% |
+| w10 | query met / p99 | 87.47% / 213.0 µs | 87.06% / 209.5 µs | −0.41 points (predicted 86.7–87.3) |
+| w10 | runqueue-wait p99 get / put / sync / multiget | 87.2 / 57.9 / 61.4 / 87.9 µs | 81.1 / 80.3 / 80.2 / 80.1 µs | the four kinds now wait alike |
+| w1–w9 | | | −3.5 to +3.7% | identical decisions (after warmup on w9) |
+| w0 | p99 at 300k 72.0 µs | 71.0 µs | −1.4% | sustained throughput −0.18% |
+
+The model's prediction held on the score, queries and multigets; puts paid
+more than predicted (0.84 points against 0.24). Sharing one length evens
+the waiting out across the two mixed labels instead of removing it: get
+wait p99 fell only 6 µs, while get p99 fell 23 µs because fewer gets reach
+the too-late regime.
