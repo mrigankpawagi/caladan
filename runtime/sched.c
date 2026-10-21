@@ -2350,6 +2350,191 @@ static uint32_t choose_sjf_overrun(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p16: a HIGH thread at most 1/POLICY_RATIO_MAX as long as the thread the
+ * order chose may run first if it is due at least POLICY_AFFORD_DUE times
+ * as late (relative to when each became ready) and the chosen thread would
+ * still keep POLICY_AFFORD_KEEP_PCT percent of its own relative deadline as
+ * slack after it: on w16 a 10 us point (due in 800 us) passes a 40 us
+ * fanout (due in 300 us) while the fanout would keep 120 us to spare
+ */
+#define POLICY_AFFORD_DUE	2
+#define POLICY_AFFORD_KEEP_PCT	40
+
+/* p16: relative deadline of @th (deadline minus ready time), 0 if none */
+static inline int64_t afford_rel(const thread_t *th)
+{
+	if (!th->deadline_tsc)
+		return 0;
+	return (int64_t)(th->deadline_tsc - th->ready_tsc);
+}
+
+/*
+ * p16: true if HIGH thread @b (length @cb) should run before HIGH thread @a,
+ * the order's choice (length @ca, slack @sa): @b is at most
+ * 1/POLICY_RATIO_MAX as long, due at least POLICY_AFFORD_DUE times as late
+ * but within p9's deadline split (past it, a short hint may belong to a much
+ * longer kind, as the multigets carry the lookups' hint on w9-w15), and @a
+ * keeps POLICY_AFFORD_KEEP_PCT percent of its relative deadline as slack
+ * after waiting for @b
+ */
+static inline bool afford_pass(const thread_t *a, uint64_t ca, int64_t sa,
+			       const thread_t *b, uint64_t cb, uint64_t u)
+{
+	int64_t ra = afford_rel(a), rb = afford_rel(b);
+
+	if (ra <= 0 || rb < POLICY_AFFORD_DUE * ra)
+		return false;
+	if (cb > ca / POLICY_RATIO_MAX)
+		return false;
+	if (scale_key(b, sjf_service(b), u) != sjf_service(b))
+		return false;
+	return sa - (int64_t)cb >= ra * POLICY_AFFORD_KEEP_PCT / 100;
+}
+
+/*
+ * p16 "sjf_afford": p15's sjf_overrun (see choose_sjf_overrun()) with one
+ * change. After the order has chosen a HIGH thread, the shortest waiting
+ * HIGH thread that has not overrun runs first instead if the chosen one can
+ * afford the wait (afford_pass()). On w16 the order lets a fresh 40 us
+ * fanout, due in 300 us, run ahead of any 10 us point readied up to about
+ * 236 us before it, although the fanout has over 200 us to spare and the
+ * point would cost it 10 us. On w1-w15 a much shorter thread due at least
+ * twice as late is a multiget past p9's split or does not exist, so every
+ * decision is p15's (in an offline model all but 0.04% of picks on w14 and
+ * w15, made while a core's unit had briefly risen to 8 or more). Then p4's
+ * rescue check as in p14. The clock is read at most once per pick. Without
+ * HIGH threads this is p4's path and the clock is never read.
+ */
+static uint32_t choose_sjf_afford(struct kthread *k, uint32_t n)
+{
+	uint64_t *ps = k->policy_state;
+	uint64_t lc[POLICY_LEARN_SLOTS], u = scale_get(ps);
+	thread_t *th, *bth, *uth = NULL, *sth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0, sbest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0, uc = 0, sc = 0;
+	bool two_high = false, o, bo = false, first;
+
+	/* close the sample of this core's previous timed pick (as in p9) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				scale_update(ps, ps[1] & 0xffffffffULL,
+					     now - ps[0], u);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the labels, then
+				 * the first thread */
+				two_high = true;
+				learn_clock(&now);
+				scale_costs(ps, lc, u);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = scale_cost(ps, lc, bth, u);
+				bs = capped_slack(bth, bc, now);
+				bo = overrun(bth);
+				if (bs >= late && !bo) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+					uc = bc;
+				}
+				if (!bo) {
+					sth = bth;
+					sbest = best;
+					sc = bc;
+				}
+			}
+			c = scale_cost(ps, lc, th, u);
+			s = capped_slack(th, c, now);
+			o = overrun(th);
+			/* least slack among the threads not too late or overrun */
+			if (s >= late && !o && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+				uc = c;
+			}
+			/* shortest among the threads not overrun, oldest first */
+			if (!o && (!sth || c < sc)) {
+				sth = th;
+				sbest = i;
+				sc = c;
+			}
+			/* of two threads with one label, one overrun, the
+			 * other goes first; otherwise p14's order */
+			if (o != bo &&
+			    scale_key(th, sjf_service(th), u) ==
+			    scale_key(bth, sjf_service(bth), u))
+				first = bo;
+			else
+				first = learn_before(th, c, s < late,
+						     bth, bc, bs < late);
+			if (first) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+				bo = o;
+			}
+		}
+	}
+
+	/* the shortest thread goes first if the order's choice can afford it */
+	if (sth && sth != bth && afford_pass(bth, bc, bs, sth, sc, u)) {
+		best = sbest;
+		bth = sth;
+		bc = sc;
+	}
+
+	/* p14's rescue check (see choose_sjf_ratio()) */
+	if (uth && uth != bth && us < late + (int64_t)bc &&
+	    (u == 1 || uc <= POLICY_RATIO_MAX * bc)) {
+		best = ubest;
+		bth = uth;
+	}
+
+	if (bth->prio_class != THREAD_PRIO_HIGH)
+		return best;
+
+	/* fold the chosen thread's deadline into the quartile and the unit */
+	upper_observe(ps, bth);
+
+	/* time this pick (as in p9), under the chosen thread's learning key */
+	if (bth->service_tsc && n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = (ps[1] & ~0xffffffffULL) |
+			scale_key(bth, sjf_service(bth), scale_get(ps));
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -2370,6 +2555,7 @@ static const struct {
 	{ "sjf_upper",	choose_sjf_upper },
 	{ "sjf_ratio",	choose_sjf_ratio },
 	{ "sjf_overrun",	choose_sjf_overrun },
+	{ "sjf_afford",	choose_sjf_afford },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
