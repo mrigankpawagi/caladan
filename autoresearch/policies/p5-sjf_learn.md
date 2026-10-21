@@ -3,7 +3,7 @@
 - id: p5
 - config: sjf_learn
 - generation: 4
-- status: candidate
+- status: rejected
 - builds_on: p4
 - changed_from_previous: p4 plus: each core learns, for each run-time hint value, how long its HIGH threads really run (timed between consecutive picks, leaning toward the long runs), and uses the larger of that and p4's hint plus 4 µs as a HIGH thread's length, both for ordering and for the rescue check
 - commit: 103c554
@@ -48,4 +48,19 @@ These are outside the policy region, for the owner to decide:
 | w0 | p99 at 300k / throughput at 450k | flat | p4's code path |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 4 (judge.py, results/gen4/) against the champion p3
+sjf_guard, on rule 6 only (another kind with a deadline may lose at most 1
+point of deadline-met).
+
+| Workload | sjf_guard | sjf_learn | Change | Notes |
+|---|---|---|---|---|
+| w5 | get p99 98.5 µs | 85.0 µs (85/85) | −13.7% | get runqueue-wait p99 43.3 → 25.2 µs (predicted 15–28); **query deadline met 88.05% → 86.55% (−1.5 points)**; put met 98.84 → 98.57% |
+| w4b | 94.0 µs | 86.0 µs | −8.5% | query met 87.15 → 86.72% |
+| w3 | 55.0 µs | 55.0 µs | 0% | |
+| w2 | 51.0 µs | 54.0 µs | +5.9% | batch p99 +17% (limit 25%) |
+| w1 | 51.0 µs | 53.0 µs | +3.9% | |
+| w0 | p99 at 300k 69.5 µs | 72.5 µs | +4.3% | sustained throughput −0.93% (limit 1%) |
+
+The learning works: lookups no longer wait behind flushing puts, and the get
+tail on w5 dropped as predicted. The price was paid by queries, which lost
+1.5 points of deadline-met, as the card flagged as its main risk.
