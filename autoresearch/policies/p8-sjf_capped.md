@@ -3,7 +3,7 @@
 - id: p8
 - config: sjf_capped
 - generation: 7
-- status: candidate
+- status: accepted
 - builds_on: p5
 - changed_from_previous: p5 plus: a HIGH thread's length is the run time learned for its run-time hint without p5's floor (so it can fall below the hint, as in p6) and at most 8 µs above p5's starting value of hint plus 4 µs; a HIGH thread without a run-time hint counts as 17 µs (p5: 4 µs); and the too-late rule and rescue check measure slack with that length, too late meaning less than 9 µs to spare (p5: slack from the hint, less than 13 µs)
 - commit: dbbe26c
@@ -77,4 +77,24 @@ These are outside the policy region, for the owner:
 | w0 | p99 at 300k / sustained throughput at 450k | flat | 70.5 within 6% (≤ 74.7); within 0.5% |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 7 (judge.py, results/gen7/) against the champion p7
+sjf_nohint, on every rule and every workload. The first evaluation measured
+only w8 and w0 because of an eval_policy.sh bug; w1–w7 were measured
+afterwards, and the verdict below uses all of them.
+
+| Workload | sjf_nohint | sjf_capped | Change | Notes |
+|---|---|---|---|---|
+| w8 | get p99 145.0 µs | 83.0 µs | −42.8% | predicted 95–115; get wait p99 97.3 → 25.4 µs (predicted 30–55) |
+| w8 | put met / p99 | 96.69% / 133.5 µs | 97.13% / 125.0 µs | puts gain (predicted flat) |
+| w8 | query met / sync p99 | 82.94% / 159.5 µs | 83.49% / 148.5 µs | both gain |
+| w7 | get p99 116.5 µs | 84.0 µs | −27.9% | predicted 90–110; put met 97.98 → 98.35% (the main risk held); sync p99 −7.2% |
+| w6 | 140.5 µs | 81.0 µs | −42.3% | predicted 85–100; get wait p99 78.2 → 24.8 µs |
+| w5 | 100.0 µs | 80.5 µs | −19.5% | query met 86.61 → 87.44% |
+| w4b | 94.0 µs | 82.0 µs | −12.8% | |
+| w3 / w2 / w1 | 57.5 / 54.0 / 53.0 µs | 53.0 / 51.5 / 52.0 µs | −8 to −2% | |
+| w0 | p99 at 300k 70.5 µs | 69.5 µs | −1.4% | sustained throughput +0.62% |
+
+Every prediction pointed the right way and most came out better than
+predicted. Get runqueue-wait p99 is now about 25 µs on w5, w6, w7 and w8
+alike; the remaining 55–60 µs of the get tail is outside the runqueue
+(packets waiting on a busy core, and a running sync that cannot be passed).
