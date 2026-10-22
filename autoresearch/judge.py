@@ -38,12 +38,13 @@ accept: (1) the newest workload's score improves on the champion's by at
 converge (generations 20-25, --converge): there is no newest workload; rule 1
         becomes "wins more workloads than the champion", and rules 2-7 apply
         to every workload.
-wins:   a policy wins a workload if, at the headline load, it keeps every
-        kind with a deadline within 1 point of the best deadline-met any
-        policy reached there (it is a deadline-keeper) and its score is within
-        the noise band of the best score of any other deadline-keeper. The
-        loop must end (by generation 25) with a champion that wins every
-        workload.
+wins:   a policy wins a workload if no other policy dominates it at the
+        headline load (the owner's definition from generation 20): another
+        policy dominates it if it is better beyond noise on something (score
+        more than 6% lower, or some kind's deadline-met more than 1 point
+        higher) and worse beyond noise on nothing (score more than 6% higher,
+        or some kind's deadline-met more than 1 point lower). The loop must
+        end (by generation 25) with a champion that wins every workload.
 A workload on which both the policy and the champion have paired runs
 (run.py --paired) in the same generation is decided from those runs alone
 (paired confirmation, README.md). A rejection prints a FAILED_ON line naming
@@ -124,16 +125,24 @@ def standing(idx, s, head):
     return sc, keep, best, met
 
 
+def dominates(sc, met, kinds, p, q):
+    """Is policy p better than q beyond noise on something and worse beyond
+    noise on nothing? Deadline-met counts only where both have a value."""
+    pairs = [(met[(p, k)], met[(q, k)]) for k in kinds if (p, k) in met and (q, k) in met]
+    worse = sc[p] > (1 + NOISE) * sc[q] or any(a < b - 1.0 for a, b in pairs)
+    better = sc[p] * (1 + NOISE) < sc[q] or any(a > b + 1.0 for a, b in pairs)
+    return better and not worse
+
+
 def wins_on(idx, s, head, pol, exclude=()):
-    """(win, best other deadline-keeper, its score) for pol on workload s,
-    ignoring the policies in exclude."""
-    sc, keep, _, _ = standing(idx, s, head)
+    """(win, the policies that dominate pol) on workload s, ignoring the
+    policies in exclude; (None, []) without data."""
+    sc, _, best, met = standing(idx, s, head)
     if pol not in sc:
-        return None, None, None
-    rivals = [p for p in keep if p != pol and p not in exclude]
-    bp = min(rivals, key=sc.get) if rivals else None
-    win = pol in keep and (bp is None or sc[pol] <= (1 + NOISE) * sc[bp])
-    return win, bp, sc.get(bp)
+        return None, []
+    doms = [p for p in sorted(sc, key=sc.get)
+            if p != pol and p not in exclude and dominates(sc, met, list(best), p, pol)]
+    return not doms, doms
 
 
 def gate(args):
@@ -227,11 +236,12 @@ def accept(args):
                 wid, S.fmt(a), S.fmt(b), 100 * rel, "ok" if good else "FAIL (2)"))
             # rule 7: the champion's win (over every other policy but the new
             # one) must be kept; from paired runs, against the champion alone
-            cw, _, _ = wins_on(idx, s, head, champ, exclude=(new,))
+            cw, _ = wins_on(idx, s, head, champ, exclude=(new,))
             if cw:
-                nw, bp, bs = wins_on(widx, s, head, new)
-                print("    win kept: %s (best other deadline-keeper %s %s) -> %s" % (
-                    "yes" if nw else "no", bp, S.fmt(bs), "ok" if nw else "FAIL (7)"))
+                nw, doms = wins_on(widx, s, head, new)
+                print("    win kept: %s%s -> %s" % (
+                    "yes" if nw else "no", (" (dominated by %s)" % ", ".join(doms)) if doms
+                    else "", "ok" if nw else "FAIL (7)"))
                 good = good and bool(nw)
         ok &= good
         for k in s["kinds"]:
@@ -302,8 +312,7 @@ def wins(args):
     pol = args.policy or champion(cards)
     ids = sorted(workloads, key=lambda w: (int(w[1:].rstrip("abcdefghij")), w))
     won, lost = [], []
-    print("%-5s %8s %9s  %-28s %7s  %s" % ("wl", "headline", pol, "best other deadline-keeper",
-                                          "gap", "result"))
+    print("%-5s %8s %9s  %-34s %s" % ("wl", "headline", pol, "deadline-met (%)", "result"))
     for wid in ids:
         s = workloads[wid]
         if wid == "w0" or s.get("status") == "superseded":
@@ -311,25 +320,20 @@ def wins(args):
         head = S.headline_load(idx, wid, s["load_rps"])
         if not head:
             continue
-        sc, keep, best, met = standing(idx, s, head)
-        win, bp, bs = wins_on(idx, s, head, pol)
+        sc, _, best, met = standing(idx, s, head)
+        win, doms = wins_on(idx, s, head, pol)
         if win is None:
             print("%-5s %8d %9s  no data" % (wid, head, "-"))
             lost.append(wid)
             continue
-        gap = "%+.1f%%" % (100 * (sc[pol] / bs - 1)) if bs else "-"
-        why = ""
-        if pol not in keep:
-            why = " (not a deadline-keeper: %s)" % ", ".join(
-                "%s %.2f vs best %.2f" % (kn, met[(pol, kn)], b) for kn, b in best.items()
-                if met.get((pol, kn), b) < b - 1.0)
-        # faster policies left out for missing deadlines, for the record
-        out = ["%s %s" % (p, S.fmt(sc[p])) for p in sorted(sc, key=sc.get)
-               if p not in keep and sc[p] < sc[pol]]
-        print("%-5s %8d %9s  %-28s %7s  %s%s%s" % (
-            wid, head, S.fmt(sc[pol]), "%s %s" % (bp, S.fmt(bs)) if bp else "-", gap,
-            "WIN" if win else "LOSS", why,
-            ("  [faster but misses deadlines: %s]" % ", ".join(out)) if out else ""))
+        dl = " ".join("%s %.2f" % (kn, met[(pol, kn)]) for kn in best if (pol, kn) in met)
+        why = "  by " + "; ".join(
+            "%s (%s%s)" % (p, S.fmt(sc[p]), "".join(
+                ", %s %.2f" % (kn, met[(p, kn)]) for kn in best
+                if (p, kn) in met and (pol, kn) in met
+                and abs(met[(p, kn)] - met[(pol, kn)]) > 1.0)) for p in doms) if doms else ""
+        print("%-5s %8d %9s  %-34s %s%s" % (wid, head, S.fmt(sc[pol]), dl[:34],
+                                           "WIN" if win else "DOMINATED", why))
         (won if win else lost).append(wid)
     print("%s wins %d of %d workloads%s" % (pol, len(won), len(won) + len(lost),
                                             ("; losses: " + " ".join(lost)) if lost else ""))

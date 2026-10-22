@@ -4,9 +4,8 @@
 #
 # converge (generations 20-25, README): there is no newest workload, every
 # workload runs at its headline level(s), and on every workload the champion
-# loses, the policies that set the bar there (the champion, prio, the best
-# other deadline-keeper, and the policy with the best deadline-met for each
-# kind) are re-measured in the same session; the judge runs with --converge.
+# loses, the policies that dominate it there (and prio) are re-measured with
+# it in the same session; the judge runs with --converge.
 #
 # Full sweep for the newest workload; the headline level and the two below it
 # for older workloads with a LOW kind (rule 4 checks the levels up to the
@@ -51,15 +50,11 @@ for w in ws:
         kind, lv = 'head', ','.join(str(l) for l in [l for l in w['load_rps'] if l <= h][-3:])
     else:
         kind, lv = 'head', '%d' % h
-    if converge and w['id'] != 'w0' and not J.wins_on(idx, w, h, champ)[0]:
-        sc, keep, best, met = J.standing(idx, w, h)
-        need = {champ, 'prio'}
-        others = [p for p in keep if p != champ]
-        if others:
-            need.add(min(others, key=sc.get))
-        for kn in best:
-            need.add(max((met[(p, kn)], p) for p in sc if (p, kn) in met)[1])
-        rivals = ','.join(sorted(need - {os.environ.get('P', '')}))
+    if converge and w['id'] != 'w0':
+        win, doms = J.wins_on(idx, w, h, champ)
+        if win is False:
+            need = {champ, 'prio'} | set(doms)
+            rivals = ','.join(sorted(need - {os.environ.get('P', '')}))
     print(kind, w['id'], w['_f'], lv, rivals)
 PY
 )"

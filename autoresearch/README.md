@@ -94,15 +94,16 @@ the tree with `status: rejected`.
 
 **Winning a workload, and the end of the loop.** The loop ends no later than
 generation 25, with a champion that wins every workload (the owner's goal,
-set in generation 19). A policy *wins* a workload if, at the headline load,
-every kind with a deadline meets within 1 point of the best deadline-met any
-policy reached there (it is a *deadline-keeper*), and its score is within the
-noise band of the best score of any other deadline-keeper. So prio's faster
-reads on w18–w20 do not count, because it misses the fan-out or suggestion
-deadlines, but its faster reads on w17 do. `./judge.py wins` prints the table
-for the champion. The per-generation rules alone let deadline-met fall up to
-1 point per generation; on w5–w10 the champion has drifted 2–3.6 points below
-prio's query deadline-met that way, so those count as losses until fixed.
+set in generation 19). Since generation 20 (the owner's choice, after the
+first definition proved to conflict with rule 2) a policy *wins* a workload if
+no other policy *dominates* it at the headline load: is better beyond noise on
+something (score more than 6% lower, or some kind's deadline-met more than 1
+point higher) and worse beyond noise on nothing. `./judge.py wins` prints the
+table for the champion. The first definition (be within 1 point of the best
+deadline-met of any policy, then within noise of the best such policy's
+score) made prio's query deadline-met the bar on w4b–w12; matching it meant
+behaving like prio there and doubling get p99, which rule 2 forbids, and four
+mechanisms tested on the nodes gained at most about 0.5 point within the rules.
 Plan: generation 19 added w20 and re-measured the eight workloads the champion
 lost, with their bar-setting policies, in one session (cross-session drift is
 about 6% of p99 and 1.5 points of deadline-met): the losses on w5–w10 and w12
