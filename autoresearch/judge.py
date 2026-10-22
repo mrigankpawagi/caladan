@@ -4,6 +4,7 @@
   ./judge.py gate --workload w2       is the new workload worth keeping?
   ./judge.py accept --policy edf      does the new policy beat the champion?
   ./judge.py champion                 which policy is the current champion?
+  ./judge.py wins [--policy p]        on which workloads does it win?
 
 The champion is the accepted policy with the highest generation, or the best
 baseline policy (prio) if none has been accepted yet. Rules (README.md):
@@ -28,7 +29,16 @@ accept: (1) the newest workload's score improves on the champion's by at
             detect overhead;
         (6) other kinds that have a deadline lose at most 1 percentage point
             of deadline-met at the headline load (so a policy cannot win by
-            sacrificing another kind's deadline).
+            sacrificing another kind's deadline);
+        (7) on every earlier workload the champion wins (see wins below), the
+            new policy wins too, so wins are never traded away and small
+            losses cannot add up over generations.
+wins:   a policy wins a workload if, at the headline load, it keeps every
+        kind with a deadline within 1 point of the best deadline-met any
+        policy reached there (it is a deadline-keeper) and its score is within
+        the noise band of the best score of any other deadline-keeper. The
+        loop must end (by generation 25) with a champion that wins every
+        workload.
 A workload on which both the policy and the champion have paired runs
 (run.py --paired) in the same generation is decided from those runs alone
 (paired confirmation, README.md). A rejection prints a FAILED_ON line naming
@@ -83,6 +93,42 @@ def score(idx, s, policy, load):
     v, n = S.metric(idx, s["id"], (policy, "hints", "hints"), load,
                     "kind:" + s["score"]["kind"], s["score"]["percentile"])
     return v if n else None
+
+
+def standing(idx, s, head):
+    """Every policy measured with hints at the headline load of workload s:
+    (scores, deadline-keepers, best deadline-met per kind, deadline-met per
+    (policy, kind)). A policy without a deadline-met value for a kind is not
+    judged on that kind."""
+    wid = s["id"]
+    pols = sorted({k[1] for k in idx if k[0] == wid and k[2:5] == ("hints", "hints", head)})
+    sc = {p: score(idx, s, p, head) for p in pols}
+    sc = {p: v for p, v in sc.items() if v is not None}
+    met = {}
+    for k in s["kinds"]:
+        if k.get("deadline_us", 0) > 0:
+            for p in sc:
+                v, _ = S.metric(idx, wid, (p, "hints", "hints"), head, "kind:" + k["name"],
+                                "deadline_met")
+                if v is not None:
+                    met[(p, k["name"])] = v
+    best = {}
+    for (p, kn), v in met.items():
+        best[kn] = max(best.get(kn, v), v)
+    keep = [p for p in sc if all(met.get((p, kn), b) >= b - 1.0 for kn, b in best.items())]
+    return sc, keep, best, met
+
+
+def wins_on(idx, s, head, pol, exclude=()):
+    """(win, best other deadline-keeper, its score) for pol on workload s,
+    ignoring the policies in exclude."""
+    sc, keep, _, _ = standing(idx, s, head)
+    if pol not in sc:
+        return None, None, None
+    rivals = [p for p in keep if p != pol and p not in exclude]
+    bp = min(rivals, key=sc.get) if rivals else None
+    win = pol in keep and (bp is None or sc[pol] <= (1 + NOISE) * sc[bp])
+    return win, bp, sc.get(bp)
 
 
 def gate(args):
@@ -170,6 +216,14 @@ def accept(args):
             good = a <= 1.10 * b
             print("  %s: score %s vs %s (%+.1f%%) -> %s" % (
                 wid, S.fmt(a), S.fmt(b), 100 * rel, "ok" if good else "FAIL (2)"))
+            # rule 7: the champion's win (over every other policy but the new
+            # one) must be kept; from paired runs, against the champion alone
+            cw, _, _ = wins_on(idx, s, head, champ, exclude=(new,))
+            if cw:
+                nw, bp, bs = wins_on(widx, s, head, new)
+                print("    win kept: %s (best other deadline-keeper %s %s) -> %s" % (
+                    "yes" if nw else "no", bp, S.fmt(bs), "ok" if nw else "FAIL (7)"))
+                good = good and bool(nw)
         ok &= good
         for k in s["kinds"]:
             if k["name"] == s["score"]["kind"] or wid == "w0":
@@ -217,6 +271,45 @@ def accept(args):
     return 0 if ok else 1
 
 
+def wins(args):
+    idx, cards, workloads = data()
+    pol = args.policy or champion(cards)
+    ids = sorted(workloads, key=lambda w: (int(w[1:].rstrip("abcdefghij")), w))
+    won, lost = [], []
+    print("%-5s %8s %9s  %-28s %7s  %s" % ("wl", "headline", pol, "best other deadline-keeper",
+                                          "gap", "result"))
+    for wid in ids:
+        s = workloads[wid]
+        if wid == "w0" or s.get("status") == "superseded":
+            continue
+        head = S.headline_load(idx, wid, s["load_rps"])
+        if not head:
+            continue
+        sc, keep, best, met = standing(idx, s, head)
+        win, bp, bs = wins_on(idx, s, head, pol)
+        if win is None:
+            print("%-5s %8d %9s  no data" % (wid, head, "-"))
+            lost.append(wid)
+            continue
+        gap = "%+.1f%%" % (100 * (sc[pol] / bs - 1)) if bs else "-"
+        why = ""
+        if pol not in keep:
+            why = " (not a deadline-keeper: %s)" % ", ".join(
+                "%s %.2f vs best %.2f" % (kn, met[(pol, kn)], b) for kn, b in best.items()
+                if met.get((pol, kn), b) < b - 1.0)
+        # faster policies left out for missing deadlines, for the record
+        out = ["%s %s" % (p, S.fmt(sc[p])) for p in sorted(sc, key=sc.get)
+               if p not in keep and sc[p] < sc[pol]]
+        print("%-5s %8d %9s  %-28s %7s  %s%s%s" % (
+            wid, head, S.fmt(sc[pol]), "%s %s" % (bp, S.fmt(bs)) if bp else "-", gap,
+            "WIN" if win else "LOSS", why,
+            ("  [faster but misses deadlines: %s]" % ", ".join(out)) if out else ""))
+        (won if win else lost).append(wid)
+    print("%s wins %d of %d workloads%s" % (pol, len(won), len(won) + len(lost),
+                                            ("; losses: " + " ".join(lost)) if lost else ""))
+    return 0 if not lost else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -226,10 +319,13 @@ def main():
     a.add_argument("--against", help="compare with this policy instead of the champion")
     a.add_argument("--newest", help="the newest workload id (default: highest id)")
     sub.add_parser("champion")
+    w = sub.add_parser("wins"); w.add_argument("--policy", help="default: the champion")
     args = ap.parse_args()
     if args.cmd == "champion":
         print(champion(data()[1]))
         return 0
+    if args.cmd == "wins":
+        return wins(args)
     return gate(args) if args.cmd == "gate" else accept(args)
 
 

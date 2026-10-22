@@ -88,7 +88,27 @@ saturation; on w0 (no hints) p99 one level below the headline load stays
 within the noise band and the throughput sustained when overloaded within 1%;
 and any
 other kind with a deadline loses at most 1 percentage point of its
-deadline-met rate. A rejected policy stays in the tree with `status: rejected`.
+deadline-met rate. From generation 19, also: on every earlier workload the
+champion wins (below), the new policy must win too. A rejected policy stays in
+the tree with `status: rejected`.
+
+**Winning a workload, and the end of the loop.** The loop ends no later than
+generation 25, with a champion that wins every workload (the owner's goal,
+set in generation 19). A policy *wins* a workload if, at the headline load,
+every kind with a deadline meets within 1 point of the best deadline-met any
+policy reached there (it is a *deadline-keeper*), and its score is within the
+noise band of the best score of any other deadline-keeper. So prio's faster
+reads on w18–w20 do not count, because it misses the fan-out or suggestion
+deadlines, but its faster reads on w17 do. `./judge.py wins` prints the table
+for the champion. The per-generation rules alone let deadline-met fall up to
+1 point per generation; on w5–w10 the champion has drifted 2–3.6 points below
+prio's query deadline-met that way, so those count as losses until fixed.
+Plan: generations 19–21 add workloads as before, and every policy agent sees
+the win table; generations 22–25 add no workloads and aim at the remaining
+losses. They start with all workloads re-measured in one session (cross-session
+drift is about 6% of p99 and 1.5 points of deadline-met), and end with a
+single-session confirmation of the final policy against fifo, prio and each
+workload's best deadline-keeper.
 
 To save node time, a new policy is judged on *older* workloads at their
 headline load only (`run.py --levels <load>`), or the headline and the two
