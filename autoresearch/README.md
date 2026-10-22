@@ -116,6 +116,17 @@ champion"; rules 2–7 apply to every workload). The last generation ends with a
 single-session confirmation of the final policy against fifo, prio and each
 workload's best deadline-keeper.
 
+Two practices from the convergence generations. **Stale rivals:** the best of
+many measurements from older sessions is a lucky draw, so before a win table
+is trusted, `./judge.py rivals --before <gen>` lists each workload's decisive
+rivals not measured in the current session, and they are re-measured (with the
+champion) until the list is empty; the first two rounds turned w1–w3, w11 and
+w13 back into wins. **Policy probes:** where the policy agent's model is
+uncertain, it submits up to three variants as thin wrappers over one
+implementation (one table row each), and the orchestrator runs each variant
+and the champion at the headline of the targeted and at-risk workloads (2
+repeats, about 30 minutes) before a full evaluation of the best one.
+
 To save node time, a new policy is judged on *older* workloads at their
 headline load only (`run.py --levels <load>`), or the headline and the two
 levels below it for workloads with a LOW kind (rule 4 checks the measured

@@ -6,6 +6,7 @@
   ./judge.py accept --policy x --converge   ... in a convergence generation?
   ./judge.py champion                 which policy is the current champion?
   ./judge.py wins [--policy p]        on which workloads does it win?
+  ./judge.py rivals --before N        which decisive rivals are stale?
 
 The champion is the accepted policy with the highest generation, or the best
 baseline policy (prio) if none has been accepted yet. Rules (README.md):
@@ -335,6 +336,43 @@ def wins(args):
     return 0 if not lost else 1
 
 
+def rivals(args):
+    """Per workload, the champion's decisive rivals last measured before
+    generation --before: the best other deadline-keeper when its score is
+    lower, and the policy with the best deadline-met of each kind when that
+    is above the champion's. The best of many old measurements is biased
+    (each was a lucky draw), so these are re-measured in the current session
+    until none is left. Prints <workload file> <headline> <policies>, the
+    champion last, for a run.py loop."""
+    idx, cards, workloads = data()
+    pol = args.policy or champion(cards)
+    gen = {(r["workload"], r["policy"]): int(r["gen"])
+           for r in S.latest(S.load_rows("summary.csv")) if r["mode"] == "hints"}
+    ids = sorted(workloads, key=lambda w: (int(w[1:].rstrip("abcdefghij")), w))
+    for wid in ids:
+        s = workloads[wid]
+        if wid == "w0" or s.get("status") == "superseded":
+            continue
+        head = S.headline_load(idx, wid, s["load_rps"])
+        sc, keep, best, met = standing(idx, s, head)
+        if pol not in sc:
+            continue
+        cand = set()
+        others = [p for p in keep if p != pol]
+        if others:
+            bp = min(others, key=sc.get)
+            if sc[bp] < sc[pol]:
+                cand.add(bp)
+        for kn in best:
+            top = max((met[(p, kn)], p) for p in sc if (p, kn) in met)
+            if top[1] != pol and top[0] > met.get((pol, kn), 0):
+                cand.add(top[1])
+        stale = sorted(p for p in cand if gen.get((wid, p), 0) < args.before)
+        if stale:
+            print(s["_file"], head, ",".join(stale + [pol]))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -347,12 +385,17 @@ def main():
                    help="convergence generation: no newest workload; must win more workloads")
     sub.add_parser("champion")
     w = sub.add_parser("wins"); w.add_argument("--policy", help="default: the champion")
+    rv = sub.add_parser("rivals"); rv.add_argument("--policy", help="default: the champion")
+    rv.add_argument("--before", type=int, required=True,
+                    help="re-measure rivals last measured before this generation")
     args = ap.parse_args()
     if args.cmd == "champion":
         print(champion(data()[1]))
         return 0
     if args.cmd == "wins":
         return wins(args)
+    if args.cmd == "rivals":
+        return rivals(args)
     return gate(args) if args.cmd == "gate" else accept(args)
 
 
