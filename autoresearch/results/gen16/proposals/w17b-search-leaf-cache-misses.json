@@ -1,0 +1,118 @@
+{
+  "id": "w17b",
+  "slug": "search-leaf-cache-misses",
+  "generation": 16,
+  "title": "A search shard where cached and uncached queries carry one hint, at 90% load",
+  "description": "A search index shard on six cores: two thirds of user searches are answered from the shard's result cache in about 7 us, the rest miss it and score posting lists for an exponentially distributed time averaging about 72 us; dashboards send slower aggregations, bulk indexing and background segment merges keep the cores busy, and a balancer sends health checks. The server cannot know whether a search will hit the cache until it runs it, so every search carries the same honest average hint and the same 500 us deadline. About a quarter of the misses run past the 100 us time slice and come back to the queue with their earlier deadline, so a scheduler that trusts the label runs them again ahead of cached searches that would take a few microseconds. The score is the cached searches' tail at 90% of capacity.",
+  "changed_from_previous": "A new service instead of w15's key-value mix (6 cores, 16 connections, honest-average hints kept): a search shard whose cached and uncached searches share one hint, misses exponential (mean 6000 iterations) instead of a 1% bimodal tail, busiest level at 0.9 of capacity instead of 0.82, bursts every 1000 us instead of 4000 (duty 0.25, factor 2).",
+  "difficulty": {
+    "load": 0.9,
+    "tails": 1,
+    "classes": 6,
+    "burst": 1,
+    "inaccuracy": 1,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 6,
+    "time_scale": [
+      5
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 6,
+    "spinning_kthreads": 6,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "hit",
+      "service": "constant:600",
+      "weight": 0.3,
+      "deadline_us": 500,
+      "hint": {
+        "class": "high",
+        "deadline_us": 500,
+        "service_us": 29
+      }
+    },
+    {
+      "name": "miss",
+      "service": "exponential:6000",
+      "weight": 0.15,
+      "deadline_us": 500,
+      "hint": {
+        "class": "high",
+        "deadline_us": 500,
+        "service_us": 29
+      }
+    },
+    {
+      "name": "agg",
+      "service": "constant:10000",
+      "weight": 0.05,
+      "deadline_us": 2000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 2000,
+        "service_us": 120
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "index",
+      "service": "constant:3400",
+      "weight": 0.35,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "merge",
+      "service": "constant:3400",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    45000,
+    90000,
+    120000,
+    130000,
+    136000,
+    140000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "hit",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. A search engine's index shard (an Elasticsearch/Lucene shard, or a web-search index-serving node) answers repeated searches from a result cache (Elasticsearch's shard request cache; result caching in web search, Baeza-Yates et al., SIGIR 2007, which reports hit rates of this order) and evaluates the rest over posting lists, whose cost is long-tailed: on Bing's index servers most queries are fast and a few take ten or more times longer (Jeon et al., EuroSys 2013 and SIGIR 2014). The cache is consulted inside the search handler, so the server sets one hint for every search: class high, the 500 us query SLO, and the handler's measured mean run time, (0.30 x 600 + 0.15 x 6000) / 0.45 = 2400 iterations / 83 per us = 29 us. The same node also serves dashboard aggregations (high, due in 2 ms, 120 us), balancer health checks (high, 1 ms, 1 us), bulk indexing (normal) and background segment merges (low), as Elasticsearch data nodes do. Approximations: cached searches are constant; uncached cost is exponential with mean 6000 iterations (72 us), the only long-tailed shape loadgen offers (real costs are heavier-tailed); indexing and merges are constant 41 us chunks; the 2:1 hit ratio, weights and all work sizes are invented to fit the story. Hits and misses are two client kinds with one server hint (as w15's get and bigget), so the score is the cached searches' tail, which ordering can change. Misses have the same 500 us client deadline (7x their mean). Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.30 x 600 + 0.15 x 6000 + 0.05 x 10000 + 0.05 x 85 + 0.35 x 3400 + 0.10 x 3400 = 3114.25 iterations = 31.27 us; 6 / 31.27 us = 191.9k req/s (170.1k with the 4 us allowance). Sized from measured light-load medians (gen 10 lesson): 3114.25 / 83 + 1 = 38.52 us, 6 / 38.52 us = 155.8k req/s. Levels 45k/90k/120k/130k/136k/140k are 28.9/57.8/77.0/83.4/87.3/89.9% of 155.8k; busy-phase rate at 140k is 224k req/s. Bursts use the ladder's 1000 us period so that 90% load stays out of overload (with 4000 us a queueing simulation put fifo's overall median past 1.5x already at 0.9). Headline rule: 45% of requests are 41 us indexing and merge chunks, so the overall median sits on them (light median about 50 us, limit about 75); the simulation (real policy region in C, 6 cores, 16 connections hashed to cores, 100 us slice, stealing, 83 iterations per us, 1 us overhead; it over-reads measured w16 fifo and prio by about 18% and matches the champion) gives fifo overall medians 52 at 45k, 65 at 136k and 73 at 140k, so both busy levels should pass. FIFO penalty: hits wait behind every queued miss, aggregation, index and merge chunk (simulated fifo hit p99 about 490 us at 140k against 26 at 45k). Why the champion has headroom: a miss is cut after 100 us with 25% probability (e^(-8300/6000)) and readied again with its first deadline and the search label, so it ranks ahead of every fresh hit and miss on its core (same learned length, earlier due time) and runs up to another 100 us; p15's overrun rule only catches it from its second return (over 150 us run, 6% of misses). The search label is learned at about 46-57 us on every core (cap 57 at unit 5, from the 500 us deadlines), so p16's afford rule never fires: no shorter kind is due twice as late within the 750 us split (health checks are past it). Simulated at 140k (4 seeds): sjf_overrun and sjf_afford hit p99 214 and 213 us with hit runqueue-wait p99 164 and 161 (share about 0.76), prio 275, fifo 493; an oracle-like variant that demotes threads already yielded once (overrun threshold 50 us) gives 161 (-25%) with miss deadline-met 99.12 -> 99.03 and agg p99 +11%. The rest of the hit tail is misses queued ahead on the same label (FIFO, not removable) and running misses. Prediction at 140k (headline): fifo hit p99 about 400-500 us, overall median about 65-75; champion hit p99 about 190-240 us with hit runqueue-wait p99 about 140-180 (share about 0.72-0.80); time-slice yields about 10k per second; miss deadline-met about 98.5-99.3%; health p99 above prio's (health ranks behind searches); at 45k every policy's hit p99 about 25-30 us. Server hint map: hit and miss = high:500:29. No run.py changes are needed."
+}

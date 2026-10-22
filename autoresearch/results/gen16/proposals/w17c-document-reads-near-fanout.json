@@ -1,0 +1,107 @@
+{
+  "id": "w17c",
+  "slug": "document-reads-near-fanout",
+  "generation": 16,
+  "title": "The fan-out leaf service where user-facing reads are only 2.5 times shorter than sub-requests, at 90% load",
+  "description": "The same RPC leaf service as w16 on six cores (frontend reads due in 800 us, fan-out sub-requests from an aggregator due in 300 us, health checks, background export and rebuild), except that each frontend read now fetches and decodes a whole document, about 16 us of work instead of 8, so a read is only 2.5 times shorter than a 41 us sub-request, and traffic runs at 90% of capacity in short bursts every millisecond. A scheduler that ranks by deadline still lets any sub-request that arrives up to about 300 us after a read run first, and a rule that lets very short requests pass long ones that can spare the time no longer applies, because the reads are not short enough. So the reads' tail is spent waiting in the queue behind sub-requests that had time to spare. The score is the reads' tail; the sub-requests must keep meeting their deadlines.",
+  "changed_from_previous": "w16 with frontend reads doing twice the work (1360 instead of 680 iterations, hint 16 us instead of 8), the busiest levels at 0.9 of capacity instead of 0.82 (159k instead of 155k req/s with 6.5% more work per request), and bursts every 1000 us instead of 4000 (duty 0.25, factor 2 unchanged); every other kind, hint, deadline, 6 cores and 48 connections unchanged.",
+  "difficulty": {
+    "load": 0.9,
+    "tails": 0,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 6,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 6,
+    "spinning_kthreads": 6,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "point",
+      "service": "constant:1360",
+      "weight": 0.25,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 16
+      }
+    },
+    {
+      "name": "fanout",
+      "service": "constant:3400",
+      "weight": 0.4,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    53000,
+    106000,
+    142000,
+    150000,
+    155000,
+    159000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "point",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. A leaf of a fan-out RPC tree (Dean and Barroso, The Tail at Scale, CACM 2013): the aggregator queries every leaf and must wait for the slowest, so it propagates a tight per-leaf deadline (gRPC and Stubby deadline propagation), while frontend reads arrive with most of the page's budget left; load balancers send health checks (gRPC health checking, Envoy active health checks); export and index rebuilds run as background work. New here: a frontend read fetches and decodes a whole stored document or feature record rather than a single small value, so it costs a sizeable fraction of a sub-request; the 2.5x ratio (16 us against 41 us) is invented, w16's work sizes, weights and deadlines are kept. Arrivals: datacenter microbursts mostly last well under a millisecond (Benson et al., IMC 2010; Zhang et al., IMC 2017), so bursts come every 1000 us, the ladder's base period, instead of w16's 4000 us; same duty and factor, so this is not a burst step, and each burst builds a quarter of w16's backlog, which is what lets the load rise to 0.9 within the headline rule. Every kind is constant work; hints are what the server sets: class by role, the caller's propagated deadline, the handler's measured run time (iterations / 83 per us). Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 1360 + 0.40 x 3400 + 0.05 x 85 + 0.15 x 3400 + 0.15 x 3400 = 2724.25 iterations = 27.35 us; 6 / 27.35 us = 219.4k req/s (191.4k with the 4 us allowance). Sized from w16's measured light-load medians (point 17.0 us at 680 iterations, fanout, export and rebuild 50.0 at 3400, so about 82-83 iterations per us; gen 10 lesson: 83 per us plus 1 us per request): 2724.25 / 83 + 1 = 33.82 us, 6 / 33.82 us = 177.4k req/s. Levels 53k/106k/142k/150k/155k/159k are 29.9/59.8/80.0/84.6/87.4/89.6% of 177.4k; busy-phase rate at 159k is 254.4k req/s. Headline rule: the overall median is a 41 us kind, as on w16 (fifo 49.0 at 55k, limit about 74). A model with the real policy region (6 cores, 48 connections hashed to cores, 100 us slice, bursts, stealing), whose fifo median rise matched w16's measured one to within 3.5 us at 140k-155k (it under-reads it by up to 25%), gives fifo medians +12 us at 155k and about +18 at 159k (+20 at 160k, +34 at 165k), so both busy levels should pass at about 62-66 and 66-72; if 159k fails, 155k is the headline. FIFO penalty: reads wait behind every queued sub-request, export and rebuild (model fifo point p99 361 at 156k and 417 at 160k against 37 at 52k). Why the champion leaves headroom: sjf_overrun ranks a HIGH thread by deadline plus 8 times its learned length, so a read's turn is 800 + 8 x 17.9 = 943 us after it becomes ready and a sub-request's 300 + 8 x 42.5 = 640 us: any sub-request readied up to about 300 us after a read runs first (w16: 236). sjf_afford's pass needs the short thread to be at most a third as long (14.2 us against 17.9 learned), so it never fires for reads, only for health checks; reads get exactly p15's order (in the model both give point p99 398-400 at 156k and 428-429 at 160k, wait p99 350 and 382). With w16's 8 us reads at the same load and bursts sjf_afford reaches 65 us, so the length ratio, not the load, is what leaves the gap. The gap is the ordering: prio gives 221-237, and a slack-guarded shortest-first order 77-89 with sub-request deadline-met 99.1-99.6% against the champion's 99.9 (room 1.0 point), so a policy must again spend the sub-requests' slack, now without a fixed length-ratio cut-off. Prediction at 159k (headline): fifo point p99 about 330-440 us, fifo overall median about 66-72 us; sjf_overrun and sjf_afford point p99 about 360-460 with point runqueue-wait p99 about 310-410 (share about 0.85-0.90), equal within noise; fanout deadline-met above 99.6%; health p99 about 100-160 under sjf_afford and 380-470 under sjf_overrun; prio point p99 about 200-270. At 53k every policy's point p99 about 33-40 us. No run.py changes are needed."
+}
