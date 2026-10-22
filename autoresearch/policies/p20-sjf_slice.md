@@ -3,7 +3,7 @@
 - id: p20
 - config: sjf_slice
 - generation: 19
-- status: candidate
+- status: rejected
 - builds_on: p19
 - changed_from_previous: p19 plus: in the second scan, a waiting HIGH thread more than half again as long as the chosen one may also pass it, under p19's deadline cut, if the chosen thread keeps 40% of its window as slack after a whole 100 µs time slice and the passer has already used at least as large a share of its window as the chosen thread will have after waiting for it (p18's share test); on w20 searches pass fresh suggestions, and on w1–w19 decisions are p19's (6 of about 30M picks differ in the model, on w11 and w12)
 - commit: d302e10
@@ -54,4 +54,19 @@ Like sjf_tier, each core runs helper threads first, then HIGH, NORMAL and LOW th
 | Rule 7 | the 11 wins | all kept (w20 search stays at or below sjf_share's 401) |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 19 on rule 1 alone (results/gen19/), decided from w20:
+the orchestrator measured the newest workload first and, since the score
+missed both thresholds, did not run the older workloads.
+
+| Workload | Metric | sjf_tier | sjf_slice | Change | Notes |
+|---|---|---|---|---|---|
+| w20 (108k) | search p99 (score) | 406.5 µs | 399.0 µs | −1.8% (−7.5 µs) | predicted −2 to −5%; needs ≤ 365.9 or a 10 µs gain (≤ 396.5) |
+| w20 (104k) | search p99 | 369.5 µs | 384.0 µs | +3.9% | predicted −2 to −4%; both within the 6% noise band |
+| w20 | search queue-wait p99 | 311.9 µs | 306.8 µs | −5.1 µs | predicted −8 to −15 |
+| w20 | suggest p99 / met | 129.5 µs / 99.96% | 138.5 µs / 99.965% | +7.0% | predicted +10 to +20 µs |
+| w20 | health p99 | 98.0 µs | 99.0 µs | | unchanged |
+
+The prediction held: charging a full slice keeps the suggestions within their
+cap, but each pass saves a search only about one suggestion's run, so a
+search cannot gain much inside the policy region while suggestions keep
+their p99. The 95 µs of search p99 outside the queue needs preemption.

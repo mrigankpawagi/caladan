@@ -21,6 +21,7 @@ Mode `ignore` means the server did not apply hints; build `stock` is Caladan wit
 | [p18](policies/p18-sjf_share.md) | `sjf_share` | 17 | accepted | p17 plus: when p17's shortest waiting HIGH thread does not pass, the oldest waiting HIGH thread (not overrun) may pass the order's choice if it became ready first and the chosen thread has not run yet, it is due at least twice as late within p9's split, it is at most half again as long, the chosen thread keeps 30% of its relative deadline as slack after it, and it has already used at least as large a share of its own deadline window as the chosen thread will have used after waiting for it; on w18 frontend reads pass fanouts that arrived after them, and on w1–w17 decisions are p17's (42 of 35M picks differ in the model) |
 | [p19](policies/p19-sjf_tier.md) | `sjf_tier` | 18 | accepted | p18 plus: in the equal-cost pass, the passer must be due later than the chosen thread by more than the chosen thread's 30% reserve plus both lengths (instead of at least twice as late), must have used at least as large a share of its window as the chosen thread has so far (instead of as large as it will have after waiting), and is the oldest waiting HIGH thread (not overrun) that meets the conditions, found in a second scan (instead of the oldest waiting HIGH thread); on w19 frontend fetches pass mid-tier and fan-out fetches that arrived after them, mids never pass fanouts, and on w1–w17 decisions are p18's (at most 0.017% of picks differ in the model) |
 | [p2](policies/p2-edf_high.md) | `edf_high` | 1 | accepted | p1 plus: among HIGH threads, run the one whose deadline comes first (oldest first on ties; a HIGH thread without a deadline counts as due 1 ms after it became ready) |
+| [p20](policies/p20-sjf_slice.md) | `sjf_slice` | 19 | rejected | p19 plus: in the second scan, a waiting HIGH thread more than half again as long as the chosen one may also pass it, under p19's deadline cut, if the chosen thread keeps 40% of its window as slack after a whole 100 µs time slice and the passer has already used at least as large a share of its window as the chosen thread will have after waiting for it (p18's share test); on w20 searches pass fresh suggestions, and on w1–w19 decisions are p19's (6 of about 30M picks differ in the model, on w11 and w12) |
 | [p3](policies/p3-sjf_guard.md) | `sjf_guard` | 2 | accepted | p2 plus: among HIGH threads, one that must start within 20 µs to finish by its deadline runs first (most urgent first; a thread that can no longer finish in time is not urgent), and the others run in order of deadline plus 8 times their expected run time instead of deadline alone |
 | [p4](policies/p4-sjf_rescue.md) | `sjf_rescue` | 3 | rejected | p3 with two changes among HIGH threads: one with less than 13 µs to spare before it must start (p3: less than 0) counts as too late to save, so it is never urgent and waits for any shorter HIGH thread; and p3's fixed 20 µs urgency guard is replaced by a check against the thread p3's order would run: the savable HIGH thread with the least time to spare runs first only if waiting for that thread (its expected run time plus 4 µs) would leave it less than 13 µs |
 | [p5](policies/p5-sjf_learn.md) | `sjf_learn` | 4 | rejected | p4 plus: each core learns, for each run-time hint value, how long its HIGH threads really run (timed between consecutive picks, leaning toward the long runs), and uses the larger of that and p4's hint plus 4 µs as a HIGH thread's length, both for ordering and for the rescue check |
@@ -50,8 +51,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 | p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
+| p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -80,8 +81,8 @@ req p99 by offered load (req/s):
 | sjf_unit | hints | hints |  |  | 72.0 |  |  | inf |
 | sjf_upper | hints | hints |  |  | 72.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 | fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
+| fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -347,9 +348,9 @@ Score: `get` p99. Headline load: 390,000 req/s.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p2 edf_high | hints | hints | 161.5 (159.0–164.0) | -16% | 93.28 | 170.0 | 181.0 | 272.0 | 295.5 | 389016 | 14.21 | 27.47 | 2 | 4 |
 | p0 fifo | hints | hints | 192.0 (188.0–196.0) | +0% | 90.48 | 199.0 | 210.0 | 210.0 | 209.5 | 388930 | 17.86 | 17.83 | 2 | 4 |
-| p1 prio | hints | hints | 159.0 (158.0–160.0) | -17% | 93.57 | 167.0 | 177.5 | 271.0 | 292.5 | 388709 | 14.05 | 27.54 | 2 | 4 |
+| p1 prio | hints | hints | 156.0 (156.0–156.0) | -19% | 93.67 | 164.5 | 175.5 | 262.0 | 285.5 | 388342 | 13.85 | 27.05 | 2 | 19 |
 | p16 sjf_afford | hints | hints | 81.0 (81.0–81.0) | -58% | 99.88 | 105.0 | 194.5 | 279.0 | 299.5 | 388848 | 11.97 | 29.21 | 2 | 15 |
-| p8 sjf_capped | hints | hints | 80.5 (80.0–81.0) | -58% | 99.90 | 103.5 | 190.5 | 272.0 | 294.0 | 388205 | 11.58 | 28.22 | 2 | 7 |
+| p8 sjf_capped | hints | hints | 80.5 (80.0–81.0) | -58% | 99.87 | 105.0 | 195.5 | 279.0 | 301.0 | 388490 | 11.93 | 29.28 | 2 | 19 |
 | p3 sjf_guard | hints | hints | 102.5 (102.0–103.0) | -47% | 98.89 | 106.5 | 196.5 | 285.5 | 307.5 | 389011 | 12.40 | 29.88 | 2 | 7 |
 | p5 sjf_learn | hints | hints | 84.5 (84.0–85.0) | -56% | 99.88 | 106.0 | 194.5 | 279.5 | 299.5 | 387918 | 12.04 | 29.33 | 2 | 7 |
 | p10 sjf_mixed | hints | hints | 81.0 (81.0–81.0) | -58% | 99.89 | 105.0 | 195.0 | 280.0 | 302.0 | 388955 | 12.27 | 29.93 | 2 | 9 |
@@ -358,10 +359,10 @@ Score: `get` p99. Headline load: 390,000 req/s.
 | p15 sjf_overrun | hints | hints | 82.0 (81.0–83.0) | -57% | 99.84 | 107.5 | 205.0 | 294.0 | 319.5 | 388052 | 12.68 | 30.91 | 2 | 14 |
 | p9 sjf_pair | hints | hints | 81.5 (81.0–82.0) | -58% | 99.85 | 106.0 | 201.0 | 288.0 | 311.5 | 388218 | 12.31 | 30.30 | 2 | 8 |
 | p14 sjf_ratio | hints | hints | 82.0 (81.0–83.0) | -57% | 99.84 | 107.0 | 206.0 | 296.5 | 318.5 | 388738 | 12.96 | 31.59 | 2 | 13 |
-| p4 sjf_rescue | hints | hints | 94.0 (94.0–94.0) | -51% | 99.43 | 98.5 | 198.0 | 286.5 | 311.5 | 389346 | 12.08 | 29.49 | 2 | 4 |
+| p4 sjf_rescue | hints | hints | 94.0 (93.0–95.0) | -51% | 99.41 | 99.5 | 194.0 | 279.5 | 299.5 | 388638 | 11.67 | 28.35 | 2 | 19 |
 | p12 sjf_scale | hints | hints | 82.0 (82.0–82.0) | -57% | 99.79 | 106.0 | 201.5 | 289.0 | 314.0 | 388260 | 12.13 | 29.54 | 2 | 11 |
 | p18 sjf_share | hints | hints | 81.0 (80.0–82.0) | -58% | 99.81 | 106.5 | 199.5 | 285.0 | 305.0 | 388744 | 12.14 | 29.63 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 81.5 (81.0–82.0) | -58% | 99.84 | 107.0 | 204.5 | 290.5 | 311.0 | 388390 | 12.54 | 30.20 | 2 | 18 |
+| p19 sjf_tier | hints | hints | 81.0 (80.0–82.0) | -58% | 99.84 | 106.5 | 200.5 | 282.5 | 308.5 | 387805 | 12.22 | 29.39 | 2 | 19 |
 | p6 sjf_timed | hints | hints | 91.5 (91.0–92.0) | -52% | 99.69 | 134.0 | 193.0 | 278.0 | 303.5 | 389014 | 11.94 | 28.45 | 2 | 5 |
 | p11 sjf_unit | hints | hints | 81.5 (81.0–82.0) | -58% | 99.82 | 106.5 | 204.5 | 293.0 | 314.5 | 388754 | 12.65 | 31.03 | 2 | 10 |
 | p13 sjf_upper | hints | hints | 81.5 (81.0–82.0) | -58% | 99.87 | 106.5 | 203.0 | 288.0 | 312.5 | 388973 | 12.68 | 30.97 | 2 | 12 |
@@ -375,9 +376,9 @@ get p99 by offered load (req/s):
 |---|---|---|---|---|---|---|---|---|
 | edf_high | hints | hints | 14.0 | 23.5 | 76.0 | 110.5 | 133.5 | 161.5 |
 | fifo | hints | hints | 14.0 | 25.5 | 81.5 | 121.5 | 151.0 | 192.0 |
-| prio | hints | hints | 14.0 | 25.0 | 76.0 | 109.0 | 129.5 | 159.0 |
+| prio | hints | hints |  |  |  |  |  | 156.0 |
 | sjf_afford | hints | hints |  |  |  | 69.0 | 76.0 | 81.0 |
-| sjf_capped | hints | hints |  |  |  | 69.0 | 75.0 | 80.5 |
+| sjf_capped | hints | hints |  |  |  |  |  | 80.5 |
 | sjf_guard | hints | hints | 14.0 | 21.5 | 56.0 | 79.0 | 92.5 | 102.5 |
 | sjf_learn | hints | hints | 14.0 | 22.0 | 53.0 | 71.0 | 78.0 | 84.5 |
 | sjf_mixed | hints | hints |  |  |  | 71.0 | 75.5 | 81.0 |
@@ -386,10 +387,10 @@ get p99 by offered load (req/s):
 | sjf_overrun | hints | hints |  |  |  | 70.0 | 76.0 | 82.0 |
 | sjf_pair | hints | hints |  |  |  | 70.5 | 76.0 | 81.5 |
 | sjf_ratio | hints | hints |  |  |  | 70.5 | 76.5 | 82.0 |
-| sjf_rescue | hints | hints | 14.0 | 22.0 | 56.0 | 76.5 | 86.5 | 94.0 |
+| sjf_rescue | hints | hints |  |  |  |  |  | 94.0 |
 | sjf_scale | hints | hints |  |  |  | 70.0 | 75.0 | 82.0 |
 | sjf_share | hints | hints |  |  |  | 70.0 | 76.0 | 81.0 |
-| sjf_tier | hints | hints |  |  |  | 71.5 | 75.0 | 81.5 |
+| sjf_tier | hints | hints |  |  |  |  |  | 81.0 |
 | sjf_timed | hints | hints | 14.0 | 22.0 | 53.0 | 72.0 | 83.0 | 91.5 |
 | sjf_unit | hints | hints |  |  |  | 70.0 | 76.5 | 81.5 |
 | sjf_upper | hints | hints |  |  |  | 71.0 | 75.5 | 81.5 |
@@ -409,12 +410,12 @@ Score: `get` p99. Headline load: 390,000 req/s.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p2 edf_high | hints | hints | 165.5 (163.0–168.0) | -16% | 92.68 | 173.5 | 185.0 | 281.0 | 307.0 | 389080 | 15.14 | 29.55 | 2 | 5 |
 | p0 fifo | hints | hints | 197.5 (194.0–201.0) | +0% | 89.85 | 203.5 | 216.0 | 217.0 | 216.0 | 388338 | 18.73 | 18.72 | 2 | 5 |
-| p1 prio | hints | hints | 161.0 (160.0–162.0) | -18% | 93.05 | 169.0 | 181.5 | 275.0 | 297.5 | 388711 | 14.62 | 28.32 | 2 | 5 |
-| p16 sjf_afford | hints | hints | 81.0 (81.0–81.0) | -59% | 99.88 | 105.0 | 194.5 | 275.0 | 299.0 | 388619 | 11.82 | 28.58 | 2 | 15 |
+| p1 prio | hints | hints | 163.5 (160.0–167.0) | -17% | 93.36 | 171.0 | 183.0 | 276.0 | 300.5 | 388422 | 14.15 | 27.62 | 2 | 19 |
+| p16 sjf_afford | hints | hints | 81.5 (80.0–83.0) | -59% | 99.82 | 105.5 | 198.0 | 283.5 | 304.5 | 388308 | 12.08 | 29.39 | 2 | 19 |
 | p8 sjf_capped | hints | hints | 81.0 (81.0–81.0) | -59% | 99.87 | 104.5 | 196.0 | 281.0 | 303.5 | 388623 | 11.91 | 29.11 | 2 | 7 |
 | p3 sjf_guard | hints | hints | 143.0 (142.0–144.0) | -28% | 89.34 | 112.5 | 198.5 | 292.0 | 314.5 | 389367 | 15.11 | 30.29 | 2 | 5 |
-| p5 sjf_learn | hints | hints | 200.0 (200.0–200.0) | +1% | 90.22 | 104.5 | 193.0 | 280.0 | 301.5 | 388788 | 15.23 | 30.02 | 2 | 5 |
-| p10 sjf_mixed | hints | hints | 81.0 (81.0–81.0) | -59% | 99.89 | 105.5 | 197.5 | 281.0 | 304.5 | 388922 | 12.46 | 30.45 | 2 | 9 |
+| p5 sjf_learn | hints | hints | 201.0 (201.0–201.0) | +2% | 90.62 | 103.0 | 190.0 | 272.5 | 294.0 | 388604 | 14.39 | 28.02 | 2 | 19 |
+| p10 sjf_mixed | hints | hints | 81.0 (81.0–81.0) | -59% | 99.87 | 105.5 | 195.5 | 278.0 | 301.5 | 388222 | 11.90 | 28.72 | 2 | 19 |
 | p7 sjf_nohint | hints | hints | 140.5 (140.0–141.0) | -29% | 89.66 | 107.5 | 189.5 | 275.0 | 297.0 | 388721 | 14.67 | 29.26 | 2 | 6 |
 | p17 sjf_older | hints | hints | 82.0 (81.0–83.0) | -58% | 99.82 | 106.5 | 204.0 | 289.0 | 314.5 | 388514 | 12.56 | 30.61 | 2 | 16 |
 | p15 sjf_overrun | hints | hints | 81.5 (81.0–82.0) | -59% | 99.83 | 107.5 | 203.5 | 294.5 | 319.0 | 388744 | 12.86 | 31.51 | 2 | 14 |
@@ -422,13 +423,13 @@ Score: `get` p99. Headline load: 390,000 req/s.
 | p14 sjf_ratio | hints | hints | 82.5 (82.0–83.0) | -58% | 99.81 | 108.0 | 208.0 | 300.5 | 325.5 | 388778 | 12.68 | 31.05 | 2 | 13 |
 | p12 sjf_scale | hints | hints | 81.0 (81.0–81.0) | -59% | 99.86 | 105.5 | 197.5 | 285.0 | 304.5 | 388386 | 12.42 | 30.57 | 2 | 12 |
 | p18 sjf_share | hints | hints | 81.5 (80.0–83.0) | -59% | 99.83 | 106.0 | 199.0 | 286.5 | 309.5 | 387886 | 12.16 | 29.60 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 81.0 (81.0–81.0) | -59% | 99.85 | 106.0 | 199.0 | 287.5 | 306.5 | 389042 | 12.28 | 29.76 | 2 | 18 |
+| p19 sjf_tier | hints | hints | 81.0 (80.0–82.0) | -59% | 99.88 | 106.0 | 198.5 | 286.0 | 306.0 | 388655 | 12.12 | 29.24 | 2 | 19 |
 | p6 sjf_timed | hints | hints | 92.0 (92.0–92.0) | -53% | 99.58 | 140.5 | 197.0 | 290.5 | 312.0 | 388104 | 12.05 | 29.23 | 2 | 5 |
 | p11 sjf_unit | hints | hints | 82.0 (82.0–82.0) | -58% | 99.83 | 108.0 | 202.0 | 291.0 | 311.5 | 388489 | 12.69 | 31.13 | 2 | 10 |
 | p13 sjf_upper | hints | hints | 81.5 (81.0–82.0) | -59% | 99.84 | 106.5 | 201.5 | 290.5 | 309.0 | 388472 | 12.65 | 30.98 | 4 | 12 |
 | p0 fifo | ignore | hints | 192.5 (188.0–197.0) | -3% | 90.17 | 201.5 | 212.0 | 213.0 | 211.0 | 388973 | - | 18.27 | 2 | 5 |
 
-Best with hints applied: **sjf_afford** (81.0 µs).
+Best with hints applied: **sjf_capped** (81.0 µs).
 
 get p99 by offered load (req/s):
 
@@ -436,12 +437,12 @@ get p99 by offered load (req/s):
 |---|---|---|---|---|---|---|---|---|
 | edf_high | hints | hints | 14.0 | 23.5 | 76.0 | 113.0 | 137.0 | 165.5 |
 | fifo | hints | hints | 14.0 | 25.5 | 83.0 | 135.5 | 164.0 | 197.5 |
-| prio | hints | hints | 14.0 | 24.0 | 77.0 | 109.0 | 137.0 | 161.0 |
-| sjf_afford | hints | hints |  |  |  | 69.5 | 75.5 | 81.0 |
+| prio | hints | hints |  |  |  |  |  | 163.5 |
+| sjf_afford | hints | hints |  |  |  |  |  | 81.5 |
 | sjf_capped | hints | hints |  |  |  | 70.5 | 75.0 | 81.0 |
 | sjf_guard | hints | hints | 14.0 | 26.0 | 95.5 | 122.0 | 133.5 | 143.0 |
-| sjf_learn | hints | hints | 14.0 | 26.5 | 93.0 | 124.5 | 158.0 | 200.0 |
-| sjf_mixed | hints | hints |  |  |  | 71.0 | 76.5 | 81.0 |
+| sjf_learn | hints | hints |  |  |  |  |  | 201.0 |
+| sjf_mixed | hints | hints |  |  |  |  |  | 81.0 |
 | sjf_nohint | hints | hints |  |  |  | 122.5 | 132.0 | 140.5 |
 | sjf_older | hints | hints |  |  |  | 70.0 | 76.5 | 82.0 |
 | sjf_overrun | hints | hints |  |  |  | 71.0 | 76.0 | 81.5 |
@@ -449,7 +450,7 @@ get p99 by offered load (req/s):
 | sjf_ratio | hints | hints |  |  |  | 70.0 | 77.0 | 82.5 |
 | sjf_scale | hints | hints |  |  |  | 70.5 | 76.0 | 81.0 |
 | sjf_share | hints | hints |  |  |  | 69.0 | 75.5 | 81.5 |
-| sjf_tier | hints | hints |  |  |  | 69.5 | 76.5 | 81.0 |
+| sjf_tier | hints | hints |  |  |  |  |  | 81.0 |
 | sjf_timed | hints | hints | 14.0 | 25.5 | 53.0 | 71.5 | 83.5 | 92.0 |
 | sjf_unit | hints | hints |  |  |  | 70.0 | 76.0 | 82.0 |
 | sjf_upper | hints | hints |  |  |  | 70.0 | 76.5 | 81.5 |
@@ -467,9 +468,9 @@ Score: `get` p99. Headline load: 380,000 req/s.
 
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| p2 edf_high | hints | hints | 180.5 (177.0–184.0) | -10% | 91.61 | 187.5 | 199.5 | 215.0 | 295.0 | 319.5 | 378182 | 16.43 | 31.69 | 2 | 6 |
+| p2 edf_high | hints | hints | 170.0 (168.0–172.0) | -15% | 91.93 | 178.5 | 190.0 | 204.0 | 288.5 | 311.5 | 378701 | 16.04 | 31.12 | 2 | 19 |
 | p0 fifo | hints | hints | 200.5 (195.0–206.0) | +0% | 88.92 | 206.0 | 219.0 | 234.5 | 218.0 | 219.5 | 378520 | 19.98 | 19.95 | 2 | 6 |
-| p1 prio | hints | hints | 181.0 (179.0–183.0) | -10% | 91.59 | 186.5 | 200.0 | 214.5 | 301.0 | 325.5 | 378763 | 16.43 | 31.95 | 2 | 6 |
+| p1 prio | hints | hints | 175.0 (168.0–182.0) | -13% | 91.72 | 182.0 | 192.5 | 209.0 | 291.0 | 311.0 | 378410 | 16.13 | 31.33 | 2 | 19 |
 | p16 sjf_afford | hints | hints | 84.5 (84.0–85.0) | -58% | 99.81 | 109.5 | 232.0 | 164.0 | 315.5 | 338.0 | 378688 | 14.34 | 34.33 | 2 | 15 |
 | p8 sjf_capped | hints | hints | 84.0 (83.0–85.0) | -58% | 99.81 | 110.0 | 226.5 | 162.0 | 309.0 | 331.5 | 378673 | 13.92 | 33.59 | 2 | 7 |
 | p3 sjf_guard | hints | hints | 139.0 (137.0–141.0) | -31% | 96.28 | 140.0 | 217.5 | 144.5 | 297.0 | 320.0 | 378856 | 14.96 | 33.10 | 2 | 6 |
@@ -480,11 +481,11 @@ Score: `get` p99. Headline load: 380,000 req/s.
 | p9 sjf_pair | hints | hints | 83.5 (83.0–84.0) | -58% | 99.86 | 110.0 | 223.0 | 160.5 | 300.0 | 321.0 | 377844 | 14.05 | 33.97 | 2 | 8 |
 | p14 sjf_ratio | hints | hints | 85.0 (84.0–86.0) | -58% | 99.83 | 110.5 | 234.5 | 164.0 | 319.0 | 339.5 | 378592 | 14.77 | 35.73 | 2 | 13 |
 | p12 sjf_scale | hints | hints | 84.5 (84.0–85.0) | -58% | 99.84 | 110.5 | 232.0 | 164.5 | 312.5 | 337.5 | 377751 | 14.66 | 35.31 | 2 | 12 |
-| p18 sjf_share | hints | hints | 85.0 (84.0–86.0) | -58% | 99.78 | 109.0 | 234.5 | 166.5 | 318.5 | 339.0 | 378074 | 14.46 | 34.82 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 85.0 (85.0–85.0) | -58% | 99.83 | 110.0 | 232.5 | 164.0 | 313.0 | 340.0 | 378206 | 14.64 | 34.84 | 2 | 18 |
+| p18 sjf_share | hints | hints | 84.5 (84.0–85.0) | -58% | 99.81 | 110.5 | 232.5 | 164.0 | 314.0 | 339.0 | 378772 | 14.38 | 34.67 | 2 | 19 |
+| p19 sjf_tier | hints | hints | 84.5 (84.0–85.0) | -58% | 99.86 | 109.5 | 233.5 | 165.5 | 315.5 | 340.5 | 379230 | 14.66 | 34.73 | 2 | 19 |
 | p6 sjf_timed | hints | hints | 96.5 (95.0–98.0) | -52% | 99.26 | 171.5 | 225.0 | 155.0 | 310.5 | 333.5 | 378490 | 14.73 | 33.56 | 2 | 6 |
 | p11 sjf_unit | hints | hints | 84.5 (84.0–85.0) | -58% | 99.85 | 111.0 | 231.5 | 164.5 | 311.5 | 333.5 | 378730 | 14.66 | 35.42 | 2 | 10 |
-| p13 sjf_upper | hints | hints | 84.0 (84.0–84.0) | -58% | 99.88 | 109.5 | 227.0 | 162.0 | 306.5 | 328.0 | 378299 | 14.65 | 35.02 | 4 | 12 |
+| p13 sjf_upper | hints | hints | 84.0 (83.0–85.0) | -58% | 99.83 | 109.5 | 230.5 | 163.5 | 308.5 | 332.5 | 379158 | 14.17 | 34.03 | 2 | 19 |
 | p0 fifo | ignore | hints | 197.5 (197.0–198.0) | -1% | 89.16 | 204.0 | 217.0 | 233.0 | 213.5 | 217.0 | 378408 | - | 19.58 | 2 | 6 |
 
 Best with hints applied: **sjf_pair** (83.5 µs).
@@ -493,9 +494,9 @@ get p99 by offered load (req/s):
 
 | Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 330,000 | 355,000 | 380,000 |
 |---|---|---|---|---|---|---|---|---|
-| edf_high | hints | hints | 14.0 | 26.5 | 90.5 | 122.5 | 146.0 | 180.5 |
+| edf_high | hints | hints |  |  |  |  |  | 170.0 |
 | fifo | hints | hints | 14.0 | 27.0 | 100.0 | 135.0 | 165.5 | 200.5 |
-| prio | hints | hints | 14.0 | 27.0 | 88.5 | 117.0 | 146.0 | 181.0 |
+| prio | hints | hints |  |  |  |  |  | 175.0 |
 | sjf_afford | hints | hints |  |  |  | 71.5 | 77.5 | 84.5 |
 | sjf_capped | hints | hints |  |  |  | 71.5 | 77.0 | 84.0 |
 | sjf_guard | hints | hints | 14.0 | 24.0 | 75.5 | 97.5 | 120.5 | 139.0 |
@@ -506,11 +507,11 @@ get p99 by offered load (req/s):
 | sjf_pair | hints | hints |  |  |  | 72.0 | 77.0 | 83.5 |
 | sjf_ratio | hints | hints |  |  |  | 71.0 | 77.0 | 85.0 |
 | sjf_scale | hints | hints |  |  |  | 73.0 | 78.5 | 84.5 |
-| sjf_share | hints | hints |  |  |  | 71.0 | 77.0 | 85.0 |
-| sjf_tier | hints | hints |  |  |  | 71.0 | 77.5 | 85.0 |
+| sjf_share | hints | hints |  |  |  |  |  | 84.5 |
+| sjf_tier | hints | hints |  |  |  |  |  | 84.5 |
 | sjf_timed | hints | hints | 14.0 | 24.5 | 62.5 | 75.5 | 87.5 | 96.5 |
 | sjf_unit | hints | hints |  |  |  | 71.5 | 78.5 | 84.5 |
-| sjf_upper | hints | hints |  |  |  | 72.0 | 78.5 | 84.0 |
+| sjf_upper | hints | hints |  |  |  |  |  | 84.0 |
 | fifo | ignore | hints | 14.0 | 27.0 | 95.5 | 128.5 | 167.0 | 197.5 |
 
 ## w8: Replica syncs labeled as puts, arriving in bursts
@@ -526,7 +527,7 @@ Score: `get` p99. Headline load: 380,000 req/s.
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p0 fifo | hints | hints | 210.5 (205.0–216.0) | +0% | 87.88 | 217.5 | 229.5 | 244.0 | 227.5 | 230.0 | 378694 | 21.17 | 20.96 | 2 | 7 |
-| p1 prio | hints | hints | 175.5 (173.0–178.0) | -17% | 91.25 | 184.0 | 195.0 | 210.0 | 294.5 | 319.0 | 378770 | 16.80 | 32.50 | 2 | 7 |
+| p1 prio | hints | hints | 177.5 (177.0–178.0) | -16% | 91.69 | 186.0 | 197.5 | 211.5 | 299.0 | 321.5 | 378714 | 16.23 | 31.52 | 2 | 19 |
 | p16 sjf_afford | hints | hints | 84.0 (84.0–84.0) | -60% | 99.84 | 126.0 | 229.0 | 152.0 | 311.5 | 332.0 | 378094 | 14.37 | 34.22 | 2 | 15 |
 | p8 sjf_capped | hints | hints | 84.5 (84.0–85.0) | -60% | 99.84 | 126.5 | 229.5 | 153.5 | 309.0 | 334.0 | 378470 | 14.62 | 34.61 | 2 | 8 |
 | p5 sjf_learn | hints | hints | 89.5 (89.0–90.0) | -57% | 99.71 | 252.0 | 209.5 | 283.5 | 319.5 | 348.5 | 379184 | 16.00 | 35.69 | 2 | 7 |
@@ -534,24 +535,24 @@ Score: `get` p99. Headline load: 380,000 req/s.
 | p7 sjf_nohint | hints | hints | 145.0 (143.0–147.0) | -31% | 95.79 | 133.5 | 225.5 | 159.5 | 311.5 | 333.5 | 378708 | 15.54 | 34.59 | 2 | 7 |
 | p17 sjf_older | hints | hints | 86.0 (86.0–86.0) | -59% | 99.78 | 129.0 | 239.5 | 156.0 | 321.0 | 343.5 | 378636 | 15.13 | 35.71 | 2 | 16 |
 | p15 sjf_overrun | hints | hints | 85.0 (85.0–85.0) | -60% | 99.85 | 126.5 | 233.5 | 152.0 | 314.5 | 337.0 | 378222 | 14.96 | 35.30 | 2 | 14 |
-| p9 sjf_pair | hints | hints | 84.5 (84.0–85.0) | -60% | 99.87 | 126.0 | 228.0 | 152.0 | 310.5 | 332.5 | 378399 | 14.70 | 34.88 | 4 | 8 |
+| p9 sjf_pair | hints | hints | 83.5 (83.0–84.0) | -60% | 99.83 | 126.5 | 226.5 | 151.0 | 305.0 | 330.0 | 378697 | 14.14 | 33.22 | 2 | 19 |
 | p14 sjf_ratio | hints | hints | 85.5 (85.0–86.0) | -59% | 99.81 | 128.5 | 233.0 | 153.5 | 313.0 | 334.0 | 378640 | 14.89 | 35.23 | 2 | 13 |
-| p12 sjf_scale | hints | hints | 84.5 (84.0–85.0) | -60% | 99.81 | 126.5 | 228.5 | 151.0 | 309.0 | 334.5 | 378270 | 14.39 | 34.15 | 2 | 11 |
+| p12 sjf_scale | hints | hints | 84.5 (84.0–85.0) | -60% | 99.82 | 128.5 | 230.5 | 154.0 | 312.0 | 331.0 | 378802 | 14.47 | 34.10 | 2 | 19 |
 | p18 sjf_share | hints | hints | 84.5 (84.0–85.0) | -60% | 99.81 | 127.5 | 228.5 | 151.5 | 309.0 | 332.0 | 378816 | 14.55 | 34.16 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 84.5 (84.0–85.0) | -60% | 99.81 | 127.5 | 232.5 | 153.0 | 317.0 | 334.5 | 378630 | 14.87 | 35.00 | 2 | 18 |
-| p6 sjf_timed | hints | hints | 96.5 (96.0–97.0) | -54% | 99.36 | 196.0 | 206.5 | 221.0 | 300.0 | 320.5 | 378940 | 15.48 | 34.07 | 2 | 7 |
+| p19 sjf_tier | hints | hints | 86.0 (86.0–86.0) | -59% | 99.75 | 129.5 | 240.5 | 153.5 | 328.5 | 348.5 | 378928 | 15.14 | 35.38 | 2 | 19 |
+| p6 sjf_timed | hints | hints | 97.5 (97.0–98.0) | -54% | 99.23 | 196.5 | 212.0 | 223.5 | 307.0 | 333.5 | 378854 | 15.01 | 33.00 | 2 | 19 |
 | p11 sjf_unit | hints | hints | 86.0 (86.0–86.0) | -59% | 99.80 | 128.5 | 239.5 | 154.0 | 327.0 | 352.5 | 378942 | 15.52 | 36.81 | 2 | 10 |
 | p13 sjf_upper | hints | hints | 85.0 (85.0–85.0) | -60% | 99.83 | 127.0 | 238.0 | 154.0 | 321.0 | 346.0 | 378137 | 15.29 | 36.16 | 2 | 12 |
 | p0 fifo | ignore | hints | 205.0 (201.0–209.0) | -3% | 88.58 | 211.5 | 224.5 | 239.5 | 225.0 | 224.0 | 378416 | - | 20.58 | 2 | 7 |
 
-Best with hints applied: **sjf_afford** (84.0 µs).
+Best with hints applied: **sjf_pair** (83.5 µs).
 
 get p99 by offered load (req/s):
 
 | Policy | Mode | Build | 100,000 | 200,000 | 300,000 | 330,000 | 355,000 | 380,000 |
 |---|---|---|---|---|---|---|---|---|
 | fifo | hints | hints | 14.0 | 27.0 | 99.5 | 139.0 | 177.0 | 210.5 |
-| prio | hints | hints | 14.0 | 26.0 | 89.0 | 123.5 | 147.5 | 175.5 |
+| prio | hints | hints |  |  |  |  |  | 177.5 |
 | sjf_afford | hints | hints |  |  |  | 70.5 | 77.5 | 84.0 |
 | sjf_capped | hints | hints |  |  |  | 71.5 | 78.0 | 84.5 |
 | sjf_learn | hints | hints | 14.0 | 23.5 | 61.0 | 73.5 | 81.5 | 89.5 |
@@ -559,12 +560,12 @@ get p99 by offered load (req/s):
 | sjf_nohint | hints | hints | 14.0 | 25.0 | 77.5 | 100.5 | 123.5 | 145.0 |
 | sjf_older | hints | hints |  |  |  | 72.5 | 78.5 | 86.0 |
 | sjf_overrun | hints | hints |  |  |  | 72.0 | 78.5 | 85.0 |
-| sjf_pair | hints | hints |  |  |  | 73.0 | 77.5 | 84.5 |
+| sjf_pair | hints | hints |  |  |  |  |  | 83.5 |
 | sjf_ratio | hints | hints |  |  |  | 73.0 | 79.5 | 85.5 |
-| sjf_scale | hints | hints |  |  |  | 70.0 | 77.0 | 84.5 |
+| sjf_scale | hints | hints |  |  |  |  |  | 84.5 |
 | sjf_share | hints | hints |  |  |  | 72.0 | 77.0 | 84.5 |
-| sjf_tier | hints | hints |  |  |  | 71.5 | 78.0 | 84.5 |
-| sjf_timed | hints | hints | 14.0 | 24.0 | 64.0 | 78.0 | 90.5 | 96.5 |
+| sjf_tier | hints | hints |  |  |  |  |  | 86.0 |
+| sjf_timed | hints | hints |  |  |  |  |  | 97.5 |
 | sjf_unit | hints | hints |  |  |  | 71.0 | 77.5 | 86.0 |
 | sjf_upper | hints | hints |  |  |  | 71.5 | 79.0 | 85.0 |
 | fifo | ignore | hints | 13.5 | 28.0 | 97.5 | 131.0 | 169.0 | 205.0 |
@@ -582,18 +583,18 @@ Score: `get` p99. Headline load: 370,000 req/s.
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p0 fifo | hints | hints | 210.5 (207.0–214.0) | +0% | 87.12 | 217.5 | 229.5 | 244.5 | 244.5 | 231.0 | 231.0 | 368415 | 22.13 | 22.10 | 2 | 8 |
-| p1 prio | hints | hints | 188.0 (185.0–191.0) | -11% | 90.06 | 196.0 | 207.5 | 224.5 | 224.5 | 316.5 | 341.0 | 369096 | 18.33 | 35.49 | 2 | 8 |
+| p1 prio | hints | hints | 183.0 (182.0–184.0) | -13% | 90.22 | 190.0 | 202.0 | 217.5 | 217.5 | 305.0 | 333.0 | 367834 | 17.96 | 34.79 | 2 | 19 |
 | p16 sjf_afford | hints | hints | 86.5 (86.0–87.0) | -59% | 99.81 | 130.5 | 275.0 | 156.5 | 269.0 | 352.0 | 375.5 | 368972 | 16.86 | 41.75 | 2 | 16 |
 | p8 sjf_capped | hints | hints | 96.0 (94.0–102.0) | -54% | 99.23 | 133.5 | 256.5 | 159.0 | 250.5 | 329.0 | 353.0 | 368591 | 15.69 | 38.40 | 4 | 8 |
 | p10 sjf_mixed | hints | hints | 85.5 (85.0–86.0) | -59% | 99.83 | 128.5 | 268.5 | 155.5 | 269.0 | 346.0 | 371.5 | 368278 | 16.33 | 40.14 | 2 | 9 |
-| p7 sjf_nohint | hints | hints | 142.0 (139.0–145.0) | -33% | 96.03 | 129.5 | 215.5 | 155.5 | 301.5 | 317.5 | 340.5 | 368564 | 15.73 | 36.89 | 2 | 8 |
+| p7 sjf_nohint | hints | hints | 141.5 (138.0–145.0) | -33% | 96.10 | 128.0 | 215.0 | 154.5 | 306.0 | 320.0 | 346.0 | 368826 | 15.60 | 36.60 | 2 | 19 |
 | p17 sjf_older | hints | hints | 86.5 (85.0–88.0) | -59% | 99.81 | 129.5 | 268.5 | 154.0 | 266.5 | 348.0 | 370.5 | 368510 | 16.81 | 41.54 | 4 | 16 |
 | p15 sjf_overrun | hints | hints | 86.5 (86.0–87.0) | -59% | 99.80 | 129.5 | 272.0 | 156.5 | 267.5 | 351.0 | 372.5 | 368540 | 16.65 | 40.97 | 2 | 14 |
 | p9 sjf_pair | hints | hints | 85.5 (85.0–87.0) | -59% | 99.84 | 127.0 | 259.5 | 153.5 | 266.0 | 334.0 | 358.5 | 368456 | 15.85 | 39.37 | 4 | 8 |
 | p14 sjf_ratio | hints | hints | 86.5 (86.0–87.0) | -59% | 99.83 | 129.0 | 268.5 | 154.5 | 268.5 | 352.0 | 373.0 | 368196 | 16.47 | 40.83 | 2 | 13 |
-| p12 sjf_scale | hints | hints | 85.5 (85.0–86.0) | -59% | 99.86 | 128.0 | 267.0 | 152.5 | 267.5 | 344.0 | 368.5 | 368884 | 16.50 | 40.76 | 2 | 12 |
+| p12 sjf_scale | hints | hints | 85.5 (85.0–86.0) | -59% | 99.81 | 127.5 | 261.0 | 154.0 | 264.0 | 339.0 | 362.5 | 368340 | 15.78 | 39.16 | 2 | 19 |
 | p18 sjf_share | hints | hints | 85.5 (85.0–86.0) | -59% | 99.85 | 127.0 | 261.0 | 151.5 | 265.5 | 335.5 | 356.5 | 368296 | 15.80 | 38.81 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 86.0 (86.0–86.0) | -59% | 99.83 | 129.0 | 267.0 | 155.5 | 267.0 | 347.5 | 370.0 | 368892 | 16.41 | 40.26 | 2 | 18 |
+| p19 sjf_tier | hints | hints | 86.5 (86.0–87.0) | -59% | 99.79 | 130.0 | 270.5 | 155.5 | 267.0 | 349.0 | 372.5 | 368466 | 16.62 | 40.54 | 2 | 19 |
 | p11 sjf_unit | hints | hints | 86.0 (86.0–86.0) | -59% | 99.82 | 129.0 | 272.5 | 153.5 | 269.5 | 355.0 | 379.5 | 368987 | 16.66 | 41.25 | 2 | 10 |
 | p13 sjf_upper | hints | hints | 86.0 (86.0–86.0) | -59% | 99.85 | 128.5 | 265.0 | 154.5 | 265.0 | 342.0 | 364.5 | 368760 | 16.77 | 41.35 | 4 | 12 |
 | p0 fifo | ignore | hints | 213.5 (213.0–214.0) | +1% | 87.61 | 221.0 | 232.5 | 247.0 | 246.0 | 232.0 | 231.5 | 368330 | - | 21.84 | 2 | 8 |
@@ -605,18 +606,18 @@ get p99 by offered load (req/s):
 | Policy | Mode | Build | 100,000 | 200,000 | 290,000 | 320,000 | 345,000 | 370,000 |
 |---|---|---|---|---|---|---|---|---|
 | fifo | hints | hints | 14.0 | 31.0 | 102.5 | 146.5 | 169.5 | 210.5 |
-| prio | hints | hints | 14.0 | 31.5 | 99.0 | 123.5 | 154.5 | 188.0 |
+| prio | hints | hints |  |  |  |  |  | 183.0 |
 | sjf_afford | hints | hints |  |  |  | 73.5 | 80.0 | 86.5 |
 | sjf_capped | hints | hints | 14.0 | 25.5 | 63.0 | 78.0 | 89.0 | 96.0 |
 | sjf_mixed | hints | hints |  |  |  | 73.0 | 80.0 | 85.5 |
-| sjf_nohint | hints | hints | 14.0 | 26.5 | 78.0 | 102.5 | 123.5 | 142.0 |
+| sjf_nohint | hints | hints |  |  |  |  |  | 141.5 |
 | sjf_older | hints | hints |  |  |  | 73.0 | 79.0 | 86.5 |
 | sjf_overrun | hints | hints |  |  |  | 73.5 | 79.5 | 86.5 |
 | sjf_pair | hints | hints | 14.0 | 25.0 | 61.5 | 72.5 | 79.5 | 85.5 |
 | sjf_ratio | hints | hints |  |  |  | 74.0 | 80.0 | 86.5 |
-| sjf_scale | hints | hints |  |  |  | 73.5 | 79.5 | 85.5 |
+| sjf_scale | hints | hints |  |  |  |  |  | 85.5 |
 | sjf_share | hints | hints |  |  |  | 73.0 | 79.0 | 85.5 |
-| sjf_tier | hints | hints |  |  |  | 72.5 | 79.0 | 86.0 |
+| sjf_tier | hints | hints |  |  |  |  |  | 86.5 |
 | sjf_unit | hints | hints |  |  |  | 73.5 | 79.5 | 86.0 |
 | sjf_upper | hints | hints |  |  |  | 73.0 | 80.0 | 86.0 |
 | fifo | ignore | hints | 14.0 | 29.5 | 104.5 | 135.0 | 171.5 | 213.5 |
@@ -634,39 +635,39 @@ Score: `get` p99. Headline load: 345,000 req/s.
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p0 fifo | hints | hints | 182.5 (180.0–185.0) | +0% | 92.17 | 188.5 | 202.0 | 218.0 | 215.0 | 202.0 | 203.0 | 344058 | 15.44 | 15.39 | 2 | 9 |
-| p1 prio | hints | hints | 161.0 (160.0–162.0) | -12% | 94.34 | 167.5 | 181.0 | 197.0 | 198.0 | 265.0 | 283.0 | 343934 | 12.45 | 23.68 | 2 | 9 |
+| p1 prio | hints | hints | 154.0 (148.0–160.0) | -16% | 94.93 | 164.5 | 174.5 | 190.5 | 190.0 | 254.5 | 271.0 | 343140 | 11.57 | 21.86 | 2 | 19 |
 | p16 sjf_afford | hints | hints | 115.0 (112.0–118.0) | -37% | 98.31 | 123.0 | 210.5 | 149.0 | 149.5 | 266.0 | 284.5 | 344048 | 11.45 | 24.39 | 2 | 15 |
-| p8 sjf_capped | hints | hints | 138.0 (135.0–141.0) | -24% | 97.07 | 112.0 | 212.0 | 134.0 | 176.0 | 271.5 | 289.0 | 343604 | 11.67 | 24.65 | 2 | 9 |
-| p10 sjf_mixed | hints | hints | 114.5 (114.0–115.0) | -37% | 98.26 | 123.0 | 209.5 | 148.5 | 148.5 | 266.5 | 281.0 | 343381 | 11.76 | 24.95 | 2 | 9 |
+| p8 sjf_capped | hints | hints | 133.0 (132.0–134.0) | -27% | 97.25 | 110.5 | 204.5 | 131.5 | 168.0 | 258.5 | 278.0 | 343722 | 11.15 | 23.46 | 2 | 19 |
+| p10 sjf_mixed | hints | hints | 115.5 (115.0–116.0) | -37% | 98.29 | 123.5 | 212.5 | 148.5 | 150.5 | 271.5 | 288.5 | 343362 | 11.37 | 24.14 | 2 | 19 |
 | p17 sjf_older | hints | hints | 115.0 (114.0–116.0) | -37% | 98.25 | 124.0 | 211.5 | 148.5 | 149.0 | 267.0 | 283.5 | 343420 | 11.70 | 24.79 | 2 | 16 |
 | p15 sjf_overrun | hints | hints | 117.5 (116.0–119.0) | -36% | 98.13 | 126.5 | 220.5 | 153.0 | 152.5 | 280.5 | 300.5 | 343655 | 12.07 | 25.65 | 2 | 14 |
 | p9 sjf_pair | hints | hints | 137.5 (135.0–140.0) | -25% | 97.00 | 113.0 | 213.0 | 136.5 | 173.5 | 268.5 | 288.0 | 343490 | 11.69 | 24.71 | 2 | 9 |
 | p14 sjf_ratio | hints | hints | 117.0 (116.0–118.0) | -36% | 98.19 | 125.0 | 213.5 | 152.5 | 150.5 | 270.5 | 290.0 | 343942 | 11.88 | 25.23 | 2 | 13 |
 | p12 sjf_scale | hints | hints | 115.0 (115.0–115.0) | -37% | 98.22 | 124.5 | 214.0 | 150.0 | 150.5 | 273.0 | 292.0 | 343912 | 11.84 | 25.14 | 2 | 12 |
-| p18 sjf_share | hints | hints | 114.0 (112.0–116.0) | -38% | 98.31 | 122.5 | 209.5 | 148.5 | 149.0 | 266.5 | 285.0 | 344164 | 11.52 | 24.35 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 115.5 (113.0–118.0) | -37% | 98.24 | 123.5 | 213.0 | 150.0 | 150.5 | 268.5 | 290.0 | 343398 | 11.58 | 24.45 | 2 | 18 |
+| p18 sjf_share | hints | hints | 116.0 (115.0–117.0) | -36% | 98.25 | 124.5 | 214.0 | 151.5 | 151.5 | 276.0 | 297.0 | 343538 | 11.59 | 24.82 | 2 | 19 |
+| p19 sjf_tier | hints | hints | 113.5 (113.0–114.0) | -38% | 98.33 | 123.5 | 211.5 | 147.5 | 149.0 | 271.5 | 284.0 | 343928 | 11.67 | 24.72 | 2 | 19 |
 | p11 sjf_unit | hints | hints | 116.0 (115.0–117.0) | -36% | 98.22 | 122.5 | 215.5 | 149.5 | 152.0 | 272.5 | 293.5 | 343566 | 11.86 | 25.22 | 2 | 10 |
 | p13 sjf_upper | hints | hints | 118.0 (116.0–121.0) | -35% | 98.09 | 126.0 | 216.5 | 151.5 | 152.5 | 278.0 | 291.5 | 343680 | 12.03 | 25.44 | 4 | 12 |
 | p0 fifo | ignore | hints | 173.5 (171.0–176.0) | -5% | 92.81 | 180.0 | 192.5 | 205.5 | 207.5 | 192.5 | 192.0 | 343620 | - | 14.50 | 2 | 9 |
 
-Best with hints applied: **sjf_share** (114.0 µs).
+Best with hints applied: **sjf_tier** (113.5 µs).
 
 get p99 by offered load (req/s):
 
 | Policy | Mode | Build | 100,000 | 200,000 | 290,000 | 320,000 | 345,000 | 370,000 |
 |---|---|---|---|---|---|---|---|---|
 | fifo | hints | hints | 14.0 | 31.0 | 108.5 | 148.5 | 182.5 | 223.5 |
-| prio | hints | hints | 14.0 | 30.5 | 97.0 | 123.5 | 161.0 | 196.5 |
+| prio | hints | hints |  |  |  |  | 154.0 |  |
 | sjf_afford | hints | hints |  |  | 75.5 | 96.0 | 115.0 |  |
-| sjf_capped | hints | hints | 14.0 | 27.0 | 86.0 | 110.5 | 138.0 | 167.0 |
-| sjf_mixed | hints | hints | 14.0 | 26.5 | 76.0 | 96.5 | 114.5 | 135.0 |
+| sjf_capped | hints | hints |  |  |  |  | 133.0 |  |
+| sjf_mixed | hints | hints |  |  |  |  | 115.5 |  |
 | sjf_older | hints | hints |  |  | 77.5 | 97.5 | 115.0 |  |
 | sjf_overrun | hints | hints |  |  | 75.5 | 96.5 | 117.5 |  |
 | sjf_pair | hints | hints | 14.0 | 28.0 | 83.0 | 110.0 | 137.5 | 162.5 |
 | sjf_ratio | hints | hints |  |  | 77.5 | 99.5 | 117.0 |  |
 | sjf_scale | hints | hints |  |  | 77.0 | 96.5 | 115.0 |  |
-| sjf_share | hints | hints |  |  | 77.5 | 94.5 | 114.0 |  |
-| sjf_tier | hints | hints |  |  | 74.0 | 99.5 | 115.5 |  |
+| sjf_share | hints | hints |  |  |  |  | 116.0 |  |
+| sjf_tier | hints | hints |  |  |  |  | 113.5 |  |
 | sjf_unit | hints | hints |  |  | 75.5 | 96.5 | 116.0 |  |
 | sjf_upper | hints | hints |  |  | 78.5 | 96.5 | 118.0 |  |
 | fifo | ignore | hints | 14.0 | 30.5 | 104.5 | 143.5 | 173.5 | 219.5 |
@@ -732,36 +733,36 @@ Score: `get` p99. Headline load: 100,000 req/s.
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | lease p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p0 fifo | hints | hints | 676.0 (669.0–683.0) | +0% | 92.73 | 820.5 | 751.0 | 1102 | 1096 | 755.5 | 753.0 | 668.5 | 99680 | 85.12 | 83.20 | 2 | 11 |
-| p1 prio | hints | hints | 560.0 (555.0–565.0) | -17% | 95.96 | 706.5 | 636.0 | 981.0 | 965.5 | 1042 | 1124 | 555.5 | 99463 | 65.78 | 132.83 | 2 | 11 |
-| p16 sjf_afford | hints | hints | 165.5 (164.0–167.0) | -76% | 100.00 | 357.0 | 828.0 | 483.5 | 859.0 | 1074 | 1140 | 129.5 | 99058 | 41.79 | 127.05 | 2 | 15 |
+| p1 prio | hints | hints | 551.0 (547.0–555.0) | -18% | 96.33 | 671.0 | 619.0 | 933.0 | 934.0 | 1007 | 1092 | 548.5 | 99446 | 60.99 | 119.59 | 2 | 19 |
+| p16 sjf_afford | hints | hints | 168.0 (168.0–168.0) | -75% | 99.99 | 358.5 | 833.0 | 473.0 | 865.0 | 1081 | 1144 | 129.0 | 99395 | 42.71 | 130.28 | 2 | 19 |
 | p10 sjf_mixed | hints | hints | 236.5 (229.0–244.0) | -65% | 99.94 | 348.5 | 866.0 | 450.5 | 857.0 | 1102 | 1177 | 131.5 | 99378 | 45.41 | 135.38 | 2 | 11 |
 | p17 sjf_older | hints | hints | 177.0 (177.0–177.0) | -74% | 99.99 | 377.0 | 862.0 | 499.0 | 885.0 | 1112 | 1188 | 131.0 | 99486 | 45.11 | 138.77 | 2 | 16 |
 | p15 sjf_overrun | hints | hints | 181.0 (174.0–188.0) | -73% | 99.99 | 371.5 | 866.0 | 488.5 | 888.0 | 1125 | 1199 | 130.0 | 99352 | 45.16 | 137.49 | 2 | 14 |
-| p14 sjf_ratio | hints | hints | 172.0 (171.0–173.0) | -75% | 100.00 | 376.0 | 848.0 | 496.5 | 866.5 | 1088 | 1154 | 130.5 | 99493 | 44.14 | 134.23 | 2 | 13 |
+| p14 sjf_ratio | hints | hints | 174.5 (174.0–175.0) | -74% | 100.00 | 366.0 | 820.0 | 488.0 | 855.0 | 1050 | 1156 | 129.5 | 99702 | 41.79 | 126.51 | 2 | 19 |
 | p12 sjf_scale | hints | hints | 184.0 (182.0–186.0) | -73% | 100.00 | 364.5 | 821.5 | 495.0 | 870.5 | 1084 | 1150 | 129.5 | 99492 | 41.81 | 127.33 | 2 | 11 |
 | p18 sjf_share | hints | hints | 169.5 (168.0–171.0) | -75% | 100.00 | 362.0 | 822.0 | 477.5 | 873.5 | 1065 | 1135 | 130.0 | 99252 | 41.31 | 123.29 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 176.5 (176.0–177.0) | -74% | 100.00 | 364.0 | 832.0 | 482.0 | 878.0 | 1070 | 1162 | 130.5 | 99521 | 42.71 | 129.12 | 2 | 18 |
-| p11 sjf_unit | hints | hints | 243.0 (239.0–247.0) | -64% | 99.89 | 335.5 | 864.0 | 438.5 | 841.0 | 1100 | 1173 | 132.5 | 99506 | 45.19 | 137.30 | 2 | 11 |
+| p19 sjf_tier | hints | hints | 174.5 (173.0–176.0) | -74% | 100.00 | 363.0 | 833.0 | 491.0 | 864.5 | 1088 | 1132 | 130.0 | 99266 | 42.65 | 130.60 | 2 | 19 |
+| p11 sjf_unit | hints | hints | 237.5 (231.0–244.0) | -65% | 99.90 | 333.5 | 825.0 | 438.5 | 837.0 | 1058 | 1142 | 133.0 | 99438 | 42.80 | 129.42 | 2 | 19 |
 | p13 sjf_upper | hints | hints | 186.0 (180.0–192.0) | -72% | 99.98 | 376.5 | 857.0 | 517.0 | 882.5 | 1098 | 1191 | 131.0 | 99366 | 44.71 | 135.65 | 2 | 12 |
 | p0 fifo | ignore | hints | 667.0 (662.0–672.0) | -1% | 93.40 | 807.5 | 744.0 | 1102 | 1099 | 751.0 | 749.0 | 666.5 | 99333 | - | 81.78 | 2 | 11 |
 
-Best with hints applied: **sjf_afford** (165.5 µs).
+Best with hints applied: **sjf_afford** (168.0 µs).
 
 get p99 by offered load (req/s):
 
 | Policy | Mode | Build | 35,000 | 70,000 | 95,000 | 100,000 | 105,000 | 110,000 |
 |---|---|---|---|---|---|---|---|---|
 | fifo | hints | hints | 23.5 | 186.5 | 578.5 | 676.0 | 775.0 | 914.0 |
-| prio | hints | hints | 25.5 | 181.5 | 478.5 | 560.0 | 647.0 | 742.0 |
-| sjf_afford | hints | hints |  | 98.5 | 152.5 | 165.5 |  |  |
+| prio | hints | hints |  |  |  | 551.0 |  |  |
+| sjf_afford | hints | hints |  |  |  | 168.0 |  |  |
 | sjf_mixed | hints | hints | 27.5 | 101.5 | 210.5 | 236.5 | 282.0 | 327.5 |
 | sjf_older | hints | hints |  | 98.5 | 149.0 | 177.0 |  |  |
 | sjf_overrun | hints | hints |  | 99.5 | 147.5 | 181.0 |  |  |
-| sjf_ratio | hints | hints |  | 97.5 | 150.0 | 172.0 |  |  |
+| sjf_ratio | hints | hints |  |  |  | 174.5 |  |  |
 | sjf_scale | hints | hints | 24.5 | 96.0 | 157.0 | 184.0 | 212.5 | 241.0 |
 | sjf_share | hints | hints |  | 97.0 | 148.0 | 169.5 |  |  |
-| sjf_tier | hints | hints |  | 96.0 | 153.5 | 176.5 |  |  |
-| sjf_unit | hints | hints | 25.0 | 102.5 | 209.0 | 243.0 | 284.5 | 319.5 |
+| sjf_tier | hints | hints |  |  |  | 174.5 |  |  |
+| sjf_unit | hints | hints |  |  |  | 237.5 |  |  |
 | sjf_upper | hints | hints |  | 100.0 | 161.5 | 186.0 |  |  |
 | fifo | ignore | hints | 26.0 | 184.5 | 569.5 | 667.0 | 774.5 | 919.0 |
 
@@ -818,32 +819,32 @@ Score: `get` p99. Headline load: 75,000 req/s.
 | Policy | Mode | Build | Score (get p99) | vs fifo | get deadline met % | put p99 | query p99 | sync p99 | multiget p99 | batch p99 | scan p99 | lease p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p0 fifo | hints | hints | 804.0 (797.0–811.0) | +0% | 91.31 | 919.0 | 871.5 | 1273 | 1288 | 868.5 | 856.5 | 785.5 | 74726 | 87.19 | 86.71 | 2 | 13 |
-| p1 prio | hints | hints | 662.0 (651.0–673.0) | -18% | 94.59 | 793.0 | 727.5 | 1118 | 1110 | 1366 | 1494 | 651.5 | 74319 | 65.31 | 144.37 | 2 | 13 |
-| p16 sjf_afford | hints | hints | 192.5 (189.0–196.0) | -76% | 99.98 | 392.0 | 1062 | 507.5 | 1008 | 1406 | 1496 | 127.0 | 74551 | 43.89 | 149.91 | 2 | 15 |
+| p1 prio | hints | hints | 627.0 (626.0–628.0) | -22% | 95.02 | 759.0 | 706.0 | 1077 | 1062 | 1300 | 1439 | 615.0 | 74538 | 62.09 | 137.81 | 2 | 19 |
+| p16 sjf_afford | hints | hints | 191.0 (186.0–196.0) | -76% | 99.98 | 377.5 | 1047 | 516.5 | 997.5 | 1408 | 1487 | 127.5 | 74752 | 42.62 | 145.69 | 2 | 19 |
 | p17 sjf_older | hints | hints | 211.0 (207.0–215.0) | -74% | 99.98 | 403.5 | 1111 | 541.0 | 1044 | 1448 | 1606 | 128.5 | 74656 | 46.64 | 160.62 | 2 | 16 |
 | p15 sjf_overrun | hints | hints | 197.5 (189.0–206.0) | -75% | 99.98 | 388.0 | 1097 | 514.0 | 1020 | 1438 | 1544 | 128.5 | 74686 | 46.06 | 159.20 | 2 | 14 |
 | p14 sjf_ratio | hints | hints | 204.5 (202.0–207.0) | -75% | 99.98 | 397.5 | 1108 | 534.0 | 1024 | 1498 | 1574 | 127.0 | 74549 | 45.67 | 158.38 | 2 | 13 |
-| p12 sjf_scale | hints | hints | 357.5 (348.0–367.0) | -56% | 99.34 | 377.0 | 1062 | 482.5 | 1002 | 1419 | 1537 | 132.0 | 74356 | 46.44 | 157.11 | 2 | 13 |
-| p18 sjf_share | hints | hints | 195.0 (193.0–197.0) | -76% | 99.99 | 386.0 | 1043 | 508.5 | 998.5 | 1430 | 1481 | 128.0 | 74454 | 42.55 | 147.81 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 204.5 (202.0–207.0) | -75% | 99.97 | 390.5 | 1067 | 525.5 | 1033 | 1404 | 1500 | 128.5 | 74626 | 44.83 | 151.82 | 2 | 18 |
+| p12 sjf_scale | hints | hints | 336.5 (330.0–343.0) | -58% | 99.48 | 372.0 | 1065 | 481.5 | 985.5 | 1407 | 1518 | 129.5 | 74642 | 44.16 | 146.19 | 2 | 19 |
+| p18 sjf_share | hints | hints | 199.0 (188.0–210.0) | -75% | 99.98 | 389.5 | 1041 | 517.0 | 989.5 | 1389 | 1487 | 126.5 | 74516 | 42.91 | 149.30 | 2 | 19 |
+| p19 sjf_tier | hints | hints | 196.0 (191.0–201.0) | -76% | 99.97 | 389.5 | 1049 | 523.5 | 999.5 | 1384 | 1495 | 126.0 | 74446 | 43.24 | 147.98 | 2 | 19 |
 | p13 sjf_upper | hints | hints | 247.5 (247.0–248.0) | -69% | 99.91 | 408.0 | 1074 | 560.5 | 1050 | 1431 | 1548 | 132.0 | 74445 | 45.74 | 153.78 | 2 | 13 |
 | p0 fifo | ignore | hints | 799.0 (788.0–810.0) | -1% | 91.54 | 922.5 | 877.5 | 1287 | 1301 | 868.0 | 884.0 | 785.0 | 74704 | - | 87.83 | 2 | 13 |
 
-Best with hints applied: **sjf_afford** (192.5 µs).
+Best with hints applied: **sjf_afford** (191.0 µs).
 
 get p99 by offered load (req/s):
 
 | Policy | Mode | Build | 26,250 | 52,500 | 67,500 | 71,250 | 73,125 | 75,000 |
 |---|---|---|---|---|---|---|---|---|
 | fifo | hints | hints | 40.5 | 221.0 | 584.0 | 690.5 | 732.0 | 804.0 |
-| prio | hints | hints | 40.5 | 206.0 | 480.0 | 572.0 | 618.0 | 662.0 |
-| sjf_afford | hints | hints |  |  |  | 164.0 | 176.0 | 192.5 |
+| prio | hints | hints |  |  |  |  |  | 627.0 |
+| sjf_afford | hints | hints |  |  |  |  |  | 191.0 |
 | sjf_older | hints | hints |  |  |  | 172.0 | 188.5 | 211.0 |
 | sjf_overrun | hints | hints |  |  |  | 173.0 | 175.0 | 197.5 |
 | sjf_ratio | hints | hints | 40.5 | 108.5 | 147.5 | 172.0 | 193.0 | 204.5 |
-| sjf_scale | hints | hints | 36.0 | 115.5 | 254.0 | 306.5 | 334.0 | 357.5 |
-| sjf_share | hints | hints |  |  |  | 167.0 | 185.0 | 195.0 |
-| sjf_tier | hints | hints |  |  |  | 173.5 | 186.5 | 204.5 |
+| sjf_scale | hints | hints |  |  |  |  |  | 336.5 |
+| sjf_share | hints | hints |  |  |  |  |  | 199.0 |
+| sjf_tier | hints | hints |  |  |  |  |  | 196.0 |
 | sjf_upper | hints | hints | 37.5 | 114.5 | 169.5 | 198.0 | 220.5 | 247.5 |
 | fifo | ignore | hints | 42.0 | 222.5 | 572.0 | 658.0 | 733.5 | 799.0 |
 
@@ -940,27 +941,27 @@ Score: `point` p99. Headline load: 159,000 req/s.
 | Policy | Mode | Build | Score (point p99) | vs fifo | point deadline met % | fanout p99 | health p99 | export p99 | rebuild p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | p0 fifo | hints | hints | 310.5 (309.0–312.0) | +0% | 100.00 | 336.0 | 294.0 | 337.5 | 333.0 | 157598 | 30.32 | 30.33 | 2 | 16 |
-| p1 prio | hints | hints | 209.5 (209.0–210.0) | -33% | 100.00 | 235.0 | 196.5 | 488.5 | 620.5 | 157693 | 15.88 | 45.80 | 2 | 16 |
+| p1 prio | hints | hints | 209.0 (209.0–209.0) | -33% | 100.00 | 234.5 | 193.0 | 484.5 | 627.5 | 157615 | 15.66 | 45.15 | 2 | 19 |
 | p16 sjf_afford | hints | hints | 364.0 (361.0–367.0) | +17% | 100.00 | 219.0 | 107.0 | 502.0 | 651.0 | 157445 | 17.98 | 46.69 | 2 | 16 |
 | p17 sjf_older | hints | hints | 234.0 (231.0–237.0) | -25% | 100.00 | 238.0 | 105.0 | 533.0 | 696.0 | 157496 | 16.67 | 52.64 | 2 | 16 |
 | p15 sjf_overrun | hints | hints | 375.5 (373.0–378.0) | +21% | 100.00 | 219.0 | 375.5 | 521.0 | 664.0 | 157601 | 20.74 | 48.86 | 2 | 16 |
-| p18 sjf_share | hints | hints | 222.5 (222.0–223.0) | -28% | 100.00 | 230.5 | 102.0 | 495.0 | 654.0 | 157540 | 15.13 | 46.60 | 2 | 17 |
-| p19 sjf_tier | hints | hints | 227.0 (222.0–232.0) | -27% | 100.00 | 236.5 | 103.5 | 510.0 | 675.5 | 157912 | 15.57 | 47.39 | 2 | 18 |
+| p18 sjf_share | hints | hints | 221.5 (219.0–224.0) | -29% | 100.00 | 230.0 | 101.0 | 493.5 | 643.5 | 157603 | 15.06 | 46.29 | 2 | 19 |
+| p19 sjf_tier | hints | hints | 223.5 (219.0–228.0) | -28% | 100.00 | 233.0 | 102.0 | 504.5 | 638.5 | 157424 | 15.35 | 47.01 | 2 | 19 |
 | p0 fifo | ignore | hints | 307.5 (301.0–314.0) | -1% | 100.00 | 330.5 | 289.5 | 330.5 | 332.5 | 157700 | - | 29.82 | 2 | 16 |
 
-Best with hints applied: **prio** (209.5 µs).
+Best with hints applied: **prio** (209.0 µs).
 
 point p99 by offered load (req/s):
 
 | Policy | Mode | Build | 53,000 | 106,000 | 142,000 | 150,000 | 155,000 | 159,000 |
 |---|---|---|---|---|---|---|---|---|
 | fifo | hints | hints | 36.5 | 104.0 | 223.5 | 250.5 | 278.0 | 310.5 |
-| prio | hints | hints | 35.5 | 92.5 | 165.5 | 185.0 | 202.5 | 209.5 |
+| prio | hints | hints |  |  |  |  |  | 209.0 |
 | sjf_afford | hints | hints | 36.0 | 117.0 | 263.0 | 301.5 | 329.0 | 364.0 |
 | sjf_older | hints | hints | 35.0 | 99.5 | 171.5 | 192.5 | 212.0 | 234.0 |
 | sjf_overrun | hints | hints | 35.5 | 115.0 | 252.0 | 304.5 | 335.0 | 375.5 |
-| sjf_share | hints | hints |  |  |  | 193.0 | 204.0 | 222.5 |
-| sjf_tier | hints | hints |  |  |  | 191.5 | 211.0 | 227.0 |
+| sjf_share | hints | hints |  |  |  |  |  | 221.5 |
+| sjf_tier | hints | hints |  |  |  |  |  | 223.5 |
 | fifo | ignore | hints | 36.0 | 107.0 | 219.5 | 257.5 | 290.0 | 307.5 |
 
 ## w18: A four-core document leaf where the same fetch arrives with a tight fan-out budget or a loose frontend budget
@@ -1044,6 +1045,7 @@ Score: `search` p99. Headline load: 108,000 req/s.
 | p0 fifo | hints | hints | 643.0 (642.0–644.0) | +0% | 99.98 | 608.0 | 595.0 | 633.0 | 631.5 | 107009 | 78.68 | 78.41 | 2 | 19 |
 | p1 prio | hints | hints | 325.5 (325.0–326.0) | -49% | 100.00 | 290.5 | 279.5 | 1054 | 1526 | 106410 | 24.51 | 114.98 | 2 | 19 |
 | p18 sjf_share | hints | hints | 401.0 (399.0–403.0) | -38% | 100.00 | 128.0 | 97.5 | 1084 | 1541 | 107275 | 15.40 | 120.97 | 2 | 19 |
+| p20 sjf_slice | hints | hints | 399.0 (395.0–403.0) | -38% | 100.00 | 138.5 | 99.0 | 1101 | 1608 | 106724 | 16.45 | 129.38 | 2 | 19 |
 | p19 sjf_tier | hints | hints | 406.5 (400.0–413.0) | -37% | 100.00 | 129.5 | 98.0 | 1104 | 1602 | 106660 | 15.70 | 124.64 | 2 | 19 |
 | p0 fifo | ignore | hints | 626.5 (623.0–630.0) | -3% | 99.99 | 592.0 | 582.0 | 616.0 | 613.5 | 106451 | - | 75.91 | 2 | 19 |
 
@@ -1056,6 +1058,7 @@ search p99 by offered load (req/s):
 | fifo | hints | hints | 83.5 | 248.0 | 453.5 | 519.0 | 592.0 | 643.0 |
 | prio | hints | hints | 80.5 | 181.5 | 261.5 | 278.0 | 304.0 | 325.5 |
 | sjf_share | hints | hints | 81.0 | 206.5 | 310.0 | 348.0 | 365.5 | 401.0 |
+| sjf_slice | hints | hints | 83.5 | 210.0 | 317.5 | 346.5 | 384.0 | 399.0 |
 | sjf_tier | hints | hints | 82.0 | 203.0 | 313.0 | 343.0 | 369.5 | 406.5 |
 | fifo | ignore | hints | 80.5 | 254.0 | 455.0 | 515.5 | 575.5 | 626.5 |
 
