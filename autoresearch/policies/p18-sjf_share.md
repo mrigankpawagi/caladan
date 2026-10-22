@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p17
 - changed_from_previous: p17 plus: when p17's shortest waiting HIGH thread does not pass, the oldest waiting HIGH thread (not overrun) may pass the order's choice if it became ready first and the chosen thread has not run yet, it is due at least twice as late within p9's split, it is at most half again as long, the chosen thread keeps 30% of its relative deadline as slack after it, and it has already used at least as large a share of its own deadline window as the chosen thread will have used after waiting for it; on w18 frontend reads pass fanouts that arrived after them, and on w1–w17 decisions are p17's (42 of 35M picks differ in the model)
-- commit: (filled by orchestrator)
+- commit: 634131a
 
 ## What it does
 Like sjf_older, each core runs helper threads first, then HIGH, NORMAL and LOW threads. It orders HIGH threads by deadline and length, and lets a shorter request go ahead of the chosen one when the chosen one can spare the time. sjf_share adds one case for two requests of about the same size. The request that has waited longest may go first if it arrived before the chosen one and has already used a larger share of its own time budget than the chosen one would after waiting for it. The chosen one must still keep 30% of its budget to spare. On w18 a frontend document fetch (800 µs budget) no longer waits behind every fan-out fetch (300 µs budget) that arrived after it while those still have time. On the earlier workloads such a pair either does not occur or p17's rule already handles it, so decisions do not change.
