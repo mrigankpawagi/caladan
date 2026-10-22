@@ -1,0 +1,107 @@
+{
+  "id": "w20c",
+  "slug": "search-behind-suggestions",
+  "generation": 19,
+  "title": "A four-core search leaf where full searches cost four times a type-ahead suggestion and carry a four-times-looser deadline",
+  "description": "A search leaf serves full search queries from the results page and type-ahead suggestions sent on every keystroke, plus health checks, index updates and background segment merges, on 4 cores. A suggestion is short and due in 250 us, because it is useless once the user has typed the next letter; a search costs about four times as much and is due in 1000 us. Both its length and its deadline tell a scheduler to run every suggestion first, so searches wait behind suggestions that arrived long after them even while those have most of their budget left, and the rules that let an earlier request go first today all require it to be shorter or at most half again as long. Suggestion cost varies with how many completions a prefix matches, so their run times are spread out rather than fixed.",
+  "changed_from_previous": "A new service on w18's 4 cores, 48 connections and 4000 us bursts in which the scored kind (search, 4000 iterations, due in 1000 us) is four times as long as the tight-deadline kind (suggest, due in 250 us) instead of about equal, and the tight kind's cost is exponential (mean 1000 iterations, hint its 12 us mean) instead of constant.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 1,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 4,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 4,
+    "guaranteed_kthreads": 4,
+    "spinning_kthreads": 4,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "search",
+      "service": "constant:4000",
+      "weight": 0.28,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 48
+      }
+    },
+    {
+      "name": "suggest",
+      "service": "exponential:1000",
+      "weight": 0.4,
+      "deadline_us": 250,
+      "hint": {
+        "class": "high",
+        "deadline_us": 250,
+        "service_us": 12
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "index",
+      "service": "constant:3400",
+      "weight": 0.135,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "merge",
+      "service": "constant:3400",
+      "weight": 0.135,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    40000,
+    80000,
+    96000,
+    100000,
+    104000,
+    108000
+  ],
+  "score": {
+    "kind": "search",
+    "percentile": "p99"
+  },
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. Search engines answer a full query from the results page and, on every keystroke, a query auto-completion (QAC) request; a completion must come back before the next keystroke replaces it, so its budget is much tighter than the results page's (Cai and de Rijke, A Survey of Query Auto Completion in Information Retrieval, FnTIR 2016; Bar-Yossef and Kraus, WWW 2011). A completion is a top-k prefix lookup in a trie or FST whose cost grows with how many completions the prefix matches (Hsu and Ottaviano, Space-Efficient Data Structures for Top-k Completion, WWW 2013): approximated as exponential, mean 1000 iterations (12 us), and the server knows only the mean, so its hint is 12 us. A leaf search (posting-list intersection and scoring, Dean and Barroso, The Tail at Scale, CACM 2013) costs several times a lookup: 4000 iterations (48 us); the 4x ratio is invented. Budgets 250 us and 1000 us are invented at this scale (the 4x ratio follows inter-keystroke time against page-load budgets). Index updates (NORMAL) and segment merges (LOW, 41 us chunks) follow Lucene/Elasticsearch near-real-time indexing with throttled background merging; health checks as in w16-w19. Weights invented: suggestions 40% of requests (several keystrokes per search, after client-side debouncing), searches 28%, short kinds kept at 45% of requests so the overall median lies in the 41-48 us kinds (w18-like light median about 50 us, giving the 1.5x headline rule 25 us of room). Hints are what the server sets: class by role, the caller's deadline, the handler's mean run time (iterations / 83 per us). Capacity at 99.6 iterations per us (calibration.json): mean work = 0.28 x 4000 + 0.40 x 1000 + 0.05 x 85 + 0.135 x 3400 + 0.135 x 3400 = 2442.25 iterations = 24.52 us; 4 / 24.52 us = 163.1k req/s (140.3k with the 4 us allowance). Sized from measured medians (gen 10 lesson: 83 per us plus 1 us per request, which matched w18's and w19b's light medians): 2442.25 / 83 + 1 = 30.42 us, 4 / 30.42 us = 131.5k req/s. Levels 40k/80k/96k/100k/104k/108k are 30.4/60.8/73.0/76.0/79.1/82.1% of 131.5k (w18 ran to 77.9%, w19b to 76.3%); busy-phase rate at 108k is 172.8k req/s. Headline rule: the gen 17-18 queueing model (per-core queues for 48 flows, stealing, bursts, 100 us slices, the real policy region compiled in, 83 per us, 0.5 us overhead, 10 us network), which put w19b's fifo median at 35 -> 53 (measured 32 -> 48), gives fifo overall median 51 at 40k and 62/67 at 104k/108k (limit 76; 78 at 112k, so 112k is left out). FIFO penalty: searches wait behind every queued suggestion, index update and merge (model fifo search p99 629/707 at 104k/108k against 79 at 40k). Why the champion leaves headroom: a search's turn is 1000 + 8 x 48 = 1384 us after it is ready, a suggestion's 250 + 8 x 12 = 346 us, so any suggestion readied up to about 1040 us after a search runs first. p16's and p17's passes need the passer shorter, and p18's and p19's equal-cost passes need it at most 1.5 times as long; a search is 4 times a suggestion, so no pass ever fires for it (model: zero passes, p18 and p19 decide identically) and it is rescued only near its deadline. Oldest-first is not the answer: prio cuts the search tail but lets suggestions wait behind 48 us searches (model suggest deadline-met 98.0-98.5% against 100%). Model at 104k/108k: champion search p99 386/410 with runqueue-wait p99 307/333 (share 0.80/0.81), suggest p99 97/99 at 100% met, health 58; prio search p99 311/332; fifo 629/707. A policy that lets an older search go first while the suggestion keeps a reserve covering the search's whole length has room. Prediction at 108k (headline; 104k fallback), allowing for the model overstating w18 read p99 by about 10%: fifo search p99 600-700, overall median 62-72; champion (p18 or p19) search p99 350-400 with search runqueue-wait p99 280-330 (share 0.78-0.83), suggest p99 90-115 with deadline-met above 99.9%, health p99 50-70; prio search p99 290-340 with suggest deadline-met 97.5-98.8%; at 40k every policy's search p99 70-85 us. No run.py changes are needed."
+}

@@ -1,0 +1,123 @@
+{
+  "id": "w20a",
+  "slug": "three-budgets-cache-neighbor",
+  "generation": 19,
+  "title": "The three-budget document leaf on two guaranteed and two burstable cores next to a cache-thrashing batch job",
+  "description": "The document leaf of w19 (the same fetch arriving with 300, 450 and 800 us budgets from three depths of a call tree, plus health checks, exports and index rebuilds, over 128 connections in bursts) now shares its machine with a best-effort batch job that copies memory on every spare core. The service is guaranteed two of its four cores; the other two are lent to it when requests pile up and handed back to the batch job when they go idle, so bursts pile up on two cores while the rest are won back, and lent cores run next to the batch job. Those deeper queues are where a deadline-ordered scheduler makes frontend fetches wait behind mid-tier and aggregator fetches that arrived after them and still had time to spare. The score is the frontend fetches' tail; mid-tier and aggregator fetches must keep meeting their deadlines.",
+  "changed_from_previous": "w19 plus w19a's best-effort cache antagonist (apps/netbench/stress, 16 threads on 16 best-effort kthreads, cacheantagonist copying within 1 MB each) and burstable server cores (2 guaranteed and 2 spinning of 4 kthreads instead of 4 and 4), with levels 28k/56k/66k/68k/70k/71k instead of 28k-76k; every kind, weight, hint, deadline, the 128 connections and the 4000 us bursts unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 6,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 1,
+    "conns": 128,
+    "kthreads": 4,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 4,
+    "guaranteed_kthreads": 2,
+    "spinning_kthreads": 2,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 128,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "point",
+      "service": "constant:3740",
+      "weight": 0.25,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 45
+      }
+    },
+    {
+      "name": "mid",
+      "service": "constant:3400",
+      "weight": 0.2,
+      "deadline_us": 450,
+      "hint": {
+        "class": "high",
+        "deadline_us": 450,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "fanout",
+      "service": "constant:3400",
+      "weight": 0.2,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    28000,
+    56000,
+    66000,
+    68000,
+    70000,
+    71000
+  ],
+  "score": {
+    "kind": "point",
+    "percentile": "p99"
+  },
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "antagonist": {
+    "threads": 16,
+    "n": 10,
+    "spec": "cacheantagonist:1048576",
+    "kthreads": 16
+  },
+  "repeats": 2,
+  "notes": "Real shape. The service is w19's leaf unchanged: one document fetch whose propagated budget depends on the caller's depth in the call tree (gRPC and Stubby deadline propagation; Dean and Barroso, The Tail at Scale, CACM 2013; DeathStarBench, Gan et al., ASPLOS 2019; Alibaba call graphs, Luo et al., SoCC 2021), with health checks (gRPC health checking, Envoy) and exports and index rebuilds as background work; the mid tier's 450 us budget and 0.20 weight and the frontend fetch's 10% extra work are invented (w18, w19). Hints are what the server sets on its own uncontended cores: class by role, the propagated deadline, the handler's measured run time. New here: co-location with best-effort batch work on a burstable allocation, as production clusters fill spare cycles (Borg, Verma et al., EuroSys 2015; Heracles, Lo et al., ISCA 2015; Kubernetes Burstable QoS: a guaranteed request below a higher limit), in the shape of Caladan's own interference setup (Fried et al., OSDI 2020; README 'Running with interference'). Antagonist exactly as w19a (gen 18 probe): 16 memcpy threads within 1 MB each (16 MB, inside the 25 MB LLC, so ias's bandwidth controller does not throttle it) on 16 best-effort kthreads, filling the 18 usable hardware threads beside the server's guaranteed pair; burstable server kthreads park when idle, the core goes to the batch job, and ias wins it back one at a time once queueing delay passes its threshold. Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 3740 + 0.20 x 3400 + 0.20 x 3400 + 0.05 x 85 + 0.15 x 3400 + 0.15 x 3400 = 3319.25 iterations = 33.33 us; 4 / 33.33 us = 120.0k req/s (106.9k with the 4 us allowance). Measured basis (gen 10 lesson, 83 iterations per us plus 1 us): 40.99 us per request, 4 / 40.99 us = 97.6k req/s; w19a's 12% penalty per lent core gives 3.76 effective cores, 91.7k req/s. Levels 28k/56k/66k/68k/70k/71k are 30.5/61.1/72.0/74.2/76.3/77.4% of 91.7k; busy-phase rate at 71k is 113.6k req/s. Headline rule, from measured medians: the work mix is exactly w18's and w19's, and w19 matched w18's fifo medians (50 at 28k, 56 at 70k); w19a, this antagonist and core split on that mix, measured fifo overall medians 54 at 28k, 74 at 68k and 76 at 70k (limit 81). A shared-queue model with 2 always-on cores and 2 cores granted after 10 us of queueing and returned after 2 us idle reproduces those three medians exactly (54/74/76) with no lent-core slowdown, and gives 77-78 at 71k, 79-80 at 72k and 82-84 at 74k, so 71k is the top level (72k is at the limit). 128 connections instead of 48 left w19's medians, depth and steals unchanged (gen 18 report, section 4). FIFO penalty: frontend fetches wait behind every queued mid, fanout, export and rebuild (w19a fifo point p99 471 at 70k against 104 at 28k). Why the champion leaves headroom: under p18 a point passes a fanout only after waiting 123 us and never passes a mid (800 / 450 is below 2); on w19 it kept 77-80% of point p99 in the runqueue (300 of 388-397 at 70k, 389 of 483 at 76k), while prio reached 273-288 at 70k. If p19 is accepted, its pass needs the passed thread to keep 30% of its window: mids and fanouts that waited for a core grant at a burst's start reach that reserve sooner, so points pass least where the antagonist deepened the queue. Prediction (headline 71k, 70k fallback): server cpu_cores about 2.1 at 28k and 3.05-3.15 at 70k-71k; fifo overall median 76-78; fifo point p99 470-510 with point runqueue-wait p99 380-420 and mean HIGH wait 42-48 us (w19 at 70k: 31.9); champion point p99 430-490 with runqueue-wait p99 330-380 (share 0.76-0.80; under p19, 380-440 and 0.74-0.78), mid p99 280-330, fanout p99 210-250 with deadline-met above 99.8%; prio point p99 300-350; at 28k every policy's point p99 100-125 with runqueue-wait p99 35-45 (w19: 77 and 0.7). If cpu_cores stays above 3.8 at 28k, the antagonist does not compete and the design has failed. No run.py changes are needed."
+}
