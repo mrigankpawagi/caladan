@@ -959,5 +959,35 @@ point p99 by offered load (req/s):
 | sjf_share | hints | hints | 79.0 | 218.5 | 388.0 | 419.0 | 454.5 | 495.5 |
 | fifo | ignore | hints | 77.0 | 219.0 | 442.0 | 480.0 | 515.0 | 567.5 |
 
+## w19: A four-core document leaf where the same fetch arrives from three depths of a call tree with three budgets, over 128 connections
+
+[workloads/w19-three-depth-budgets.json](workloads/w19-three-depth-budgets.json). A leaf server stores documents, and the same document fetch now arrives from three depths of a call tree: fan-out aggregators with 300 us left, a mid-tier ranking service with 450 us left, and the frontend with 800 us left (it also returns the whole document, about 10% more work), over 128 connections from many callers; health checks, exports and index rebuilds share the 4 cores. All fetches cost about the same, so the only reason to run one first is its remaining budget, and neighbouring budgets differ by less than a factor of two, as they do when deadlines are passed down a real call tree. A scheduler that orders by deadline makes frontend fetches wait behind every mid-tier fetch arriving up to about 380 us after them and every aggregator fetch arriving up to about 530 us after them, even while those have time to spare, and rules built for one tight and one loose budget do not cover the middle one.
+
+Score: `point` p99. Headline load: 76,000 req/s.
+
+![point p99 by offered load on w19](plots/w19-load.svg)
+
+![point p99 and its runqueue wait at the headline load on w19](plots/w19-wait.svg)
+
+| Policy | Mode | Build | Score (point p99) | vs fifo | point deadline met % | mid p99 | fanout p99 | health p99 | export p99 | rebuild p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 551.5 (546.0–557.0) | +0% | 99.96 | 559.5 | 549.5 | 510.0 | 555.5 | 559.0 | 74202 | 57.55 | 57.60 | 2 | 18 |
+| p1 prio | hints | hints | 340.0 (333.0–347.0) | -38% | 100.00 | 336.5 | 333.0 | 287.0 | 1048 | 1366 | 74830 | 24.71 | 104.38 | 2 | 18 |
+| p17 sjf_older | hints | hints | 562.0 (554.0–570.0) | +2% | 99.95 | 269.5 | 171.0 | 128.0 | 1047 | 1372 | 74647 | 22.61 | 105.03 | 2 | 18 |
+| p18 sjf_share | hints | hints | 483.0 (480.0–486.0) | -12% | 99.94 | 300.5 | 208.5 | 108.5 | 1021 | 1370 | 74182 | 22.26 | 100.75 | 2 | 18 |
+| p0 fifo | ignore | hints | 544.0 (542.0–546.0) | -1% | 99.96 | 535.0 | 534.0 | 494.5 | 538.5 | 532.5 | 74256 | - | 55.12 | 2 | 18 |
+
+Best with hints applied: **prio** (340.0 µs).
+
+point p99 by offered load (req/s):
+
+| Policy | Mode | Build | 28,000 | 56,000 | 70,000 | 72,000 | 74,000 | 76,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 78.0 | 216.5 | 424.5 | 484.0 | 506.5 | 551.5 |
+| prio | hints | hints | 75.5 | 169.5 | 280.5 | 293.0 | 309.0 | 340.0 |
+| sjf_older | hints | hints | 77.5 | 211.5 | 435.5 | 485.0 | 511.5 | 562.0 |
+| sjf_share | hints | hints | 77.0 | 216.5 | 392.5 | 425.0 | 450.0 | 483.0 |
+| fifo | ignore | hints | 77.5 | 214.5 | 429.5 | 458.5 | 507.5 | 544.0 |
+
 Superseded workloads (kept with their results, not scored): w4.
 
