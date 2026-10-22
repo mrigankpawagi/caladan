@@ -3,7 +3,7 @@
 - id: p19
 - config: sjf_tier
 - generation: 18
-- status: candidate
+- status: accepted
 - builds_on: p18
 - changed_from_previous: p18 plus: in the equal-cost pass, the passer must be due later than the chosen thread by more than the chosen thread's 30% reserve plus both lengths (instead of at least twice as late), must have used at least as large a share of its window as the chosen thread has so far (instead of as large as it will have after waiting), and is the oldest waiting HIGH thread (not overrun) that meets the conditions, found in a second scan (instead of the oldest waiting HIGH thread); on w19 frontend fetches pass mid-tier and fan-out fetches that arrived after them, mids never pass fanouts, and on w1–w17 decisions are p18's (at most 0.017% of picks differ in the model)
 - commit: 610f8f5
@@ -58,4 +58,21 @@ Like sjf_share, each core runs helper threads first, then HIGH, NORMAL and LOW t
 | w1–w15, w0 | every metric | within noise (p18's decisions; w0 has no HIGH threads, so p4's path is unchanged) |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 18 (judge.py, results/gen18/) against the champion
+p18 sjf_share, with no paired confirmation needed.
+
+| Workload | Metric | sjf_share | sjf_tier | Change | Notes |
+|---|---|---|---|---|---|
+| w19 (76k) | point p99 (score) | 483.0 µs | 413.5 µs | −14.4% | predicted −11 to −15% (410–430) |
+| w19 | point queue-wait p99 | 388.6 µs | 308.8 µs | −20.5% | predicted 320–345 |
+| w19 | mid p99 / met | 300.5 µs / 99.955% | 349.5 µs / 99.945% | +16.3% / −0.01 points | predicted 335–350; limit 375.6 |
+| w19 | fanout p99 / met | 208.5 µs / 99.905% | 236.0 µs / 99.89% | +13.2% / −0.02 points | predicted 230–240; limit 260.6 |
+| w19 | health p99 | 108.5 µs | 96.5 µs | −11.1% | predicted 75–85 (missed) |
+| w18 (76k) | read p99 | 495.5 µs | 454.5 µs | −8.3% | predicted −2 to −5% |
+| w18 | fanout p99 / met | 234.5 µs / 99.83% | 264.0 µs / 99.625% | +12.6% / −0.21 points | predicted +7 to +10% / −0.05 to −0.10 (cost above prediction) |
+| w17 / w16 | read p99 | 222.5 / 241.0 µs | 227.0 / 240.5 µs | +2.0% / −0.2% | within noise |
+| w1–w15, w0 | | | | within noise | largest +4.9% (w14) |
+
+The score and the mids landed as predicted; the restated cut also helped
+w18 more than the model said, and charged w18's fanouts more. Fanouts on
+w18 now sit at 264 µs p99 and 99.62% met.
