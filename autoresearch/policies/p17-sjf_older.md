@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p16
 - changed_from_previous: p16 plus: the shortest waiting HIGH thread may also pass the order's choice when it is only shorter, not a third as long, if it became ready before the chosen thread and the chosen thread has not run yet; p16's other guards still apply (due at least twice as late within p9's split, and the chosen thread keeps 40% of its relative deadline as slack). On w17 reads now pass the fanouts that arrived after them; on w1–w16 decisions are p16's.
-- commit: (filled by orchestrator)
+- commit: 4f21993
 
 ## What it does
 Like sjf_afford, each core runs helper threads first, then HIGH, NORMAL and LOW threads. It orders HIGH threads by deadline and length, and lets a much shorter request with a much looser deadline go ahead of the chosen one when that one can spare the time. sjf_older also lets a request that is only somewhat shorter go ahead, but only if it was already waiting when the chosen one arrived. Oldest-first would have run it first anyway. On w17 a document read no longer waits behind fan-out sub-requests that arrived after it while they still have 120 µs to spare; a sub-request with little slack left still runs first. On the earlier workloads a shorter, earlier request due twice as late does not occur, so nothing changes there.
