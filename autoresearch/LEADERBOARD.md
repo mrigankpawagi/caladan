@@ -50,8 +50,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 | p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
+| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -80,8 +80,8 @@ req p99 by offered load (req/s):
 | sjf_unit | hints | hints |  |  | 72.0 |  |  | inf |
 | sjf_upper | hints | hints |  |  | 72.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 | fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
+| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -1028,6 +1028,36 @@ point p99 by offered load (req/s):
 | sjf_share | hints | hints | 77.0 | 216.5 | 392.5 | 425.0 | 450.0 | 483.0 |
 | sjf_tier | hints | hints | 77.5 | 190.0 | 331.5 | 356.5 | 399.0 | 413.5 |
 | fifo | ignore | hints | 77.5 | 214.5 | 429.5 | 458.5 | 507.5 | 544.0 |
+
+## w20: A four-core search leaf where full searches cost four times a type-ahead suggestion and carry a four-times-looser deadline
+
+[workloads/w20-search-behind-suggestions.json](workloads/w20-search-behind-suggestions.json). A search leaf serves full search queries from the results page and type-ahead suggestions sent on every keystroke, plus health checks, index updates and background segment merges, on 4 cores. A suggestion is short and due in 250 us, because it is useless once the user has typed the next letter; a search costs about four times as much and is due in 1000 us. Both its length and its deadline tell a scheduler to run every suggestion first, so searches wait behind suggestions that arrived long after them even while those have most of their budget left, and the rules that let an earlier request go first today all require it to be shorter or at most half again as long. Suggestion cost varies with how many completions a prefix matches, so their run times are spread out rather than fixed.
+
+Score: `search` p99. Headline load: 108,000 req/s.
+
+![search p99 by offered load on w20](plots/w20-load.svg)
+
+![search p99 and its runqueue wait at the headline load on w20](plots/w20-wait.svg)
+
+| Policy | Mode | Build | Score (search p99) | vs fifo | search deadline met % | suggest p99 | health p99 | index p99 | merge p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 643.0 (642.0–644.0) | +0% | 99.98 | 608.0 | 595.0 | 633.0 | 631.5 | 107009 | 78.68 | 78.41 | 2 | 19 |
+| p1 prio | hints | hints | 325.5 (325.0–326.0) | -49% | 100.00 | 290.5 | 279.5 | 1054 | 1526 | 106410 | 24.51 | 114.98 | 2 | 19 |
+| p18 sjf_share | hints | hints | 401.0 (399.0–403.0) | -38% | 100.00 | 128.0 | 97.5 | 1084 | 1541 | 107275 | 15.40 | 120.97 | 2 | 19 |
+| p19 sjf_tier | hints | hints | 406.5 (400.0–413.0) | -37% | 100.00 | 129.5 | 98.0 | 1104 | 1602 | 106660 | 15.70 | 124.64 | 2 | 19 |
+| p0 fifo | ignore | hints | 626.5 (623.0–630.0) | -3% | 99.99 | 592.0 | 582.0 | 616.0 | 613.5 | 106451 | - | 75.91 | 2 | 19 |
+
+Best with hints applied: **prio** (325.5 µs).
+
+search p99 by offered load (req/s):
+
+| Policy | Mode | Build | 40,000 | 80,000 | 96,000 | 100,000 | 104,000 | 108,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 83.5 | 248.0 | 453.5 | 519.0 | 592.0 | 643.0 |
+| prio | hints | hints | 80.5 | 181.5 | 261.5 | 278.0 | 304.0 | 325.5 |
+| sjf_share | hints | hints | 81.0 | 206.5 | 310.0 | 348.0 | 365.5 | 401.0 |
+| sjf_tier | hints | hints | 82.0 | 203.0 | 313.0 | 343.0 | 369.5 | 406.5 |
+| fifo | ignore | hints | 80.5 | 254.0 | 455.0 | 515.5 | 575.5 | 626.5 |
 
 Superseded workloads (kept with their results, not scored): w4.
 
