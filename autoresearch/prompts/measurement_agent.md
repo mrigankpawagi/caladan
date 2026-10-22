@@ -86,3 +86,4 @@ about code you have not been shown.
 - gen13: Compare a changed workload with its parent at matched load per core and say which of means and tails moved; on w14 only the tails did, which pointed the policy agent at what passes gets rather than at overall load.
 - gen14: Distinguishing two candidate mechanisms by which kinds should move (here, if the lookup label were inflated, puts would have gained; they lost) settled the question without a new counter and pointed the policy agent at the right fix.
 - gen15: Measure simple baselines (prio, edf_high, an early champion) on a new service: on w16 they showed that deadline order itself, not learning or rescue, was what hurt the score, which pointed the policy agent straight at the fix.
+- gen16: Check prio's deadline-met for the tight-deadline kind before treating deadline order as necessary: on w17 short bursts let oldest-first meet nearly all of them, which made the deadline order a pure cost to the score kind.

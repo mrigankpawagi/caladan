@@ -3,7 +3,7 @@
 - id: p17
 - config: sjf_older
 - generation: 16
-- status: candidate
+- status: accepted
 - builds_on: p16
 - changed_from_previous: p16 plus: the shortest waiting HIGH thread may also pass the order's choice when it is only shorter, not a third as long, if it became ready before the chosen thread and the chosen thread has not run yet; p16's other guards still apply (due at least twice as late within p9's split, and the chosen thread keeps 40% of its relative deadline as slack). On w17 reads now pass the fanouts that arrived after them; on w1–w16 decisions are p16's.
 - commit: 4f21993
@@ -35,4 +35,18 @@ Like sjf_afford, each core runs helper threads first, then HIGH, NORMAL and LOW 
 | w16, w1–w15, w0 | every metric | unchanged within noise (p16's decisions) |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 16 (judge.py, results/gen16/) against the champion
+p16 sjf_afford, after a paired confirmation on w4b and w9 (rule-6 drift on
+workloads where p17 decides as p16).
+
+| Workload | sjf_afford | sjf_older | Change | Notes |
+|---|---|---|---|---|
+| w17 | read p99 364.0 µs | 234.0 µs | −35.7% | predicted −25 to −35% (235–275) |
+| w17 | fanout p99 / met | 219.0 µs / 99.84% | 238.0 µs / 99.81% | +8.7% / −0.03 points (predicted +8 to +12%) |
+| w17 | health p99 | 107.0 µs | 105.0 µs | −1.9% |
+| w16 | read p99 255.0 µs | 261.0 µs | +2.4% | p16's decisions; fanout met −0.21 points |
+| w15 | 262.5 µs | 258.0 µs | −1.7% | |
+| w1–w14 | | | within noise | w4b and w9 decided from paired runs |
+
+Every prediction held. Stated in cost (shorter) and arrival order, under
+p16's slack guard, the rule needs no length ratio for the case it adds.
