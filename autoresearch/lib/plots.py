@@ -39,6 +39,8 @@ def _style():
         ".tick{font-size:11px;fill:var(--muted);font-variant-numeric:tabular-nums}",
         ".lab{font-size:12px;fill:var(--ink2)}",
         ".val{font-size:11px;fill:var(--ink);font-variant-numeric:tabular-nums}",
+        ".valb{font-size:11px;font-weight:700;fill:var(--ink);font-variant-numeric:tabular-nums}",
+        ".best{fill:none;stroke:var(--ink);stroke-width:2}",
         ".grid{stroke:var(--grid);stroke-width:1}",
         ".axis{stroke:var(--axis);stroke-width:1}",
         ".ref{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 3}",
@@ -207,18 +209,20 @@ def load_curves(title, subtitle, series, headline, colors, ylabel):
     return _doc(W, H, title, body)
 
 
-def score_map(title, subtitle, rows, cols, cell, row_note, col_note=None):
-    """Heatmap: rows = policies, cols = workloads, cell(r, c) -> % vs fifo or
-    None. Diverging: blue = better (lower latency) than fifo, red = worse,
-    gray = no change; the value is printed in every cell. col_note(c), if
-    given, is printed under each column's label (the workload's score kind)."""
+def score_map(title, subtitle, rows, cols, cell, row_note, col_note=None, footer=""):
+    """Heatmap: rows = policies, cols = workloads, cell(r, c) -> None or
+    {"pct": change from fifo in %, "text": printed value, "best": outline it,
+    "mark": suffix it with an asterisk}. Fill is diverging on pct: blue =
+    better (lower latency) than fifo, red = worse, gray = no change.
+    col_note(c), if given, is printed under each column's label (the
+    workload's score kind)."""
     CW, CH, LW, TOP = 62, 28, 230, (106 if col_note else 92)
     W = LW + CW * len(cols) + 24
-    H = TOP + CH * len(rows) + 50
+    H = TOP + CH * len(rows) + (66 if footer else 50)
     body = [_t(16, 26, title, "title"), _t(16, 44, subtitle, "sub")]
     # color key
     kx = 16
-    for frac, lab in ((-1, "−60% or better"), (-0.5, "−30%"), (0, "same as fifo"),
+    for frac, lab in ((-1, "−60% or better than fifo"), (-0.5, "−30%"), (0, "same as fifo"),
                       (0.5, "+30%"), (1, "+60% or worse")):
         body.append('<rect class="mid" x="%d" y="54" width="14" height="14" rx="3"/>' % kx)
         if frac:
@@ -227,6 +231,8 @@ def score_map(title, subtitle, rows, cols, cell, row_note, col_note=None):
                                                   0.85 * abs(frac)))
         body.append(_t(kx + 19, 65, lab, "tick"))
         kx += 34 + 6 * len(lab)
+    body.append('<rect class="best" x="%d" y="54" width="14" height="14" rx="3"/>' % kx)
+    body.append(_t(kx + 19, 65, "best in its column", "tick"))
     for j, c in enumerate(cols):
         if col_note:
             body.append(_t(LW + CW * j + CW / 2, TOP - 22, c, "lab", "middle"))
@@ -238,12 +244,15 @@ def score_map(title, subtitle, rows, cols, cell, row_note, col_note=None):
         body.append(_t(LW - 10, y + CH / 2 + 4, r + row_note(r), "lab", "end"))
         for j, c in enumerate(cols):
             x = LW + CW * j
-            v = cell(r, c)
-            if v is None:
+            d = cell(r, c)
+            if d is None:
                 body.append(_t(x + CW / 2, y + CH / 2 + 4, "–", "tick", "middle"))
                 continue
+            v = d["pct"]
             op = min(abs(v) / 60.0, 1.0) * 0.85
-            tip = "<title>%s on %s: %+.0f%% vs fifo</title>" % (escape(r), escape(c), v)
+            tip = "<title>%s on %s: %s (%+.0f%% vs fifo)%s</title>" % (
+                escape(r), escape(c), escape(d["text"]), v,
+                ", dominated" if d.get("mark") else "")
             body.append('<rect class="mid" x="%d" y="%d" width="%d" height="%d" rx="4">%s'
                         '</rect>' % (x + 1, y + 1, CW - 2, CH - 2, tip))
             if abs(v) >= 0.5:
@@ -251,10 +260,16 @@ def score_map(title, subtitle, rows, cols, cell, row_note, col_note=None):
                             'fill-opacity="%.2f">%s</rect>' % (
                                 "neg" if v < 0 else "pos", x + 1, y + 1, CW - 2, CH - 2, op,
                                 tip))
-            body.append(_t(x + CW / 2, y + CH / 2 + 4, ("%+.0f%%" % v).replace("-", "−"),
-                           "val", "middle"))
-    body.append(_t(16, H - 16, "Each cell: the p99 latency of the workload's score kind at its "
-                   "headline load, change from fifo's. Lower is better (blue).", "sub"))
+            if d.get("best"):
+                body.append('<rect class="best" x="%.1f" y="%.1f" width="%d" height="%d" '
+                            'rx="4"/>' % (x + 2, y + 2, CW - 4, CH - 4))
+            body.append(_t(x + CW / 2, y + CH / 2 + 4, d["text"] + ("*" if d.get("mark") else ""),
+                           "valb" if d.get("best") else "val", "middle"))
+    body.append(_t(16, H - (32 if footer else 16), "Each cell: the p99 latency (µs) of the "
+                   "workload's score kind; the fill shows its change from fifo's. Lower is "
+                   "better.", "sub"))
+    if footer:
+        body.append(_t(16, H - 14, footer, "sub"))
     return _doc(W, H, title, body)
 
 

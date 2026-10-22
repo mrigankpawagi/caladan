@@ -289,27 +289,88 @@ def make_plots(idx, cards, workloads, sidx=None):
     svgs = {}
 
     # every policy on every scored workload, as change from fifo
-    pols = [c["config"] for c in sorted(cards.values(), key=card_num) if c["config"] != "fifo"]
-    cols = [w for w in live if w != "w0" and score("fifo", w)]
-    pols = [p for p in pols if any(score(p, w) for w in cols)]
+    # every kept policy on every workload, in µs: the score at the headline
+    # load (w0: one level below it, where the overhead rule measures every
+    # policy); rejected and unbuilt policies are left out
+    def level(wid):
+        h = heads[wid]
+        if wid == "w0" and h:
+            return max([l for l in workloads[wid]["load_rps"] if l < h], default=h)
+        return h
+
+    def at(policy, wid, group, field):
+        l = level(wid)
+        if not l:
+            return None
+        v, n = metric(idx, wid, combo(policy), l, group, field)
+        return v if n and v is not None and math.isfinite(v) else None
+
+    def val(policy, wid):
+        s = workloads[wid]
+        return at(policy, wid, "kind:" + s["score"]["kind"], s["score"]["percentile"])
+
+    def dominated(policy, wid):
+        """Another policy measured here is better beyond noise on something
+        (p99 more than 6% lower, or a kind's deadline-met more than 1 point
+        higher) and worse beyond noise on nothing (judge.py's win rule)."""
+        allp = sorted({k[1] for k in idx if k[0] == wid and k[2:4] == ("hints", "hints")})
+        sc = {p: val(p, wid) for p in allp}
+        sc = {p: v for p, v in sc.items() if v is not None}
+        if policy not in sc:
+            return False
+        kinds = [k["name"] for k in workloads[wid]["kinds"] if k.get("deadline_us", 0) > 0]
+        met = {(p, k): at(p, wid, "kind:" + k, "deadline_met") for p in sc for k in kinds}
+        for q in sc:
+            if q == policy:
+                continue
+            pairs = [(met[(q, k)], met[(policy, k)]) for k in kinds
+                     if met[(q, k)] is not None and met[(policy, k)] is not None]
+            worse = sc[q] > 1.06 * sc[policy] or any(a < b - 1.0 for a, b in pairs)
+            better = sc[q] * 1.06 < sc[policy] or any(a > b + 1.0 for a, b in pairs)
+            if better and not worse:
+                return True
+        return False
+
+    keep_rows = ["fifo"] + [c["config"] for c in sorted(cards.values(), key=card_num)
+                            if c["config"] != "fifo"
+                            and c.get("status") not in ("rejected", "not built")]
+    cols = [w for w in live if val("fifo", w)]
+    rows = [p for p in keep_rows if any(val(p, w) for w in cols)]
+    best = {}
+    for w in cols:
+        vs = [val(p, w) for p in rows]
+        vs = [v for v in vs if v is not None]
+        if vs:
+            best[w] = min(vs)
+
+    def fmt_us(v):
+        return "%.0f" % v if v >= 1000 or v == int(v) else "%.1f" % v
 
     def cell(p, w):
-        a, b = score(p, w), score("fifo", w)
-        return 100 * (a / b - 1) if a and b else None
+        a, b = val(p, w), val("fifo", w)
+        if not a or not b:
+            return None
+        return {"pct": 100 * (a / b - 1), "text": fmt_us(a), "best": best.get(w) == a,
+                "mark": dominated(p, w)}
 
     def note(p):
         st = cards.get(p, {}).get("status", "")
         return " (champion)" if p == champ else (" (%s)" % st if st in (
-            "rejected", "candidate", "baseline") else "")
-    if cols and pols:
+            "candidate", "baseline") else "")
+
+    def kind_note(w):
+        k = workloads[w]["score"]["kind"]
+        return "%s @%dk" % (k, level(w) // 1000) if w == "w0" else k
+    if cols and rows:
         svgs["scores.svg"] = plots.score_map(
             "Every policy on every workload",
-            "Score = p99 latency of each workload's latency-critical kind (named under "
-            "its id), median of 2 repeats; w0 (no hints) is left out.",
-            ["%s %s" % (cards[p]["id"], p) for p in pols], cols,
+            "p99 latency (µs) of each workload's latency-critical kind (named under its id) at "
+            "its headline load, median of 2 repeats; rejected policies left out.",
+            ["%s %s" % (cards[p]["id"], p) for p in rows], cols,
             lambda r, c: cell(r.split(" ", 1)[1], c),
-            lambda r: note(r.split(" ", 1)[1]),
-            lambda w: workloads[w]["score"]["kind"])
+            lambda r: note(r.split(" ", 1)[1]), kind_note,
+            "Outlined: the lowest p99 in the column. * = dominated: another policy is faster "
+            "beyond noise or meets more deadlines (over 1 point) without being worse at either.")
 
     # each candidate against the champion it faced, on its generation's newest workload
     bars = []
