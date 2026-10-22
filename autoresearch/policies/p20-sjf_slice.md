@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p19
 - changed_from_previous: p19 plus: in the second scan, a waiting HIGH thread more than half again as long as the chosen one may also pass it, under p19's deadline cut, if the chosen thread keeps 40% of its window as slack after a whole 100 µs time slice and the passer has already used at least as large a share of its window as the chosen thread will have after waiting for it (p18's share test); on w20 searches pass fresh suggestions, and on w1–w19 decisions are p19's (6 of about 30M picks differ in the model, on w11 and w12)
-- commit: (filled by orchestrator)
+- commit: d302e10
 
 ## What it does
 Like sjf_tier, each core runs helper threads first, then HIGH, NORMAL and LOW threads. It orders HIGH threads by deadline and length, and lets an earlier request go first when the chosen one can spare the time. Until now, that earlier request had to be at most half again as long. sjf_slice also lets a much longer request go first. To allow it, the chosen request must still have 40% of its budget left after waiting a full time slice (100 µs), and the longer request must already have used a larger share of its own budget than the chosen one will have after waiting for it. On w20 a search that has waited a long time can now run before a suggestion that has only just arrived. A request with a budget under about 170 µs is never passed this way.
