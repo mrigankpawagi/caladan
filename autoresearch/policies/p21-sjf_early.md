@@ -3,7 +3,7 @@
 - id: p21
 - config: sjf_early (variants: sjf_early30, sjf_early_w)
 - generation: 20
-- status: candidate
+- status: rejected
 - builds_on: p19
 - changed_from_previous: p19 plus: at a time unit of 1 (w1-w10), when p4's rescue check does not fire, the HIGH thread with the least slack still runs first if waiting for the chosen thread, priced at that label's uncapped learned length, would leave it with less than 18 us of slack (22 us margin instead of 13), and the chosen thread keeps 60% of its window after it; give-up rule unchanged; decisions on w1 and w11-w20 are p19's (0 differing picks in the model)
 - commit: 4030a2b
@@ -62,4 +62,24 @@ Share of picks that differ from sjf_tier on won workloads (lockstep model): sjf_
 | w1, w11, w13–w16, w18–w20 (won), w0 | every metric | identical decisions; within noise |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 20 (results/gen20/). All three variants were probed on
+the nodes against sjf_tier at the headline of w2, w3, w4b, w5, w7, w9, w10,
+w11 and w12 (2 repeats each, one session); the model's claimed 2.4–3.7×
+under-statement did not hold.
+
+| Config | Query deadline-met change (w4b, w5, w7, w9, w10, w12) | Get p99 change | Verdict |
+|---|---|---|---|
+| sjf_early | +0.4, +0.1, −0.2, +0.2, +0.1, 0.0 points | w5 +6%, w7 +5% | rejected on the probe |
+| sjf_early30 | +0.4, −0.3, −0.1, +0.1, +0.1, −0.2 points | w5 +7%, w7 +6%, w3 +8% | rejected on the probe |
+| sjf_early_w | +0.6, −0.1, −0.4, +0.2, −0.1, +0.2 points | w5 +6%, w7 +6%, w12 +5% | full convergence evaluation |
+
+sjf_early_w's full evaluation (eval_policy.sh 20 sjf_early_w converge) passed
+rules 2–6 everywhere, but no query moved by more than 0.6 point, and gets
+were 3.5–6.5% slower on w4b–w9 (w5 85.5 against 81.0, w8 89.5 against 84.0).
+Under the first win definition it won 11 workloads, like the champion (it
+gained w12 and lost w11), and was rejected on rule 1; under the definition
+adopted in generation 20 (never dominated) it would lose five of the
+champion's 19 wins (w5–w8, w11), dominated by older policies with faster
+gets and equal deadlines. An earlier rescue does not help queries on these
+nodes, because the misses come from bursts the server cannot see coming,
+not from rescues that fire too late.
