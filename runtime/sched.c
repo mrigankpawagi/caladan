@@ -3339,6 +3339,281 @@ static uint32_t choose_sjf_slice(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p21: p4's rescue may also fire this many us earlier than
+ * POLICY_RESCUE_LATE_US says: at the headline load a query spends 34-41 us
+ * outside the run queue, not the 13 us measured at light load ...
+ */
+#define POLICY_EARLY_LATE_US	22
+/* p21: ... but only if the chosen thread keeps this percent of its relative
+ * deadline as slack after the rescued thread has run */
+#define POLICY_EARLY_KEEP_PCT	60
+
+/* p21: the run time this core has learned for @th's label without p8's cap
+ * (a put/sync label counts its 30 us flushes), never less than @c */
+static inline uint64_t early_raw_cost(const uint64_t *ps, const thread_t *th,
+				      uint64_t c, uint64_t u)
+{
+	uint64_t hint = sjf_service(th), key, raw;
+	int i;
+
+	if (!hint)
+		return c;
+	key = scale_key(th, hint, u);
+	for (i = 0; i < POLICY_LEARN_SLOTS; i++) {
+		if ((ps[POLICY_LEARN_FIRST + i] >> 32) == key) {
+			raw = ps[POLICY_LEARN_FIRST + i] & 0xffffffffULL;
+			return raw > c ? raw : c;
+		}
+	}
+	return c;
+}
+
+/*
+ * p21: true if the least-slack HIGH thread @b (slack @us, length @uc) should
+ * run before HIGH thread @a, the order's choice (length @ca, slack @sa),
+ * although p4's rescue check did not fire: waiting for @a, priced at its
+ * uncapped learned length, would leave @b with less than @margin_us -
+ * POLICY_RESCUE_COST_US of slack, and @a, which has a deadline, keeps
+ * @keep_pct percent of its relative deadline as slack after waiting for @b.
+ * The margin is in plain us at every unit: it stands for time spent outside
+ * the run queue, which does not grow with the deadlines. At a unit above 1
+ * @b must not be due sooner than @a relative to when each became ready, so
+ * a tight kind (a fan-out fetch, a lease) is never rescued past a looser
+ * one; p14's ratio rule does not apply to this rescue
+ */
+static inline bool early_rescue(const uint64_t *ps, const thread_t *a,
+				uint64_t ca, int64_t sa, const thread_t *b,
+				int64_t us, uint64_t uc, uint64_t u,
+				int64_t margin_us, int64_t keep_pct)
+{
+	int64_t early = (margin_us - (int64_t)POLICY_RESCUE_COST_US) *
+			cycles_per_us;
+
+	if (!a->deadline_tsc)
+		return false;
+	if (u > 1 && afford_rel(b) < afford_rel(a))
+		return false;
+	if (us >= early + (int64_t)early_raw_cost(ps, a, ca, u))
+		return false;
+	return sa - (int64_t)uc >= afford_rel(a) * keep_pct / 100;
+}
+
+/*
+ * p21: p19's sjf_tier (see choose_sjf_tier()) with one change to p4's
+ * rescue check: when it does not fire, the HIGH thread with the least slack
+ * (not too late, not overrun) still runs first if early_rescue() says so,
+ * with @margin_us (POLICY_RESCUE_LATE_US in p4's check) and @keep_pct; at a
+ * unit above 1 only if @any_unit. p4's give-up rule (below
+ * POLICY_RESCUE_LATE_US - POLICY_RESCUE_COST_US of slack a thread waits for
+ * shorter ones) is unchanged. The clock is read at most once per pick.
+ * Without HIGH threads this is p4's path and the clock is never read.
+ */
+static inline uint32_t choose_sjf_early_k(struct kthread *k, uint32_t n,
+					  int64_t margin_us, int64_t keep_pct,
+					  bool any_unit)
+{
+	uint64_t *ps = k->policy_state;
+	uint64_t lc[POLICY_LEARN_SLOTS], u = scale_get(ps);
+	thread_t *th, *bth, *uth = NULL, *sth = NULL, *oth = NULL;
+	uint8_t r, rank;
+	uint32_t i, best = 0, ubest = 0, sbest = 0, obest = 0;
+	int64_t s, bs = 0, us = 0, late = 0;
+	uint64_t now = 0, c, bc = 0, uc = 0, sc = 0, oc = 0;
+	bool two_high = false, o, bo = false, first;
+
+	/* close the sample of this core's previous timed pick (as in p9) */
+	if (ps[0]) {
+		learn_clock(&now);
+		for (i = 0; i < n; i++) {
+			if (learn_mark(sched_rq_at(k, i)) == ps[2]) {
+				scale_update(ps, ps[1] & 0xffffffffULL,
+					     now - ps[0], u);
+				break;
+			}
+		}
+		ps[0] = 0;
+	}
+
+	th = bth = sched_rq_at(k, 0);
+	rank = prio_rank[th->prio_class];
+	if (rank == prio_rank[THREAD_PRIO_SOFTIRQ])
+		return 0;
+
+	for (i = 1; i < n; i++) {
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r > rank) {
+			/* a more important class: helpers run at once */
+			if (r == prio_rank[THREAD_PRIO_SOFTIRQ])
+				return i;
+			rank = r;
+			best = i;
+			bth = th;
+		} else if (r == rank && r == prio_rank[THREAD_PRIO_HIGH]) {
+			if (!two_high) {
+				/* a second HIGH thread: price the labels, then
+				 * the first thread */
+				two_high = true;
+				learn_clock(&now);
+				scale_costs(ps, lc, u);
+				late = (int64_t)(POLICY_RESCUE_LATE_US -
+						 POLICY_RESCUE_COST_US) *
+				       cycles_per_us;
+				bc = scale_cost(ps, lc, bth, u);
+				bs = capped_slack(bth, bc, now);
+				bo = overrun(bth);
+				if (bs >= late && !bo) {
+					uth = bth;
+					ubest = best;
+					us = bs;
+					uc = bc;
+				}
+				if (!bo) {
+					sth = bth;
+					sbest = best;
+					sc = bc;
+				}
+			}
+			c = scale_cost(ps, lc, th, u);
+			s = capped_slack(th, c, now);
+			o = overrun(th);
+			/* least slack among the threads not too late or overrun */
+			if (s >= late && !o && (!uth || s < us)) {
+				uth = th;
+				ubest = i;
+				us = s;
+				uc = c;
+			}
+			/* shortest among the threads not overrun, oldest first */
+			if (!o && (!sth || c < sc)) {
+				sth = th;
+				sbest = i;
+				sc = c;
+			}
+			/* of two threads with one label, one overrun, the
+			 * other goes first; otherwise p14's order */
+			if (o != bo &&
+			    scale_key(th, sjf_service(th), u) ==
+			    scale_key(bth, sjf_service(bth), u))
+				first = bo;
+			else
+				first = learn_before(th, c, s < late,
+						     bth, bc, bs < late);
+			if (first) {
+				best = i;
+				bth = th;
+				bc = c;
+				bs = s;
+				bo = o;
+			}
+		}
+	}
+
+	/* the shortest thread goes first if the order's choice can afford it
+	 * (as in p17); otherwise the oldest thread that tier_pass() lets
+	 * through, at roughly equal cost */
+	if (sth && sth != bth && older_pass(bth, bc, bs, sth, sc, u)) {
+		best = sbest;
+		bth = sth;
+		bc = sc;
+	} else if (two_high && bth->prio_class == THREAD_PRIO_HIGH &&
+		   bth->deadline_tsc && !bth->total_cycles) {
+		for (i = 0; i < n; i++) {
+			th = sched_rq_at(k, i);
+			if (th == bth || th->prio_class != THREAD_PRIO_HIGH ||
+			    (int64_t)(th->ready_tsc - bth->ready_tsc) >= 0 ||
+			    (oth &&
+			     (int64_t)(th->ready_tsc - oth->ready_tsc) >= 0) ||
+			    overrun(th))
+				continue;
+			c = scale_cost(ps, lc, th, u);
+			if (tier_pass(bth, bc, bs, th, c, u, now)) {
+				oth = th;
+				obest = i;
+				oc = c;
+			}
+		}
+		if (oth) {
+			best = obest;
+			bth = oth;
+			bc = oc;
+		}
+	}
+
+	/* p14's rescue check (see choose_sjf_ratio()), then p21's earlier
+	 * one */
+	if (uth && uth != bth && us < late + (int64_t)bc &&
+	    (u == 1 || uc <= POLICY_RATIO_MAX * bc)) {
+		best = ubest;
+		bth = uth;
+	} else if (uth && uth != bth && (u == 1 || any_unit) &&
+		   bth->prio_class == THREAD_PRIO_HIGH &&
+		   early_rescue(ps, bth, bc, bs, uth, us, uc, u, margin_us,
+				keep_pct)) {
+		best = ubest;
+		bth = uth;
+	}
+
+	if (bth->prio_class != THREAD_PRIO_HIGH)
+		return best;
+
+	/* fold the chosen thread's deadline into the quartile and the unit */
+	upper_observe(ps, bth);
+
+	/* time this pick (as in p9), under the chosen thread's learning key */
+	if (bth->service_tsc && n - 1 >= POLICY_LEARN_MIN_LEFT) {
+		ps[0] = learn_clock(&now);
+		ps[1] = (ps[1] & ~0xffffffffULL) |
+			scale_key(bth, sjf_service(bth), scale_get(ps));
+		ps[2] = learn_mark(sched_rq_at(k, best == n - 1 ? n - 2 : n - 1));
+	}
+	return best;
+}
+
+/*
+ * p21 "sjf_early": choose_sjf_early_k() with a POLICY_EARLY_LATE_US margin
+ * and POLICY_EARLY_KEEP_PCT kept, at a time unit of 1 only (w1-w10); at a
+ * unit above 1 (w11-w20) every decision is p19's
+ */
+static uint32_t choose_sjf_early(struct kthread *k, uint32_t n)
+{
+	return choose_sjf_early_k(k, n, POLICY_EARLY_LATE_US,
+				  POLICY_EARLY_KEEP_PCT, false);
+}
+
+/* p21 variant: the report's bolder margin, with p16's 40% reserve */
+#define POLICY_EARLY30_LATE_US	30
+#define POLICY_EARLY30_KEEP_PCT	40
+
+/*
+ * p21 "sjf_early30": choose_sjf_early_k() with a POLICY_EARLY30_LATE_US
+ * margin and POLICY_EARLY30_KEEP_PCT kept, at a time unit of 1 only
+ */
+static uint32_t choose_sjf_early30(struct kthread *k, uint32_t n)
+{
+	return choose_sjf_early_k(k, n, POLICY_EARLY30_LATE_US,
+				  POLICY_EARLY30_KEEP_PCT, false);
+}
+
+/* p21 variant: the reserve the chosen thread keeps, at every unit */
+#define POLICY_EARLYW_KEEP_PCT	70
+
+/*
+ * p21 "sjf_early_w": choose_sjf_early_k() at every unit, with a
+ * POLICY_EARLY_LATE_US margin and POLICY_EARLYW_KEEP_PCT kept; at a unit
+ * above 1 the rescued thread must not be due sooner than the chosen one
+ * (relative to when each became ready), and p14's ratio rule does not bar
+ * it: on w12 a 68 us query near its deadline (400 us) may pass a get
+ * (400 us) that keeps 70% of its window, but never a lease (100 us); on
+ * w16-w20 no kind is rescued past a kind due later
+ */
+static uint32_t choose_sjf_early_w(struct kthread *k, uint32_t n)
+{
+	return choose_sjf_early_k(k, n, POLICY_EARLY_LATE_US,
+				  POLICY_EARLYW_KEEP_PCT, true);
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -3364,6 +3639,9 @@ static const struct {
 	{ "sjf_share",	choose_sjf_share },
 	{ "sjf_tier",	choose_sjf_tier },
 	{ "sjf_slice",	choose_sjf_slice },
+	{ "sjf_early",	choose_sjf_early },
+	{ "sjf_early30",	choose_sjf_early30 },
+	{ "sjf_early_w",	choose_sjf_early_w },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
