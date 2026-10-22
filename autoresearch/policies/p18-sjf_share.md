@@ -3,7 +3,7 @@
 - id: p18
 - config: sjf_share
 - generation: 17
-- status: candidate
+- status: accepted
 - builds_on: p17
 - changed_from_previous: p17 plus: when p17's shortest waiting HIGH thread does not pass, the oldest waiting HIGH thread (not overrun) may pass the order's choice if it became ready first and the chosen thread has not run yet, it is due at least twice as late within p9's split, it is at most half again as long, the chosen thread keeps 30% of its relative deadline as slack after it, and it has already used at least as large a share of its own deadline window as the chosen thread will have used after waiting for it; on w18 frontend reads pass fanouts that arrived after them, and on w1–w17 decisions are p17's (42 of 35M picks differ in the model)
 - commit: 634131a
@@ -36,4 +36,20 @@ Like sjf_older, each core runs helper threads first, then HIGH, NORMAL and LOW t
 | w17, w16, w1–w15, w0 | every metric | within noise (p17's decisions) |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 17 (judge.py, results/gen17/) against the champion
+p17 sjf_older, with no paired confirmation needed.
+
+| Workload | Metric | sjf_older | sjf_share | Change | Notes |
+|---|---|---|---|---|---|
+| w18 (76k) | read p99 (score) | 589.0 µs | 495.5 µs | −15.9% | predicted −10 to −15% (500–530) |
+| w18 | read queue-wait p99 | 482.4 µs | 396.3 µs | −17.8% | predicted 400–430 |
+| w18 | fanout p99 / met | 216.0 µs / 99.85% | 234.5 µs / 99.83% | +8.6% / −0.02 points | predicted +12 to +18%; limit 270.0 |
+| w18 | health p99 | 126.0 µs | 107.5 µs | −14.7% | predicted −10 to −25% |
+| w17 | read p99 | 234.0 µs | 222.5 µs | −4.9% | within noise |
+| w16 | read p99 | 261.0 µs | 241.0 µs | −7.7% | health −10.5%, fanout met +0.24 points |
+| w1–w15, w0 | | | | within noise | no kind with a deadline lost a point |
+
+Every prediction held, and the fanouts paid less than the model said. The
+share condition (the passer has used at least as large a share of its window
+as the chosen thread will have) let reads pass at equal cost while keeping
+fanout queue-wait p99 at 132 µs, near the champion's 127.
