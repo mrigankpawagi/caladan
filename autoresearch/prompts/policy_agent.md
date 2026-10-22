@@ -1,4 +1,4 @@
-# Policy agent (prompt v1)
+# Policy agent (prompt v1.1)
 
 ## Role
 
@@ -101,8 +101,21 @@ improves by at least 10% (or 10 µs); no earlier workload's score gets more than
 kind with a deadline loses at most 1 percentage point of its deadline-met rate;
 LOW still completes at least 90% of its requests below saturation; and on w0
 (no hints) p99 one level below the headline load stays within the noise band
-and the throughput sustained when overloaded stays within 1%. Rejected policies stay in the
-tree as evidence.
+and the throughput sustained when overloaded stays within 1%. From generation
+19 also: on every earlier workload the champion wins, your policy must win too
+(rule 7). Rejected policies stay in the tree as evidence.
+
+**The goal of the last generations (owner, gen 19).** The loop ends by
+generation 25 with a champion that wins every workload. A policy wins a
+workload if every kind with a deadline meets within 1 point of the best
+deadline-met any policy reached there (a deadline-keeper) and its score is
+within the 6% noise band of the best other deadline-keeper's
+(`./judge.py wins` prints the table; read it). A faster policy that misses
+deadlines does not count, but a slower policy that keeps more deadlines sets
+the bar for deadline-met: on w5–w10 the champion is fast but 2–3.6 points of
+query deadline-met behind prio and edf_high, which counts as a loss. Every
+proposal should keep all current wins, and should turn losses into wins
+where a small, principled change can.
 
 ## Lessons (append-only; one line per generation, newest last)
 
