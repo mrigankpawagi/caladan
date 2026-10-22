@@ -1,0 +1,118 @@
+{
+  "id": "w18b",
+  "slug": "search-shard-usable-peak",
+  "generation": 17,
+  "title": "A search shard where cached and uncached searches carry one hint, sized so its busiest levels stay usable",
+  "description": "A search index shard on six cores: two thirds of user searches are answered from the shard's result cache in about 7 us, the rest miss it and score posting lists for an exponentially distributed time averaging about 72 us; dashboards send slower aggregations, bulk indexing and background segment merges keep the cores busy, and a load balancer sends health checks, over 48 connections from many coordinating nodes. The server cannot know whether a search will hit the cache until it runs it, so every search carries the same honest average hint and the same 500 us deadline. About a quarter of the misses run past the 100 us time slice and come back to the queue with their first deadline, so a scheduler that trusts the label runs them again ahead of cached searches that would take a few microseconds. The score is the cached searches' tail at the busiest load the plain first-come-first-served server sustains.",
+  "changed_from_previous": "w17b's search shard (gen 16 proposal) with 48 client connections instead of 16 and the busiest levels re-sized from its measured probe (136k and 132k instead of 140k and 136k, where fifo's overall median broke the 1.5x rule at 140k: 78 against 49); mix, work, hints, deadlines, bursts and 6 cores unchanged.",
+  "difficulty": {
+    "load": 0.87,
+    "tails": 1,
+    "classes": 6,
+    "burst": 1,
+    "inaccuracy": 1,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 6,
+    "time_scale": [
+      5
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 6,
+    "spinning_kthreads": 6,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "hit",
+      "service": "constant:600",
+      "weight": 0.3,
+      "deadline_us": 500,
+      "hint": {
+        "class": "high",
+        "deadline_us": 500,
+        "service_us": 29
+      }
+    },
+    {
+      "name": "miss",
+      "service": "exponential:6000",
+      "weight": 0.15,
+      "deadline_us": 500,
+      "hint": {
+        "class": "high",
+        "deadline_us": 500,
+        "service_us": 29
+      }
+    },
+    {
+      "name": "agg",
+      "service": "constant:10000",
+      "weight": 0.05,
+      "deadline_us": 2000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 2000,
+        "service_us": 120
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "index",
+      "service": "constant:3400",
+      "weight": 0.35,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "merge",
+      "service": "constant:3400",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    45000,
+    90000,
+    118000,
+    127000,
+    132000,
+    136000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "hit",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. A search engine's index shard (an Elasticsearch/Lucene shard, or a web-search index-serving node) answers repeated searches from a result cache (Elasticsearch's shard request cache; result caching in web search, Baeza-Yates et al., SIGIR 2007) and evaluates the rest over posting lists, whose cost is long-tailed (Bing index servers: most queries fast, a few ten or more times longer; Jeon et al., EuroSys 2013, SIGIR 2014). The cache is consulted inside the search handler, so every search gets one honest hint: class high, the 500 us query SLO, and the handler's mean run time, (0.30 x 600 + 0.15 x 6000) / 0.45 = 2400 iterations / 83 per us = 29 us. The node also serves dashboard aggregations (high, 2 ms, 120 us), balancer health checks (high, 1 ms, 1 us), bulk indexing (normal) and segment merges (low), as Elasticsearch data nodes do, and receives searches from every coordinating node, hence 48 connections (as the RPC-leaf family). Approximations: hits constant; misses exponential with mean 6000 iterations (72 us), loadgen's only long-tailed shape (real costs are heavier-tailed); indexing and merges constant 41 us chunks; the 2:1 hit ratio, weights and work sizes are invented to fit the story. Capacity, at 99.6 iterations per us: mean work = 0.30 x 600 + 0.15 x 6000 + 0.05 x 10000 + 0.05 x 85 + 0.35 x 3400 + 0.10 x 3400 = 3114.25 iterations = 31.27 us; 6 / 31.27 us = 191.9k req/s (170.1k with the 4 us allowance). Sized from measured light-load medians (gen 16 probe of w17b at 45k: hit 16, index 50, agg 130, miss p50 58, health 10 us, i.e. 83 iterations per us plus about 8 us of network): 3114.25 / 83 + 1 = 38.52 us of core time, 6 / 38.52 us = 155.8k req/s. Levels 45k/90k/118k/127k/132k/136k are 28.9/57.8/75.7/81.5/84.7/87.3%; busy-phase rate at 136k is 217.6k req/s. Why w17b's 140k failed the headline rule: the overall median sits on the indexing and merge chunks (45% of requests at 41 us; health, hits and the fastest misses make only about 41.5% below them), so the light median is 49 and the limit 73.5. Under fifo every kind gains the same median wait (at 140k hit +29, health +30, index +29, agg +32 us), and almost none of it is runqueue wait (fifo qwait p50 0.5-0.9 us): it is mostly the wait for the segment already running on the core, whose mean residual is about 28 us here (exponential misses and 120 us aggregations, cut at 100 us slices), against about 19 us on w17. The 1000 us bursts run at 1.6x the average, so the top level runs at 1.40-1.44x capacity for 250 us of every millisecond and the median request lands in a burst or its drain; the extra median therefore rises steeply near the knee: 20 us at 136k (fifo median 68, passes), 29 at 140k (78, fails). Moving short kinds above half the requests would put the light median at about 16 and the limit at 24, so the fix is the levels: the busiest two are 132k and 136k, where the measured probe gives fifo medians of about 63 and 68 (limit 73.5) and answers and adherence above 99%. The 48 connections spread the flows over the six cores more evenly; on w17 (48 connections, same bursts) the extra fifo median at 0.873 of capacity was 0.53 of the running residual against 0.70 on w17b, so the change should not raise the median. FIFO penalty: hits wait behind every queued miss, aggregation, index and merge chunk (w17b probe at 136k: fifo hit p99 405 against 25 at 45k). Headroom: at 136k the champion's hit p99 was 251 us with runqueue-wait p99 180.2 (72%); a miss cut after its first 100 us slice (25% of misses) keeps its first deadline and the search label, so it ranks ahead of every fresh search on its core while its expected remaining time is still 72 us against the label's 29; p15's overrun test catches it only from its second return (6% of misses). Ranking a search that has used a full slice behind fresh searches cut hit p99 by about 25% in the w17b simulation (miss deadline-met 99.12 to 99.03). p17's older-passer rule does not fire here (the only shorter, twice-as-late kind, health checks, is due past the 750 us split at unit 5), so p16 and p17 decide alike. Prediction at 136k: fifo overall median 64-70, hit p99 380-430; champion hit p99 230-270 with hit runqueue-wait p99 170-210 (share 0.72-0.80), time-slice yields about 10k per second, miss deadline-met 99.0-99.4%; at 45k every policy's hit p99 about 25 us. Server hint map: hit and miss = high:500:29. No run.py changes are needed."
+}
