@@ -1,7 +1,8 @@
 # p22: sjf_age (with variants sjf_age_mix and sjf_age_all)
 
 - id: p22
-- config: sjf_age (variants: sjf_age_mix, sjf_age_all)
+- config: sjf_age
+- variants: sjf_age_mix, sjf_age_all
 - generation: 21
 - status: not built
 - builds_on: p19

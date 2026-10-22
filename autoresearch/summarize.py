@@ -75,6 +75,10 @@ def load_cards():
                 card[m.group(1)] = m.group(2).strip()
         if "config" in card:
             cards[card["config"]] = card
+            # variants probed under one card (generation 20 on) share its id
+            # and status
+            for v in filter(None, (x.strip() for x in card.get("variants", "").split(","))):
+                cards[v] = dict(card, config=v, variant_of=card["config"])
     return cards
 
 
@@ -95,6 +99,22 @@ def latest(rows):
         newest[key] = max(newest.get(key, -1), int(r["gen"]))
     return [r for r in rows if int(r["gen"]) ==
             newest[(r["workload"], r["policy"], r["mode"], r["build"])]]
+
+
+def sweeps(rows, min_levels=3):
+    """Like latest(), for load curves: for each (workload, policy, mode, build),
+    the latest generation that measured at least min_levels loads, else the
+    latest generation, so that a re-measurement at the headline alone (the
+    convergence generations) does not hide an earlier full sweep."""
+    levels = {}
+    for r in rows:
+        k = (r["workload"], r["policy"], r["mode"], r["build"])
+        levels.setdefault((k, int(r["gen"])), set()).add(r["load_rps"])
+    pick = {}
+    for (k, g), ls in levels.items():
+        pick[k] = max(pick.get(k, (False, -1)), (len(ls) >= min_levels, g))
+    return [r for r in rows if int(r["gen"]) ==
+            pick[(r["workload"], r["policy"], r["mode"], r["build"])][1]]
 
 
 def index(rows, metric_rows=True):
@@ -139,6 +159,7 @@ def spread(idx, wid, combo, load, group, field):
 
 
 def leaderboard(rows, crows, cards, workloads):
+    sidx = index(sweeps(rows))
     rows, crows = latest(rows), latest(crows)
     idx, cidx = index(rows), index(crows, metric_rows=False)
     combos = sorted({(r["policy"], r["mode"], r["build"]) for r in rows},
@@ -158,7 +179,7 @@ def leaderboard(rows, crows, cards, workloads):
             c.get("status", "?"), c.get("changed_from_previous", "")))
     out.append("")
 
-    svgs = make_plots(idx, cards, workloads)
+    svgs = make_plots(idx, cards, workloads, sidx)
     out += ["## Progress", "",
             "![Score of every policy on every workload, as change from fifo]"
             "(plots/scores.svg)", "",
@@ -244,8 +265,10 @@ def card_num(c):
     return int(str(c.get("id", "p999"))[1:] or 999)
 
 
-def make_plots(idx, cards, workloads):
-    """The leaderboard's plots, as {file name: SVG text}."""
+def make_plots(idx, cards, workloads, sidx=None):
+    """The leaderboard's plots, as {file name: SVG text}; load curves come from
+    sidx (see sweeps()) when given."""
+    sidx = sidx or idx
     colors = plots.Colors(cards)
     combo = lambda p: (p, "hints", "hints")
     live = sorted((w for w, s in workloads.items() if s.get("status") != "superseded"),
@@ -281,16 +304,17 @@ def make_plots(idx, cards, workloads):
     if cols and pols:
         svgs["scores.svg"] = plots.score_map(
             "Every policy on every workload",
-            "Score at the headline load (median of repeats), change from fifo; "
-            "w0 (no hints) is left out.",
+            "Score = p99 latency of each workload's latency-critical kind (named under "
+            "its id), median of 2 repeats; w0 (no hints) is left out.",
             ["%s %s" % (cards[p]["id"], p) for p in pols], cols,
             lambda r, c: cell(r.split(" ", 1)[1], c),
-            lambda r: note(r.split(" ", 1)[1]))
+            lambda r: note(r.split(" ", 1)[1]),
+            lambda w: workloads[w]["score"]["kind"])
 
     # each candidate against the champion it faced, on its generation's newest workload
     bars = []
-    for c in sorted((c for c in cards.values() if c.get("status") != "baseline"),
-                    key=card_num):
+    for c in sorted((c for c in cards.values() if c.get("status") not in ("baseline", "not built")
+                     and not c.get("variant_of")), key=card_num):
         g = int(c.get("generation", 0))
         before = [x for x in acc if int(x.get("generation", 0)) < g]
         faced = max(before, key=lambda x: (int(x.get("generation", 0)), x.get("id")))[
@@ -319,7 +343,7 @@ def make_plots(idx, cards, workloads):
         for p in order:
             pts = []
             for l in s["load_rps"]:
-                v, n = metric(idx, wid, combo(p), l, "kind:" + sk, sp)
+                v, n = metric(sidx, wid, combo(p), l, "kind:" + sk, sp)
                 if n and v is not None:
                     pts.append((l, v))
             if len(pts) >= 3:

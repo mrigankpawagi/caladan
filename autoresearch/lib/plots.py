@@ -86,18 +86,24 @@ def _klabel(load):
 class Colors:
     """Fixed color per policy: baselines gray and dashed; the others take the
     categorical slots in card-id order. When a ninth policy arrives, the
-    oldest rejected policy that holds a slot gives it up and is drawn gray and
-    dotted ("folded"), so every other policy keeps its color."""
+    oldest rejected policy that holds a slot gives it up, or else the oldest
+    accepted policy that is no longer the champion, and is drawn gray and
+    dotted ("folded"); so the newest policies and the champion always have a
+    color, and every policy that keeps a slot keeps its color."""
 
     def __init__(self, cards):
         self.cls = {"fifo": "b0", "prio": "b1"}
         num = lambda c: int(str(c.get("id", "p999"))[1:] or 999)
         others = sorted((c for n, c in cards.items() if n not in self.cls), key=num)
+        acc = [c for c in others if c.get("status") == "accepted"]
+        champ = max(acc, key=lambda c: (int(c.get("generation", 0)), num(c)))["config"] \
+            if acc else None
         free = [str(i + 1) for i in range(len(SERIES_LIGHT))]
         holders = []
         for c in others:
             if not free:
-                victim = next((h for h in holders if h.get("status") == "rejected"), None)
+                victim = next((h for h in holders if h.get("status") == "rejected"), None) \
+                    or next((h for h in holders if h["config"] != champ), None)
                 if victim is None:
                     self.cls[c["config"]] = "fold"
                     continue
@@ -201,11 +207,12 @@ def load_curves(title, subtitle, series, headline, colors, ylabel):
     return _doc(W, H, title, body)
 
 
-def score_map(title, subtitle, rows, cols, cell, row_note):
+def score_map(title, subtitle, rows, cols, cell, row_note, col_note=None):
     """Heatmap: rows = policies, cols = workloads, cell(r, c) -> % vs fifo or
     None. Diverging: blue = better (lower latency) than fifo, red = worse,
-    gray = no change; the value is printed in every cell."""
-    CW, CH, LW, TOP = 62, 28, 230, 92
+    gray = no change; the value is printed in every cell. col_note(c), if
+    given, is printed under each column's label (the workload's score kind)."""
+    CW, CH, LW, TOP = 62, 28, 230, (106 if col_note else 92)
     W = LW + CW * len(cols) + 24
     H = TOP + CH * len(rows) + 50
     body = [_t(16, 26, title, "title"), _t(16, 44, subtitle, "sub")]
@@ -221,7 +228,11 @@ def score_map(title, subtitle, rows, cols, cell, row_note):
         body.append(_t(kx + 19, 65, lab, "tick"))
         kx += 34 + 6 * len(lab)
     for j, c in enumerate(cols):
-        body.append(_t(LW + CW * j + CW / 2, TOP - 8, c, "lab", "middle"))
+        if col_note:
+            body.append(_t(LW + CW * j + CW / 2, TOP - 22, c, "lab", "middle"))
+            body.append(_t(LW + CW * j + CW / 2, TOP - 8, col_note(c), "tick", "middle"))
+        else:
+            body.append(_t(LW + CW * j + CW / 2, TOP - 8, c, "lab", "middle"))
     for i, r in enumerate(rows):
         y = TOP + CH * i
         body.append(_t(LW - 10, y + CH / 2 + 4, r + row_note(r), "lab", "end"))
@@ -242,8 +253,8 @@ def score_map(title, subtitle, rows, cols, cell, row_note):
                                 tip))
             body.append(_t(x + CW / 2, y + CH / 2 + 4, ("%+.0f%%" % v).replace("-", "−"),
                            "val", "middle"))
-    body.append(_t(16, H - 16, "Each cell: the workload's score at its headline load, "
-                   "change from fifo. Lower latency is better (blue).", "sub"))
+    body.append(_t(16, H - 16, "Each cell: the p99 latency of the workload's score kind at its "
+                   "headline load, change from fifo's. Lower is better (blue).", "sub"))
     return _doc(W, H, title, body)
 
 
@@ -281,7 +292,8 @@ def generations(title, subtitle, bars, colors, threshold):
         body.append(_t(cx, B + 34, verdict, "tick", "middle"))
         body.append(_t(cx, B + 48, note, "tick", "middle"))
         if v is None:
-            body.append(_t(cx, Y(0) - 8, "pending", "tick", "middle"))
+            body.append(_t(cx, Y(0) - 8, "pending" if verdict == "candidate" else "not run",
+                           "tick", "middle"))
             continue
         y0, y1 = Y(0), Y(v)
         top, h = min(y0, y1), max(abs(y1 - y0), 1)

@@ -1,7 +1,8 @@
 # p21: sjf_early (with variants sjf_early30 and sjf_early_w)
 
 - id: p21
-- config: sjf_early (variants: sjf_early30, sjf_early_w)
+- config: sjf_early
+- variants: sjf_early30, sjf_early_w
 - generation: 20
 - status: rejected
 - builds_on: p19
