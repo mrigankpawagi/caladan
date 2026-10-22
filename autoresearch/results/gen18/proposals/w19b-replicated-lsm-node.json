@@ -1,0 +1,109 @@
+{
+  "id": "w19b",
+  "slug": "replicated-lsm-node",
+  "generation": 18,
+  "title": "A four-core replicated storage node where client reads cost twice a log append but carry a looser deadline",
+  "description": "A storage node in a replicated database keeps its data in an LSM tree (as RocksDB does) and serves client point reads, replication log appends from the group's leader, memtable flushes, background compactions and health checks. A leader cannot acknowledge a write until enough followers have appended it, so appends carry a tight 300 us budget, while client reads get 1000 us; a read searches several sorted files and costs about twice an append, and append sizes vary with how many writes the leader batched. A scheduler that ranks by deadline and length runs every append ahead of reads that arrived up to about 800 us earlier, even though appends usually have most of their budget to spare, and no existing rule lets a read pass because it is not shorter. Flushes are high priority, as in RocksDB, and run 400 us in 100 us slices, so a scheduler that simply runs the oldest request first lets them block reads instead.",
+  "changed_from_previous": "A new service on w18's 4 cores, 48 connections and 4000 us bursts: the tight-deadline kind (appends, 300 us) is now exponential (mean 1000 iterations, hint its mean, 12 us) and half as long as the scored loose-deadline kind (reads, 2000 iterations, 1000 us), and a long high-priority kind (flush, 33000 iterations, 1% of requests) is re-queued at every 100 us slice under its own label.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 1,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 4,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 4,
+    "guaranteed_kthreads": 4,
+    "spinning_kthreads": 4,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "read",
+      "service": "constant:2000",
+      "weight": 0.38,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 24
+      }
+    },
+    {
+      "name": "append",
+      "service": "exponential:1000",
+      "weight": 0.44,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 12
+      }
+    },
+    {
+      "name": "flush",
+      "service": "constant:33000",
+      "weight": 0.01,
+      "deadline_us": 4000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 4000,
+        "service_us": 400
+      }
+    },
+    {
+      "name": "compact",
+      "service": "constant:8300",
+      "weight": 0.11,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 100
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.06,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    }
+  ],
+  "load_rps": [
+    36000,
+    72000,
+    92000,
+    95000,
+    98000,
+    100000
+  ],
+  "score": {
+    "kind": "read",
+    "percentile": "p99"
+  },
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. Replicated storage nodes built on an LSM store (TiKV and CockroachDB on RocksDB/Pebble with Raft; ZippyDB on RocksDB with Paxos, Cao et al., FAST 2020) serve client point reads, append the leader's replicated log entries, flush full memtables and compact sorted runs. A write commits only when a quorum has appended it, so the leader's tail waits on the slowest follower, the fan-in argument of Dean and Barroso (The Tail at Scale, CACM 2013): appends get a tight propagated budget (300 us), reads the client's looser one (1000 us, invented). Costs: a point read probes the memtable and several levels and decodes a block (Cao et al.: Get dominates and is several times a Put's CPU); here 2000 iterations (24 us) against appends of mean 1000 (12 us): the 2x ratio is invented. Append size follows how many writes the leader batched, which varies widely; approximated as exponential (the server knows only the mean, so the hint is 12 us). RocksDB runs flushes in its HIGH-priority thread pool and compactions in its LOW pool (RocksDB wiki, Thread Pool); a flush must finish before the next memtable fills or writes stall, so it gets class high, a 4000 us deadline (invented) and its honest 400 us length (33000 iterations, 1% of requests); compaction is low, 100 us chunks. Health checks as in w16-w18. Hints are what the server sets: class by role, the propagated deadline, the handler's mean run time (iterations / 83 per us). Weights invented (reads and appends dominate, as in a write-heavy replicated table). Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.38 x 2000 + 0.44 x 1000 + 0.01 x 33000 + 0.11 x 8300 + 0.06 x 85 = 2448.1 iterations = 24.58 us; 4 / 24.58 us = 162.7k req/s (140.0k with the 4 us allowance). Sized from measured medians (gen 10 lesson: 83 per us plus 1 us per request): 2448.1 / 83 + 1 = 30.50 us, 4 / 30.50 us = 131.1k req/s. Levels 36k/72k/92k/95k/98k/100k are 27.5/54.9/70.2/72.5/74.8/76.3% of 131.1k (w18 ran to 77.9%); busy-phase rate at 100k is 160k req/s. Headline rule: a queueing model (per-core queues for 48 flows, stealing, bursts, 100 us slices, the real policy region, 83 per us, 1 us overhead, 10 us network) gives a fifo overall median of 35 at 36k and 48/53/57 at 95k/98k/100k; it overstated w16-w18 median rises by about 1.4x, so about 45-51 measured against a limit of about 52. FIFO penalty: reads wait behind every queued append, flush and compaction (model fifo read p99 588-656 at 96k-100k against 58 at 36k). Why the champion leaves headroom: a read's turn is 1000 + 8 x 24-36 us after it is ready, an append's 300 + 8 x 12-24, so appends readied up to about 800 us after a read run first; p16's pass needs a third of the length, p17's a shorter passer, p18's at most 1.5 times as long, and a read is twice an append, so none fires. Oldest-first is not the answer: prio lets flush slices hog cores (model prio read p99 337-365, worse than the champion's 232-246, and appends lose about 2 points of deadline-met). Without flushes, the model's prio read p99 is about 25% below the champion's, so a policy that spends append slack on older reads and keeps flushes behind them has room. Model at 96k-100k: sjf_older read p99 232-246 with runqueue-wait p99 175-190 (share 0.75-0.77), append p99 127, deadline-met 100%; sjf_share 222-236. Prediction at 100k (headline; 98k fallback): fifo read p99 about 550-650; sjf_older read p99 about 220-280 with read runqueue-wait p99 about 160-210 (share 0.7-0.8); append p99 about 110-150 and deadline-met above 99.8%; prio read p99 about 300-380 with append deadline-met about 97.5-98.5%; flush p99 1.3-1.8 ms everywhere. At 36k every policy's read p99 about 45-60 us. No run.py changes are needed."
+}

@@ -1,0 +1,45 @@
+{
+  "id": "w19",
+  "slug": "three-depth-budgets",
+  "generation": 18,
+  "title": "A four-core document leaf where the same fetch arrives from three depths of a call tree with three budgets, over 128 connections",
+  "description": "A leaf server stores documents, and the same document fetch now arrives from three depths of a call tree: fan-out aggregators with 300 us left, a mid-tier ranking service with 450 us left, and the frontend with 800 us left (it also returns the whole document, about 10% more work), over 128 connections from many callers; health checks, exports and index rebuilds share the 4 cores. All fetches cost about the same, so the only reason to run one first is its remaining budget, and neighbouring budgets differ by less than a factor of two, as they do when deadlines are passed down a real call tree. A scheduler that orders by deadline makes frontend fetches wait behind every mid-tier fetch arriving up to about 380 us after them and every aggregator fetch arriving up to about 530 us after them, even while those have time to spare, and rules built for one tight and one loose budget do not cover the middle one.",
+  "changed_from_previous": "w18 with half of the aggregator fetches (0.20 of its 0.40 weight) replaced by mid-tier fetches of the same work and run-time hint but a 450 us budget (client and hint deadline), and 128 client connections instead of 48; 4 cores, load levels, bursts, the other kinds and their hints unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 6,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 128,
+    "kthreads": 4,
+    "time_scale": [6]
+  },
+  "server": {
+    "kthreads": 4,
+    "guaranteed_kthreads": 4,
+    "spinning_kthreads": 4,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 128,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {"name": "point", "service": "constant:3740", "weight": 0.25, "deadline_us": 800, "hint": {"class": "high", "deadline_us": 800, "service_us": 45}},
+    {"name": "mid", "service": "constant:3400", "weight": 0.2, "deadline_us": 450, "hint": {"class": "high", "deadline_us": 450, "service_us": 41}},
+    {"name": "fanout", "service": "constant:3400", "weight": 0.2, "deadline_us": 300, "hint": {"class": "high", "deadline_us": 300, "service_us": 41}},
+    {"name": "health", "service": "constant:85", "weight": 0.05, "deadline_us": 1000, "hint": {"class": "high", "deadline_us": 1000, "service_us": 1}},
+    {"name": "export", "service": "constant:3400", "weight": 0.15, "deadline_us": 0, "hint": {"class": "normal"}},
+    {"name": "rebuild", "service": "constant:3400", "weight": 0.15, "deadline_us": 0, "hint": {"class": "low", "service_us": 41}}
+  ],
+  "load_rps": [28000, 56000, 70000, 72000, 74000, 76000],
+  "score": {"kind": "point", "percentile": "p99"},
+  "burst": {"period_us": 4000, "duty": 0.25, "factor": 2},
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. Deadline propagation down a call tree: gRPC and Stubby pass each caller's remaining budget to every downstream call, so one leaf handler sees a different budget at each depth it is called from (Dean and Barroso, The Tail at Scale, CACM 2013). Production microservice graphs are several tiers deep and a popular leaf is called from many upstream services at different depths (DeathStarBench, Gan et al., ASPLOS 2019; Alibaba call-graph traces, Luo et al., SoCC 2021), so its budgets form several tiers whose neighbours differ by less than 2x, not just one tight and one loose. Approximated by three caller kinds doing the same fetch: frontend direct (800 us, w18's point, 10% more work to return the whole document), a mid-tier ranking service (450 us, invented: the frontend's budget minus a hop and the ranker's own work) and a root aggregator's fan-out (300 us, w16-w18). Health checks (gRPC health checking, Envoy), exports and index rebuilds as in w16-w18. Many connections: a leaf is reached by every caller instance over its own flow (memcache at Facebook, Nishtala et al., NSDI 2013); 128 is the ladder's next step, not a measured count. Mid-tier weight 0.20 (taken from the fan-out's 0.40) is invented. Every kind is constant work; hints are what the server sets: class by role, the propagated deadline, the handler's measured run time (iterations / 83 per us). Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 3740 + 0.20 x 3400 + 0.20 x 3400 + 0.05 x 85 + 0.15 x 3400 + 0.15 x 3400 = 3319.25 iterations = 33.33 us; 4 / 33.33 us = 120.0k req/s (106.9k with the 4 us allowance). The work mix is exactly w18's, so the levels are sized from w18's measured fifo medians (light 50 us at 28k, 63 at 74k, 68 at 76k against a 75 us limit; 83 iterations per us plus 1 us: 40.99 us per request, 4 / 40.99 us = 97.6k req/s): 28k/56k/70k/72k/74k/76k are 28.7/57.4/71.7/73.8/75.8/77.9% of 97.6k; busy-phase rate at 76k is 121.6k req/s. 128 flows put 32 +- 5 flows on each core instead of 12 +- 3, so per-core arrivals are more even and steals should fall (w18: 14% of hinted picks stolen at 76k); with mean depth about 2.1, overflow beyond 32 queued threads should stay near zero (counter hinted_overflow). FIFO penalty: points wait behind every queued export and rebuild (w18 fifo point p99 574.5 at 76k against 77 at 28k). Why the champion leaves headroom: it ranks a HIGH thread at deadline plus 8 times its learned length, so a point's turn is 800 + 8 x 46 = 1168 us after it becomes ready, a mid's 450 + 8 x 42 = 786 and a fanout's 636: mids readied up to about 380 us after a point and fanouts up to about 530 us after it run first. p16's and p17's passes need a shorter passer, and p18's equal-cost pass, like p16's, needs the passer due at least twice as late: 800 / 300 qualifies but 800 / 450 does not, so under p18 points can pass only the fanouts, now half as many, and never the mids, while mids (1.5x a fanout's budget) never pass fanouts. A rule that orders equal-cost requests by the share of their window already used, without a ratio cut-off, would cover all three tiers. Prediction at 76k (74k fallback): fifo point p99 550-600 us, overall median 64-70; prio point p99 320-380; the champion (p17 or p18) point p99 500-600 with point runqueue-wait p99 420-520 (share 0.82-0.88), mid p99 180-260 and fanout p99 190-230 with deadline-met above 99.8%, health p99 100-160; steals about 8-12% of hinted picks; at 28k every policy's point p99 75-90 us. No run.py changes are needed."
+}
