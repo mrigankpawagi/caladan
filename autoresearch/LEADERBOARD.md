@@ -47,8 +47,8 @@ Score: `req` p99. Headline load: 350,000 req/s.
 | p1 prio | hints | hints | 178.5 (178.0–179.0) | -2% | - | 348376 | - | 9.49 | 2 | 0 |
 | p3 sjf_guard | hints | hints | 163.0 (161.0–165.0) | -11% | - | 348720 | - | 8.33 | 2 | 2 |
 | p0 fifo | hints | hints-nostats | 180.0 (169.0–191.0) | -1% | - | 348342 | - | - | 2 | 0 |
-| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 | p0 fifo | ignore | hints-nostats | 190.0 (185.0–195.0) | +4% | - | 348367 | - | - | 2 | 0 |
+| p0 fifo | ignore | stock | 164.0 (150.0–175.0) | -10% | - | 348914 | - | - | 4 | 0 |
 
 Best with hints applied: **sjf_guard** (163.0 µs).
 
@@ -74,8 +74,8 @@ req p99 by offered load (req/s):
 | sjf_unit | hints | hints |  |  | 72.0 |  |  | inf |
 | sjf_upper | hints | hints |  |  | 72.0 |  |  | inf |
 | fifo | hints | hints-nostats | 33.0 | 39.5 | 71.0 | 180.0 | inf | inf |
-| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 | fifo | ignore | hints-nostats | 33.0 | 39.0 | 70.0 | 190.0 | inf | inf |
+| fifo | ignore | stock | 33.0 | 39.0 | 67.0 | 164.0 | inf | inf |
 
 ## w1: Short latency-critical requests behind long ones
 
@@ -824,6 +824,36 @@ point p99 by offered load (req/s):
 | sjf_guard | hints | hints | 27.0 | 155.0 | 419.5 | 459.5 | 491.5 | 520.5 |
 | sjf_overrun | hints | hints | 28.0 | 154.0 | 406.5 | 448.5 | 470.5 | 486.0 |
 | fifo | ignore | hints | 28.5 | 146.0 | 439.0 | 524.0 | 577.5 | 625.5 |
+
+## w17: The fan-out leaf service where user-facing reads are only 2.5 times shorter than sub-requests, at 90% load
+
+[workloads/w17-document-reads-near-fanout.json](workloads/w17-document-reads-near-fanout.json). The same RPC leaf service as w16 on six cores (frontend reads due in 800 us, fan-out sub-requests from an aggregator due in 300 us, health checks, background export and rebuild), except that each frontend read now fetches and decodes a whole document, about 16 us of work instead of 8, so a read is only 2.5 times shorter than a 41 us sub-request, and traffic runs at 90% of capacity in short bursts every millisecond. A scheduler that ranks by deadline still lets any sub-request that arrives up to about 300 us after a read run first, and a rule that lets very short requests pass long ones that can spare the time no longer applies, because the reads are not short enough. So the reads' tail is spent waiting in the queue behind sub-requests that had time to spare. The score is the reads' tail; the sub-requests must keep meeting their deadlines.
+
+Score: `point` p99. Headline load: 159,000 req/s.
+
+![point p99 by offered load on w17](plots/w17-load.svg)
+
+![point p99 and its runqueue wait at the headline load on w17](plots/w17-wait.svg)
+
+| Policy | Mode | Build | Score (point p99) | vs fifo | point deadline met % | fanout p99 | health p99 | export p99 | rebuild p99 | Throughput (req/s) | HIGH wait (µs) | NORMAL wait (µs) | Repeats | Gen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0 fifo | hints | hints | 310.5 (309.0–312.0) | +0% | 100.00 | 336.0 | 294.0 | 337.5 | 333.0 | 157598 | 30.32 | 30.33 | 2 | 16 |
+| p1 prio | hints | hints | 209.5 (209.0–210.0) | -33% | 100.00 | 235.0 | 196.5 | 488.5 | 620.5 | 157693 | 15.88 | 45.80 | 2 | 16 |
+| p16 sjf_afford | hints | hints | 364.0 (361.0–367.0) | +17% | 100.00 | 219.0 | 107.0 | 502.0 | 651.0 | 157445 | 17.98 | 46.69 | 2 | 16 |
+| p15 sjf_overrun | hints | hints | 375.5 (373.0–378.0) | +21% | 100.00 | 219.0 | 375.5 | 521.0 | 664.0 | 157601 | 20.74 | 48.86 | 2 | 16 |
+| p0 fifo | ignore | hints | 307.5 (301.0–314.0) | -1% | 100.00 | 330.5 | 289.5 | 330.5 | 332.5 | 157700 | - | 29.82 | 2 | 16 |
+
+Best with hints applied: **prio** (209.5 µs).
+
+point p99 by offered load (req/s):
+
+| Policy | Mode | Build | 53,000 | 106,000 | 142,000 | 150,000 | 155,000 | 159,000 |
+|---|---|---|---|---|---|---|---|---|
+| fifo | hints | hints | 36.5 | 104.0 | 223.5 | 250.5 | 278.0 | 310.5 |
+| prio | hints | hints | 35.5 | 92.5 | 165.5 | 185.0 | 202.5 | 209.5 |
+| sjf_afford | hints | hints | 36.0 | 117.0 | 263.0 | 301.5 | 329.0 | 364.0 |
+| sjf_overrun | hints | hints | 35.5 | 115.0 | 252.0 | 304.5 | 335.0 | 375.5 |
+| fifo | ignore | hints | 36.0 | 107.0 | 219.5 | 257.5 | 290.0 | 307.5 |
 
 Superseded workloads (kept with their results, not scored): w4.
 
