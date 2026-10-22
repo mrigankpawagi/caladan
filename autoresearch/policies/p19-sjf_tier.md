@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p18
 - changed_from_previous: p18 plus: in the equal-cost pass, the passer must be due later than the chosen thread by more than the chosen thread's 30% reserve plus both lengths (instead of at least twice as late), must have used at least as large a share of its window as the chosen thread has so far (instead of as large as it will have after waiting), and is the oldest waiting HIGH thread (not overrun) that meets the conditions, found in a second scan (instead of the oldest waiting HIGH thread); on w19 frontend fetches pass mid-tier and fan-out fetches that arrived after them, mids never pass fanouts, and on w1–w17 decisions are p18's (at most 0.017% of picks differ in the model)
-- commit: (filled by orchestrator)
+- commit: 610f8f5
 
 ## What it does
 Like sjf_share, each core runs helper threads first, then HIGH, NORMAL and LOW threads. It orders HIGH threads by deadline and length, and lets a request that came first go ahead of the chosen one when both cost about the same and the chosen one can spare the time. sjf_tier changes when that is allowed. The earlier request may go first if its deadline is later than the chosen one's by more than the chosen one's reserve (30% of its budget) plus both run times, and it has already used at least as large a share of its own budget as the chosen one has. On w19 a frontend fetch (800 µs budget) can now go ahead of mid-tier fetches (450 µs) as well as fan-out fetches (300 µs) that arrived after it, while a mid-tier fetch still never goes ahead of a fan-out fetch. If the request that has waited longest does not qualify, the policy looks at the next oldest one, so a mid-tier fetch that may not pass no longer hides an older frontend fetch that may.
