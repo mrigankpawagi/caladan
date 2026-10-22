@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p19
 - changed_from_previous: p19 plus: at a time unit of 1 (w1-w10), when p4's rescue check does not fire, the HIGH thread with the least slack still runs first if waiting for the chosen thread, priced at that label's uncapped learned length, would leave it with less than 18 us of slack (22 us margin instead of 13), and the chosen thread keeps 60% of its window after it; give-up rule unchanged; decisions on w1 and w11-w20 are p19's (0 differing picks in the model)
-- commit: (filled by orchestrator)
+- commit: 4030a2b
 
 ## What it does
 Like sjf_tier, each core runs helper threads first, then HIGH, NORMAL and LOW threads, and orders HIGH threads by deadline and length, so short lookups usually go ahead of long queries. A query that is about to run out of time can jump ahead (the "rescue"), but so far that happened only when the query was already lost, because the rule assumed a request spends 13 µs outside the queue, while at full load it spends 34-41 µs. sjf_early lets the rescue happen a little earlier, using the full measured length of the request it would wait for (a "1 µs" put label that really holds 30 µs flushes counts as long as it is). The earlier rescue happens only if the request that gets passed still keeps 60% of its time budget afterwards. It applies only on workloads whose deadlines are around 100 µs (time unit 1); everywhere else the policy decides exactly as sjf_tier.
