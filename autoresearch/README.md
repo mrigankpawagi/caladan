@@ -103,10 +103,16 @@ deadlines, but its faster reads on w17 do. `./judge.py wins` prints the table
 for the champion. The per-generation rules alone let deadline-met fall up to
 1 point per generation; on w5–w10 the champion has drifted 2–3.6 points below
 prio's query deadline-met that way, so those count as losses until fixed.
-Plan: generations 19–21 add workloads as before, and every policy agent sees
-the win table; generations 22–25 add no workloads and aim at the remaining
-losses. They start with all workloads re-measured in one session (cross-session
-drift is about 6% of p99 and 1.5 points of deadline-met), and end with a
+Plan: generation 19 added w20 and re-measured the eight workloads the champion
+lost, with their bar-setting policies, in one session (cross-session drift is
+about 6% of p99 and 1.5 points of deadline-met): the losses on w5–w10 and w12
+(query deadline-met 1.9–4.4 points below prio's) and w17 (prio 6.9% faster)
+are real, and w14's was drift. Generations 20–25 add no workloads: each is a
+convergence generation, with a measurement report on the losses, a policy
+aimed at them, and `./eval_policy.sh <gen> <policy> converge`, which
+re-measures the bar-setters of every lost workload in the same session and
+judges with `--converge` (rule 1 becomes "wins more workloads than the
+champion"; rules 2–7 apply to every workload). The last generation ends with a
 single-session confirmation of the final policy against fifo, prio and each
 workload's best deadline-keeper.
 

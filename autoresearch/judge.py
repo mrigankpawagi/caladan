@@ -3,6 +3,7 @@
 
   ./judge.py gate --workload w2       is the new workload worth keeping?
   ./judge.py accept --policy edf      does the new policy beat the champion?
+  ./judge.py accept --policy x --converge   ... in a convergence generation?
   ./judge.py champion                 which policy is the current champion?
   ./judge.py wins [--policy p]        on which workloads does it win?
 
@@ -33,6 +34,9 @@ accept: (1) the newest workload's score improves on the champion's by at
         (7) on every earlier workload the champion wins (see wins below), the
             new policy wins too, so wins are never traded away and small
             losses cannot add up over generations.
+converge (generations 20-25, --converge): there is no newest workload; rule 1
+        becomes "wins more workloads than the champion", and rules 2-7 apply
+        to every workload.
 wins:   a policy wins a workload if, at the headline load, it keeps every
         kind with a deadline within 1 point of the best deadline-met any
         policy reached there (it is a deadline-keeper) and its score is within
@@ -170,6 +174,10 @@ def accept(args):
     new, champ = args.policy, args.against or champion(cards)
     ids = sorted(workloads, key=lambda w: (int(w[1:].rstrip("abcdefghij")), w))
     newest = args.newest or [w for w in ids if workloads[w].get("status") != "superseded"][-1]
+    if args.converge:
+        # a convergence generation has no newest workload: rule 1 becomes
+        # "wins more workloads than the champion", and rules 2-7 apply to all
+        newest = None
     ok = True
     failed = []
     score_ok = [True]  # rule 1 on the newest workload
@@ -263,10 +271,27 @@ def accept(args):
         if not check(wid):
             ok = False
             failed.append(wid)
+    if args.converge:
+        nw, cw = [], []
+        for wid in ids:
+            s = workloads[wid]
+            head = S.headline_load(idx, wid, s["load_rps"])
+            if wid == "w0" or s.get("status") == "superseded" or not head:
+                continue
+            if wins_on(idx, s, head, new)[0]:
+                nw.append(wid)
+            if wins_on(idx, s, head, champ, exclude=(new,))[0]:
+                cw.append(wid)
+        good = len(nw) > len(cw)
+        score_ok[0] = good
+        print("  wins: %s %d (%s), %s %d (%s) -> %s" % (
+            new, len(nw), " ".join(nw), champ, len(cw), " ".join(cw),
+            "ok" if good else "FAIL (1, convergence: no more wins)"))
+        ok &= good
     if failed:
         # machine-readable, for eval_policy.sh's paired confirmation
         print("FAILED_ON: %s NEWEST: %s CHAMPION: %s SCORE: %s" % (
-            " ".join(failed), newest, champ, "ok" if score_ok[0] else "fail"))
+            " ".join(failed), newest or "none", champ, "ok" if score_ok[0] else "fail"))
     print("ACCEPT" if ok else "REJECT")
     return 0 if ok else 1
 
@@ -318,6 +343,8 @@ def main():
     a = sub.add_parser("accept"); a.add_argument("--policy", required=True)
     a.add_argument("--against", help="compare with this policy instead of the champion")
     a.add_argument("--newest", help="the newest workload id (default: highest id)")
+    a.add_argument("--converge", action="store_true",
+                   help="convergence generation: no newest workload; must win more workloads")
     sub.add_parser("champion")
     w = sub.add_parser("wins"); w.add_argument("--policy", help="default: the champion")
     args = ap.parse_args()

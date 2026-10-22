@@ -1,5 +1,12 @@
 #!/bin/bash
-# eval_policy.sh <gen> <policy>: judge a new policy on every scored workload.
+# eval_policy.sh <gen> <policy> [converge]: judge a new policy on every scored
+# workload.
+#
+# converge (generations 20-25, README): there is no newest workload, every
+# workload runs at its headline level(s), and on every workload the champion
+# loses, the policies that set the bar there (the champion, prio, the best
+# other deadline-keeper, and the policy with the best deadline-met for each
+# kind) are re-measured in the same session; the judge runs with --converge.
 #
 # Full sweep for the newest workload; the headline level and the two below it
 # for older workloads with a LOW kind (rule 4 checks the levels up to the
@@ -16,21 +23,25 @@
 # (run.py --paired; the full sweep for the newest workload) and the judge
 # decides those workloads from the paired runs.
 set -e
-G=$1; P=$2
+G=$1; P=$2; MODE=${3:-}
 cd "$(dirname "$0")"
-# one line per workload: <kind> <id> <spec file> <levels or "all">
-PLAN="$(python3 - <<'PY'
-import glob, json, sys
+# one line per workload: <kind> <id> <spec file> <levels or "all"> <rivals or ->
+PLAN="$(MODE=$MODE P=$P python3 - <<'PY'
+import glob, json, os, sys
 sys.path.insert(0, '.')
 import summarize as S
+import judge as J
+converge = os.environ.get('MODE') == 'converge'
+champ = J.champion(S.load_cards())
 idx = S.index(S.latest(S.load_rows('summary.csv')))
 ws = [json.load(open(f)) | {'_f': f} for f in sorted(glob.glob('workloads/w*.json'))]
 ws = [w for w in ws if w.get('status') != 'superseded']
 num = lambda w: (int(w['id'][1:].rstrip('abcdefghij')), w['id'])
-newest = max(ws, key=num)['id']
+newest = None if converge else max(ws, key=num)['id']
 low = lambda w: any(k.get('hint', {}).get('class') == 'low' for k in w['kinds'])
 for w in ws:
     h = S.headline_load(idx, w['id'], w['load_rps'])
+    rivals = '-'
     if w['id'] == 'w0':
         below = max([l for l in w['load_rps'] if l < h])
         kind, lv = 'w0', '%d,%d' % (below, w['load_rps'][-1])
@@ -40,23 +51,36 @@ for w in ws:
         kind, lv = 'head', ','.join(str(l) for l in [l for l in w['load_rps'] if l <= h][-3:])
     else:
         kind, lv = 'head', '%d' % h
-    print(kind, w['id'], w['_f'], lv)
+    if converge and w['id'] != 'w0' and not J.wins_on(idx, w, h, champ)[0]:
+        sc, keep, best, met = J.standing(idx, w, h)
+        need = {champ, 'prio'}
+        others = [p for p in keep if p != champ]
+        if others:
+            need.add(min(others, key=sc.get))
+        for kn in best:
+            need.add(max((met[(p, kn)], p) for p in sc if (p, kn) in met)[1])
+        rivals = ','.join(sorted(need - {os.environ.get('P', '')}))
+    print(kind, w['id'], w['_f'], lv, rivals)
 PY
 )"
 echo "$PLAN"
 ARGS=""
-while read -r kind wid f lv; do
+while read -r kind wid f lv rv; do
     [ "$kind" = full ] && ARGS="$ARGS --workload $f"
 done <<<"$PLAN"
-./run.py --gen $G $ARGS --policy $P
-while read -r kind wid f lv; do
+[ -n "$ARGS" ] && ./run.py --gen $G $ARGS --policy $P </dev/null
+while read -r kind wid f lv rv; do
     [ "$kind" = full ] && continue
+    # the bar-setters of a lost workload run in the same session (converge),
+    # at the headline level only (the last of the levels)
+    [ "$rv" = - ] || ./run.py --gen $G --workload $f --policy $rv --levels ${lv##*,} </dev/null
     # no stdin for run.py: its ssh sessions would swallow the rest of the plan
     ./run.py --gen $G --workload $f --policy $P --levels $lv </dev/null
 done <<<"$PLAN"
 ./summarize.py --gen $G
 set +e
-OUT="$(./judge.py accept --policy $P)"; EXIT=$?
+[ "$MODE" = converge ] && JF=--converge || JF=""
+OUT="$(./judge.py accept --policy $P $JF)"; EXIT=$?
 echo "$OUT"; echo "ACCEPT_EXIT=$EXIT"
 LINE="$(grep '^FAILED_ON:' <<<"$OUT")"
 [ $EXIT -eq 0 ] || [ -z "$LINE" ] && exit 0
@@ -71,10 +95,10 @@ fi
 set -e
 echo "paired confirmation of $P against $CHAMP on: $FAILED"
 for wid in $FAILED; do
-    read -r kind _ f lv <<<"$(awk -v w="$wid" '$2 == w' <<<"$PLAN")"
+    read -r kind _ f lv rv <<<"$(awk -v w="$wid" '$2 == w' <<<"$PLAN")"
     [ "$lv" = all ] && LV="" || LV="--levels $lv"
     ./run.py --gen $G --workload $f --policy $CHAMP,$P $LV --paired </dev/null
 done
 ./summarize.py --gen $G
 set +e
-./judge.py accept --policy $P; echo "ACCEPT_EXIT=$?"
+./judge.py accept --policy $P $JF; echo "ACCEPT_EXIT=$?"
