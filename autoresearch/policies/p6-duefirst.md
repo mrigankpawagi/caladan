@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p3
 - changed_from_previous: Where passonce would run the oldest thread of the chosen class, the earliest-due class-mate runs instead if every class-mate ahead of it has the same hinted run time and is due later (unbounded, no state); passonce's shortest-first pass, its once-bound and its mark are unchanged and keep precedence; a thread never passes a class-mate of a different or unknown run time by deadline.
-- commit: (set when applied)
+- commit: 749981a
 
 ## What it does
 Each core runs helper threads first and then the highest class present,
