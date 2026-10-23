@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p3
 - changed_from_previous: passonce's first pass per thread is kept unconditional; a prefix whose head has already been passed may be passed again while the passers' run times absorbed in that episode, the new one included, stay within 25% of the least hinted run time among the passed threads; policy_state[1] carries the absorbed total, the mark in policy_state[0] is passonce's.
-- commit: (set when applied)
+- commit: 996f3e6
 
 ## What it does
 Each core runs helper threads first and then the highest class present,
