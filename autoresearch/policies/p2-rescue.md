@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p1
 - changed_from_previous: Inside the class prio chose, a younger thread due earlier than everything of its class ahead of it runs first when the hints say it would otherwise miss its deadline, but only while the oldest thread has waited less than the run time it would be asked to absorb.
-- commit: (set by the orchestrator when the code is applied)
+- commit: af7c648
 
 ## What it does
 Each core runs helper threads first and then the highest priority class, oldest
