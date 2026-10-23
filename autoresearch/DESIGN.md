@@ -125,7 +125,7 @@ revised once with the numbers attached.
 Agents receive the design, the data and the reports. They never receive a
 numeric target to hit.
 
-An epoch is 5 generations. It ends with the ablation (§6), a re-measurement
+An epoch is 10 generations. It ends with the ablation (§6), a re-measurement
 of fifo, prio and the champion on every workload in one session, and the
 owner's review.
 
@@ -160,3 +160,6 @@ are summarized for the agents in `prompts/lessons-from-loop-1.md`.
   client misses about 0.15% of its send slots at every load, which put w4's
   lightest level at 98.99% of the offered load. The headline loads of w0–w3
   are unchanged, so the epoch continues.
+- 2.0.2 (2026-10-23, generation 5): an epoch is 10 generations, not 5,
+  because the owner asked to review after generation 10; a schedule, not a
+  judging rule, so no result changes.
