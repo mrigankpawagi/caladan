@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p1
 - changed_from_previous: Inside the class prio chose, the shortest-hinted thread that carries a deadline runs ahead of the longer threads of its class, but only while the oldest of them has never been passed; the core remembers the ready time of the youngest thread it let something pass, so each thread is passed at most once.
-- commit: <filled by the orchestrator>
+- commit: db98ae0
 
 ## What it does
 Each core runs helper threads first and then the highest class present,
