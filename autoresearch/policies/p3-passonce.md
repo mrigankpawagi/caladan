@@ -3,7 +3,7 @@
 - id: p3
 - config: passonce
 - generation: 2
-- status: candidate
+- status: accepted
 - builds_on: p1
 - changed_from_previous: Inside the class prio chose, the shortest-hinted thread that carries a deadline runs ahead of the longer threads of its class, but only while the oldest of them has never been passed; the core remembers the ready time of the youngest thread it let something pass, so each thread is passed at most once.
 - commit: db98ae0
@@ -75,4 +75,20 @@ scan; the mark is never written on w0, w1 or w2.
 | w0 | req p99 at 300k, throughput at 450k | within the rule | p99 ≈ fifo's 71 ± noise; throughput within 1% | No hints: service and deadline are zero, no candidate, index 0 = prio = fifo. |
 
 ## Results
-(filled after evaluation)
+Accepted in generation 2 (judge.py accept, results/e1/gen2/), against prio
+in one session per workload, 3 repeats, interleaved.
+
+| Workload | Kind | prio p99 (range) | passonce p99 (range) | Verdict |
+|---|---|---|---|---|
+| w3 (299k) | suggest (×60 µs) | 129 (127–133), ×2.15 | 98 (98–100), ×1.63 | better (−24%); p99.9 better too |
+| w3 | search (×200 µs) | 161 (161–165) | 162 (161–167) | same |
+| w3 | index / merge | 203 / 233 | 200 / 232 | same / same |
+| w2 (202k) | read, subreq, health, export, rebuild | 179 / 179 / 136 / 248 / 249 | 183 / 180 / 145 / 255 / 259 | all same (ranges overlap) |
+| w1 (400k) | short / long | 53 / 116 | 53 / 118 | same / same |
+| w0 | req p99 at 300k, throughput at 450k | fifo 73 / 373.6k | 73 / 372.0k | ok |
+
+The expectation held: the suggestions' p99 landed in the predicted 85–105
+band, every repeat below prio's lowest, and the searches paid nothing
+measurable (+1 µs, inside their range). The far tail of the suggestions
+improved as well. On w2, w1 and w0 the decisions are prio's by construction
+and the numbers agree.
