@@ -317,6 +317,77 @@ static uint32_t choose_rescue(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p3 "passonce": prio's strict class order, plus one pass inside the chosen
+ * class, paid at most once by each passed thread.
+ *
+ * Principle: a thread that carries a deadline and whose hinted run time is
+ * shorter than that of every thread of its class ahead of it may run before
+ * them, and a thread is passed at most once. The price of a pass to each
+ * passed thread is the passer's own run time, so a thread never passes one
+ * of its own kind (no cascades) and never passes a shorter one.
+ *
+ * Bookkeeping without a clock: the ring is kept in ready-time order (the
+ * steal path merges by ready_tsc and thread_ready_head copies the head's
+ * stamp), so the core remembers in policy_state[0] the ready time of the
+ * youngest thread it let something pass. Every thread with a ready time at
+ * or before that mark forms a prefix of the ring and has been passed
+ * already; a pass is therefore allowed only while the oldest thread of the
+ * chosen class is younger than the mark, and when it happens the mark moves
+ * to the youngest thread passed. The mark is per core: a thread stolen to
+ * another core may in rare cases be passed once more there, or, if it is
+ * older than the thief's mark, be treated as already passed.
+ *
+ * The pick is prio's whenever no thread of the chosen class carries a
+ * deadline together with a hinted run time strictly shorter than every
+ * class-mate ahead of it: without deadlines (w0), with one hinted run time
+ * per class (w1), or when the shorter kind has no deadline (w2's health
+ * checks). The mark is then never written. There are no constants.
+ */
+static uint32_t choose_passonce(struct kthread *k, uint32_t n)
+{
+	uint32_t i, best = 0, cand = 0, passed = 0, last = 0;
+	thread_t *th = sched_rq_at(k, 0);
+	uint8_t rank = prio_rank[th->prio_class];
+	/* the shortest hinted run time seen in the chosen class; unknown = longest */
+	uint64_t shortest = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+
+	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
+		uint8_t r;
+		uint64_t s;
+
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r < rank)
+			continue;	/* a lower class: prio runs it later anyway */
+		if (r > rank) {
+			/* a higher class: prio's choice moves here, nothing passes it yet */
+			rank = r;
+			best = i;
+			cand = 0;
+			last = i;
+			shortest = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+			continue;
+		}
+		s = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+		if (th->deadline_tsc && s < shortest) {
+			/* shorter than every class-mate ahead: the pass candidate */
+			cand = i;
+			passed = last;	/* the youngest thread it would pass */
+		}
+		if (s < shortest)
+			shortest = s;
+		last = i;
+	}
+
+	/* no candidate, or the oldest of the class has been passed already */
+	if (!cand || sched_rq_at(k, best)->ready_tsc <= k->policy_state[0])
+		return best;
+
+	k->policy_state[0] = sched_rq_at(k, passed)->ready_tsc;
+	return cand;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -324,6 +395,7 @@ static const struct {
 	{ "fifo",	choose_fifo },
 	{ "prio",	choose_prio },
 	{ "rescue",	choose_rescue },
+	{ "passonce",	choose_passonce },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
