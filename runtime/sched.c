@@ -508,6 +508,117 @@ static uint32_t choose_afford(struct kthread *k, uint32_t n)
 	return cand;
 }
 
+/*
+ * p5 "absorb": passonce's pass, with the once bound relaxed for passers
+ * that are cheap relative to the threads they pass.
+ *
+ * Principle: a thread that carries a deadline and whose hinted run time is
+ * shorter than that of every thread of its class ahead of it may run before
+ * them, and each passed thread pays the passer's run time (passonce). A
+ * thread absorbs one such pass unconditionally; it absorbs further passes
+ * only while everything it has absorbed during its stay at the head of its
+ * class, the new pass included, stays within a share of its own hinted run
+ * time. A thread without a hinted run time has no share and is passed once.
+ * The pick is prio's wherever no candidate forms (no deadlines, one hinted
+ * run time per class, the shorter kind without a deadline), and passonce's
+ * wherever the share admits nothing beyond the first pass.
+ *
+ * Bookkeeping, without a clock: passonce's mark in policy_state[0] (the
+ * ready time of the youngest thread passed; the ring is kept in ready-time
+ * order) says whether the oldest thread of the chosen class has been passed
+ * before. policy_state[1] adds what the passed prefix has absorbed since a
+ * pass last opened on a never-passed head, an episode. Every thread of the
+ * prefix is charged the whole of it, which overstates what the younger ones
+ * paid and therefore refuses passes, never admits them, beyond the rule.
+ * The share is measured against the shortest hinted run time among the
+ * threads the candidate would pass, the tightest of them. Both words are
+ * per core, with passonce's caveat for stolen threads.
+ *
+ * Cost: passonce's single scan plus one min per thread of the chosen class
+ * (same cache line as prio_class). The share is consulted only where
+ * passonce refuses (a candidate behind a passed head); one extra store on a
+ * pass. No clock read, no second scan.
+ */
+
+/*
+ * Share of a passed thread's hinted run time, in percent, that the passes it
+ * absorbs in one episode may add up to before further passes are refused.
+ * The cap is a share of the passed thread's own cost so that it scales with
+ * that thread and not with the passers' share of the traffic, which is what
+ * an unconditional shorter-first order would charge. 25 is the middle of
+ * the band in which the cap changes nothing on the workloads where the once
+ * bound was measured as right and admits a second pass where its refusal
+ * was measured as the whole residue: two suggestions cost a search 12 of 37
+ * (32%, w3) and two appends cost a read 20 of 37 (54%, w4), both refused;
+ * two lookups cost a range read 4 of 21 (19%, w5), admitted. 25 sits a
+ * factor 1.3 from either edge of 19-32. A passer at an eighth of the
+ * thread it passes or less therefore gets a second pass, one at a sixth or
+ * more does not.
+ */
+#define POLICY_ABSORB_PCT 25
+
+static uint32_t choose_absorb(struct kthread *k, uint32_t n)
+{
+	uint32_t i, best = 0, cand = 0, passed = 0, last = 0;
+	thread_t *th = sched_rq_at(k, 0);
+	uint8_t rank = prio_rank[th->prio_class];
+	/* the shortest hinted run time seen in the chosen class; unknown = longest */
+	uint64_t shortest = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+	/* the same, with unknown = 0: a thread without a hint has no share */
+	uint64_t least = th->service_tsc;
+	/* the candidate's run time and the least run time it would pass */
+	uint64_t price = 0, cap = 0, paid;
+
+	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
+		uint8_t r;
+		uint64_t s;
+
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r < rank)
+			continue;	/* a lower class: prio runs it later anyway */
+		if (r > rank) {
+			/* a higher class: prio's choice moves here, nothing passes it yet */
+			rank = r;
+			best = i;
+			cand = 0;
+			last = i;
+			shortest = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+			least = th->service_tsc;
+			continue;
+		}
+		s = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+		if (th->deadline_tsc && s < shortest) {
+			/* shorter than every class-mate ahead: the pass candidate */
+			cand = i;
+			passed = last;	/* the youngest thread it would pass */
+			price = th->service_tsc;
+			cap = least;	/* the tightest share among them */
+		}
+		if (s < shortest)
+			shortest = s;
+		least = MIN(least, th->service_tsc);
+		last = i;
+	}
+
+	if (!cand)
+		return best;
+
+	if (sched_rq_at(k, best)->ready_tsc > k->policy_state[0]) {
+		/* a never-passed head: passonce's one pass opens an episode */
+		paid = price;
+	} else {
+		/* a passed head: only while the prefix stays within its share */
+		paid = k->policy_state[1] + price;
+		if (paid * 100 > cap * POLICY_ABSORB_PCT)
+			return best;
+	}
+	k->policy_state[1] = paid;
+	k->policy_state[0] = MAX(k->policy_state[0],
+				 sched_rq_at(k, passed)->ready_tsc);
+	return cand;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -517,6 +628,7 @@ static const struct {
 	{ "rescue",	choose_rescue },
 	{ "passonce",	choose_passonce },
 	{ "afford",	choose_afford },
+	{ "absorb",	choose_absorb },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
