@@ -1,0 +1,86 @@
+{
+  "id": "w4",
+  "slug": "storage-node-reads-vs-appends",
+  "generation": 3,
+  "title": "A storage node: expensive tight-budget reads beside cheap loose-budget appends, with flushes and compactions behind",
+  "description": "A replica of a log-structured storage node serves two client-facing kinds. Point reads consult the memtable and several on-disk tables, cost about 37 us and are due in 130 us, because they sit on the page-render path with most of the page budget already spent upstream. Log appends only write the commit log and the memtable, cost about 10 us and are due in 300 us, because a write's end-to-end time is dominated by durability and replication and the client tolerates more of it. Both are latency-critical, so the class hint does not separate them; the expected run time and the budget do, and they point the same way: the costlier kind is the one with less time. The node also flushes memtables to disk (normal) and compacts tables (low), chunked to steps below the runtime's time slice; together they are about a third of the work, the share compaction takes in a log-structured store. At 0.85-0.9 of capacity, first-come-first-served queueing pushes the reads' p99 past their budget while the appends stay far inside theirs. The question for a policy is whether the appends' cheapness and slack can be used at all: running appends ahead of reads costs the reads, and running reads ahead of appends gains them little.",
+  "changed_from_previous": "First workload of the storage-node family. Keeps w1's, w2's and w3's server (8 cores, all guaranteed and spinning), client (16 connections, 3 s per level), constant work per kind, honest hints, no bursts and no antagonist. New: four kinds, of which the two HIGH kinds differ in cost (3000 vs 800 iterations) and in budget (130 vs 300 us) in the same direction, the costlier one being the tighter one (w3's pair pointed the other way); background work is 31% of the total (w2 10%, w3 18%) and its compaction step, at 4000 iterations, is the longest request in the suite; load levels sized for this mix's capacity (about 266k req/s).",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 3,
+    "burst": 0,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "read",
+      "service": "constant:3000",
+      "weight": 0.45,
+      "deadline_us": 130,
+      "hint": {
+        "class": "high",
+        "deadline_us": 130,
+        "service_us": 37
+      }
+    },
+    {
+      "name": "append",
+      "service": "constant:800",
+      "weight": 0.35,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 10
+      }
+    },
+    {
+      "name": "flush",
+      "service": "constant:3000",
+      "weight": 0.05,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal",
+        "service_us": 37
+      }
+    },
+    {
+      "name": "compact",
+      "service": "constant:4000",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 49
+      }
+    }
+  ],
+  "load_rps": [
+    67000,
+    133000,
+    186000,
+    213000,
+    226000,
+    240000
+  ],
+  "antagonist": null,
+  "notes": "Shape: one replica of a log-structured storage node (a Bigtable tablet server: Chang et al., Bigtable, OSDI 2006; a RocksDB-backed replica: Dong et al., The RocksDB Experience, FAST 2021; a Cassandra node). Two client-facing kinds. A point read checks the memtable, then the bloom filters, block cache and index of several on-disk tables, so it is the costlier kind; a log append writes the record to the commit log buffer and inserts it into the memtable, which is why writes are cheaper than reads in these stores (Cassandra's documentation says so outright; RocksDB's own benchmarks put a Put at a fraction of a Get). Budgets point the same way as costs: reads sit on the page-render path, where a frontend issues dozens of dependent reads per page and passes down what is left of the page budget (Bronson et al., TAO, USENIX ATC 2013; Dean and Barroso, The Tail at Scale, CACM 2013), so the node sees a tight remaining budget; an append's end-to-end time is dominated by durability and replication (a Raft leader waits for a majority of followers' appends: Ongaro and Ousterhout, 2014) and users tolerate slower writes, so the budget handed to the node is looser. Background: memtable flushes (minor compactions, normal: if a flush falls behind the memtables fill and writes stall, so it outranks compaction) and table compactions (low: rate-limited and lowest priority in RocksDB and Cassandra), both chunked into steps below the runtime's 100 us time slice, as w2 and w3 did. Compaction rewrites every appended byte many times (RocksDB's write amplification is 10-30x under leveled compaction), so it is a real share of a storage node's CPU; here compaction and flush together are 31% of the work. Invented: the works (3000 iterations, about 37 us, for a read, the same as w2's fetch and w3's search so that its light-load numbers are known; 800, about 10 us, for an append, 3.75 times less; 3000 for a flush step; 4000, about 49 us, for a compaction step, the heaviest unit because it decompresses, merges and recompresses), the budgets (130 us for a read, 3.5 times its run time, set where plain queueing at 0.85-0.9 load misses it; 300 us for an append, 30 times its run time and 2.3 times the read's, which no order of the queue comes near), the weights (45% reads and 35% appends, a write-heavy serving mix between YCSB's A and B; 5% flush steps and 15% compaction steps, a 1:4 flush-to-compaction work ratio, below RocksDB's write amplification because compaction is rate-limited) and the zero deadlines of the two background kinds (a flush's real deadline is the seconds until the memtables fill and is left unset rather than scaled). Hints are what this server sets on its own: class by role (reads and appends high, flushes normal, compactions low), the caller's budget as the deadline, and each handler's run time at the in-server rate of about 82 iterations per us (800 is 10 us, 3000 is 37, 4000 is 49). Capacity: mean work = 0.45 x 3000 + 0.35 x 800 + 0.05 x 3000 + 0.15 x 4000 = 2380 iterations; shares of the work: reads 57%, appends 12%, flushes 6%, compactions 25%. By the in-server cost (82 iterations per us plus 1 us per request, the model that matched w2's 202k and w3's 299k headlines): 30.0 us per request, 8 / 30.0 us = 266k req/s (the calibration model, 99.6 per us plus 4 us, says 287k). Levels 67k/133k/186k/213k/226k/240k are 0.25/0.50/0.70/0.80/0.85/0.90 of 266k; w2 at 0.90 of the same model and w3 at 0.90 stayed inside the headline rule (99.5% delivered, median 49 against 45 and 45 against 44), so the headline is expected at 240k. Headline rule: reads, flush steps and compaction steps are 65% of requests, so the overall median is a read's latency (about 45 us at light load), which rose only to 49 at 0.9 load in w2; the appends (35%) cannot reach the median even though their own median rises from about 19 to 24-26. Queueing: this mix has squared coefficient of variation 0.26, so its Pollaczek-Khinchine factor (1 + cv^2) / 2 times the mean work is 1497 iterations, the same as w2's (1499; w3's was 1327 and w2's fifo excess over the light-load p99 was 1.13x w3's at both top levels, as the factor predicts), so fifo's excess over the light-load p99 should be w2's: about 90 us at 0.85 and 135 at 0.90. Expectations at 226k and 240k, p99 in us (light-load p99 about 49 for a read, 22 for an append, 49 for a flush step, 61 for a compaction step). fifo: one queue for all kinds, so read about 130-145 at 226k and 175-195 at 240k (1.0-1.1x and 1.35-1.5x its budget), append 105-118 and 150-170 (0.35-0.4x and 0.5-0.57x), flush 130-145 and 175-195, compaction 145-160 and 190-210; 99.5% or more delivered; overall median 46-47 at 226k and 48-50 at 240k against about 45 at 67k. prio: HIGH skips queued flush and compaction steps (31% of the work, against 10% in w2 and 18% in w3, where prio's HIGH p99 was 0.92-0.96 of fifo's) but still waits for a running step of up to 49 us, and stolen threads ignore hints, so read about 118-135 at 226k and 155-175 at 240k (0.9-1.05x and 1.2-1.35x), append 95-110 and 135-150 (0.3-0.37x and 0.45-0.5x), flush at 1.3-1.5x fifo's (170-200 at 226k, 230-290 at 240k), compaction 200-260 at 226k and 280-450 at 240k, all still answered. The champion after gen 2 is prio and measures as above; if gen 1's rescue candidate is accepted it differs from prio only within HIGH, where a read due earlier than the appends ahead of it may pass them when it would otherwise miss: each pass saves the read one append's 10 us and a tail read has at most one or two appends ahead (appends are 12% of the work), so read p99 at most 3-8 us below prio's (inside the noise band), appends' p50 and p90 a few us up, p99 unchanged, flush and compaction unchanged. Open question for a policy: a shortest-first order within HIGH (appends ahead of queued reads) would bring the appends' p99 to about 60-70 (their 22 plus one running request and dispatch) and raise the reads' p99 by about 5-10%, since about 1.4 appends arrive per core during a tail read's wait at 240k and each costs it 10 us; the 5% rule forbids that, so the question is a selective pass that takes an append ahead of a read only while the read's hinted slack covers it, of which plain queueing leaves none at the reads' p99. A deadline order (reads ahead of appends) gains the reads at most the appends' share of the queue, 10-15 us, and would raise the appends' p99 by far more than 5%.",
+  "family": "storage-node",
+  "cell": "base"
+}
