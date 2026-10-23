@@ -6,9 +6,10 @@ Protocol 2.0, epoch 1 (DESIGN.md). Champion: **passonce**. Every number is the m
 
 | Workload | Headline (req/s) | Session | Result |
 |---|---|---|---|
-| w1 | 400000 | 20261023-021054 | HELD against prio |
-| w2 | 202000 | 20261023-021319 | HELD against prio |
-| w3 | 299000 | 20261023-021542 | HELD against prio |
+| w1 | 400000 | 20261023-030204 | HELD against afford |
+| w2 | 202000 | 20261023-030427 | HELD against afford |
+| w3 | 299000 | 20261023-030650 | HELD against afford |
+| w4 | 240000 | 20261023-030912 | HELD against afford |
 
 ## Plots
 
@@ -34,7 +35,7 @@ Headline load: 400,000 req/s.
 |---|---|---|---|---|
 | fifo | 20261023-002655 | 93.0 / 257 (x1.55) | 113 / 284 | 398527 |
 | prio | 20261023-021054 | 53.0 / 133 (x0.88) | 116 / 308 | 398656 |
-| passonce (champion) | 20261023-021054 | 53.0 / 129 (x0.88) | 118 / 296 | 398295 |
+| passonce (champion) | 20261023-030204 | 52.0 / 132 (x0.87) | 115 / 295 | 398046 |
 
 ![short p99 by offered load on w1](plots/w1-load.svg)
 
@@ -48,7 +49,7 @@ Headline load: 202,000 req/s.
 |---|---|---|---|---|---|---|---|
 | fifo | 20261023-003837 | 184 / 349 (x0.23) | 187 / 341 (x1.44) | 144 / 296 | 183 / 341 | 186 / 333 | 201056 |
 | prio | 20261023-021319 | 179 / 320 (x0.22) | 179 / 318 (x1.38) | 136 / 275 | 248 / 488 | 249 / 515 | 200676 |
-| passonce (champion) | 20261023-021319 | 183 / 343 (x0.23) | 180 / 336 (x1.38) | 145 / 300 | 255 / 553 | 259 / 534 | 200784 |
+| passonce (champion) | 20261023-030427 | 177 / 322 (x0.22) | 179 / 332 (x1.38) | 143 / 301 | 250 / 500 | 256 / 552 | 201316 |
 
 ![subreq p99 by offered load on w2](plots/w2-load.svg)
 
@@ -62,6 +63,20 @@ Headline load: 299,000 req/s.
 |---|---|---|---|---|---|---|
 | fifo | 20261023-010732 | 135 / 292 (x2.25) | 167 / 320 (x0.83) | 148 / 303 | 165 / 320 | 297647 |
 | prio | 20261023-021542 | 129 / 275 (x2.15) | 161 / 301 (x0.81) | 203 / 475 | 233 / 528 | 297580 |
-| passonce (champion) | 20261023-021542 | 98.0 / 228 (x1.63) | 162 / 294 (x0.81) | 200 / 424 | 232 / 511 | 298138 |
+| passonce (champion) | 20261023-030650 | 104 / 236 (x1.73) | 167 / 303 (x0.83) | 213 / 463 | 243 / 518 | 298305 |
 
 ![suggest p99 by offered load on w3](plots/w3-load.svg)
+
+## w4: A storage node: expensive tight-budget reads beside cheap loose-budget appends, with flushes and compactions behind
+
+[workloads/w4-storage-node-reads-vs-appends.json](workloads/w4-storage-node-reads-vs-appends.json). A replica of a log-structured storage node serves two client-facing kinds. Point reads consult the memtable and several on-disk tables, cost about 37 us and are due in 130 us, because they sit on the page-render path with most of the page budget already spent upstream. Log appends only write the commit log and the memtable, cost about 10 us and are due in 300 us, because a write's end-to-end time is dominated by durability and replication and the client tolerates more of it. Both are latency-critical, so the class hint does not separate them; the expected run time and the budget do, and they point the same way: the costlier kind is the one with less time. The node also flushes memtables to disk (normal) and compacts tables (low), chunked to steps below the runtime's time slice; together they are about a third of the work, the share compaction takes in a log-structured store. At 0.85-0.9 of capacity, first-come-first-served queueing pushes the reads' p99 past their budget while the appends stay far inside theirs. The question for a policy is whether the appends' cheapness and slack can be used at all: running appends ahead of reads costs the reads, and running reads ahead of appends gains them little.
+
+Headline load: 240,000 req/s.
+
+| Policy | Session | read p99 / p99.9 (x of 130 us) | append p99 / p99.9 (x of 300 us) | flush p99 / p99.9 | compact p99 / p99.9 | Responses/s |
+|---|---|---|---|---|---|---|
+| fifo | 20261023-013951 | 188 / 360 (x1.45) | 159 / 331 (x0.53) | 189 / 357 | 201 / 369 | 239325 |
+| prio | 20261023-013951 | 156 / 278 (x1.20) | 127 / 249 (x0.42) | 213 / 429 | 248 / 509 | 239028 |
+| passonce (champion) | 20261023-030912 | 164 / 286 (x1.26) | 104 / 223 (x0.35) | 213 / 412 | 259 / 511 | 239048 |
+
+![read p99 by offered load on w4](plots/w4-load.svg)

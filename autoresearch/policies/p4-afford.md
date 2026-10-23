@@ -3,7 +3,7 @@
 - id: p4
 - config: afford
 - generation: 3
-- status: candidate
+- status: rejected
 - builds_on: p3
 - changed_from_previous: passonce's pass fires only if every thread it would pass that carries a deadline would still, by the hints, finish with the unseen time to spare after absorbing the passer's run time (deadline − now − hinted work of its class through it − passer's run time − 30 µs unseen ≥ 0); the once-bound and the mark are unchanged.
 - commit: 8b8ed04
@@ -90,4 +90,24 @@ read and the decisions are passonce's (prio's) by construction.
 | w0 | req p99 at 300k, throughput at 450k | within the rule | p99 ≈ fifo's 71–73 ± noise; throughput within 1% (372–374k) | No hints: no candidate, index 0 = passonce = prio = fifo. |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 3 (judge.py accept, results/e1/gen3/), against
+passonce in one session per workload, 3 repeats, interleaved.
+
+| Workload | Kind | passonce p99 (range) | afford p99 (range) | Verdict |
+|---|---|---|---|---|
+| w4 (240k) | read (×130 µs) | 164 (158–173), ×1.26 | 165 (162–165), ×1.27 | same |
+| w4 | append (×300 µs) | 104 (100–110), ×0.35 | 125 (124–127), ×0.42 | worse (+20%); p99.9 worse |
+| w4 | flush / compact | 213 / 259 | 229 / 266 | same / same |
+| w3 (299k) | suggest (×60 µs) | 104 (99–104) | 99 (96–105) | same; **p99.9 worse** |
+| w3 | search, index, merge | 167 / 213 / 243 | 161 / 198 / 227 | same |
+| w2, w1 | every kind | | | same |
+| w0 | req p99 at 300k, throughput at 450k | fifo 72 / 373.8k | 73 / 371.7k | ok |
+
+Two expectations failed. The reads on w4 did not recover at all (165 vs
+164 in one session): the 7 µs that the gen 3 report attributed to
+passonce's pass was drift between that report's two sessions, not the
+pass. And on w3 the suggestions' far tail got worse, because the
+slack-priced pass refuses passes in queues three or four searches deep,
+exactly where the far tail sits. Pricing a pass against the passed
+thread's hinted slack therefore gave nothing back and took something
+away; passonce's once-bound alone was the better rule.
