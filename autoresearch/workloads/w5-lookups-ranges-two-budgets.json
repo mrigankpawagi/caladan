@@ -1,0 +1,76 @@
+{
+  "id": "w5",
+  "slug": "lookups-ranges-two-budgets",
+  "generation": 4,
+  "title": "Key-value lookups and range reads under two budgets, behind long requests",
+  "description": "w1's key-value server with its second user-facing read. Point lookups (20% of requests, about 2 us) are HIGH and due in 60 us, as in w1. Range reads (30%), which return the first entries of a key's list and cost ten lookups' work (about 21 us), are HIGH too and due in 100 us: more time than a lookup, but not ten times more. The remaining 50% are w1's long NORMAL requests, still the bulk of the work. Under first-come-first-served both reads queue behind the long requests and miss their budgets at the top level. A priority order skips the long requests, but inside HIGH it runs the oldest thread first, so a lookup still waits behind the range reads that arrived before it, which now carry over a third of the work. The two HIGH kinds differ in both cost and budget: running lookups ahead of queued range reads saves each lookup about 21 us per range passed and costs each range read 2-3 us, and the budgets say when a range read can no longer afford it. The question for a policy is how much of the lookups' queueing inside HIGH it can recover without raising the range reads' tail.",
+  "changed_from_previous": "w1 plus a second HIGH kind with its own budget. Kinds: w1's short kind is now called lookup (170 iterations, HIGH, 60 us budget, unchanged); new range kind, 1700 iterations, HIGH, 100 us budget, 30% of requests; w1's long kind (1700 iterations, NORMAL, class-only hint) keeps the other 50% (it was 80%). The work distribution is unchanged (20% of 170 and 80% of 1700 iterations), so capacity is w1's 444k req/s and fifo, which ignores kinds, behaves as on w1. Server (8 cores, all guaranteed and spinning), client (16 connections, 3 s per level), constant work, honest hints, no bursts and no antagonist as in w1. Load levels: w1's 450k, which is saturated (fifo median 91 us), is replaced by 380k, so that the two busiest levels (380k and 400k, 0.86 and 0.90 of capacity) are inside the headline rule.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 2,
+    "deadlines": 2,
+    "burst": 0,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "lookup",
+      "service": "constant:170",
+      "weight": 0.2,
+      "deadline_us": 60,
+      "hint": {
+        "class": "high",
+        "deadline_us": 60,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "range",
+      "service": "constant:1700",
+      "weight": 0.3,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 21
+      }
+    },
+    {
+      "name": "long",
+      "service": "constant:1700",
+      "weight": 0.5,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    300000,
+    350000,
+    380000,
+    400000
+  ],
+  "antagonist": null,
+  "notes": "Shape: w1's key-value server with its second read kind. A social-graph or object cache serves point reads (one object or one edge by key) and range reads (the first entries of a key's list: a post's latest comments, a user's latest posts), and range reads are not rare: in TAO (Bronson et al., TAO: Facebook's Distributed Data Store for the Social Graph, USENIX ATC 2013) association range reads are about 41% of all requests and point reads of objects and single associations about 45%; memcached clients send the same shape as multiget batches (Nishtala et al., Scaling Memcache at Facebook, NSDI 2013). Both reads sit on the page-render path, where a page issues its reads in a few dependent rounds and each round gets a slice of the page budget (Bronson et al.; Dean and Barroso, The Tail at Scale, CACM 2013), so both are latency-critical; a range read assembles a list, several to tens of lookups' work, and the frontend allows it more time than a lookup but not proportionally more, since it is one round's step like a lookup. w1's long NORMAL kind stays the bulk of the work. Invented: the range read's work (1700 iterations, about 21 us, ten lookups' worth and the same as the long kind's, so that the mix's total work, capacity and load levels are w1's and fifo's rows are w1's rows), its budget (100 us, 4.6x its run time and 1.7x the lookup's: set where first-come-first-served queueing at 0.9 load misses it and a priority order does not, so that both budgets bind; w3's and w4's second budgets, 200 and 300 us, were missed by no policy), and the weights (20% lookups as in w1; 30% range reads and 50% long requests out of w1's 80% long, so that HIGH carries 39% of the work and the long NORMAL requests 61%; TAO's 41:45 ratio of range to point reads would make HIGH most of the work, which is the family's base already measured in w2-w4's shapes). Hints are what this server sets on its own: class by role (lookups and range reads high, long requests normal), the caller's budget as the deadline, and each handler's run time at the in-server rate of about 82 iterations per us (170 is 2 us, 1700 is 21; the long kind carries w1's class-only hint). Capacity: mean work 0.2 x 170 + 0.3 x 1700 + 0.5 x 1700 = 1394 iterations, w1's; shares of the work: lookups 2.4%, range reads 36.6%, long requests 61.0%. By the in-server cost (82 iterations per us plus 1 us per request, the model that matched w2's, w3's and w4's headlines): 18.0 us per request, 8 / 18.0 us = 444k req/s (the calibration model, 99.6 per us plus 4 us, gives the same; gen 0's program_cycles counters at saturation, 17.4 us per request, give 460k). Levels 100k/200k/300k/350k/380k/400k are 0.23/0.45/0.68/0.79/0.86/0.90 of 444k; w1's 450k is dropped because it is saturated (fifo median 91, p99 804) and the two busiest levels must be inside the headline rule. Headline rule: fifo ignores kinds and this mix's work distribution is w1's, so fifo's rows are w1's: at 400k the overall median was 32 against 30 at 100k and 99.8% of sent requests were answered; the median request is a 1700-iteration one (80% of requests), never a lookup. The headline is expected at 400k. Expectations at 380k and 400k, p99 in us (w1 at 400k: fifo short 93, long 113, run-queue wait p99 58; prio short 52, long 117, HIGH run-queue wait p99 5; w1 at 350k: fifo 45 and 64, prio 31 and 64; light-load p99 14 for a lookup, 32 for a 1700-iteration request; p99.9 at 400k: fifo 257 and 284, prio 121 and 280). fifo: one queue for all, so lookup about 62-72 at 380k and 90-98 at 400k (1.05-1.2x and 1.5-1.65x its budget; p99.9 about 240-260 and 250-265), range read and long request alike about 82-92 and 108-118 (range 0.82-0.92x and 1.08-1.18x; p99.9 265-290); lookup deadline-met about 98.5-99% and 97-97.5%, range read's about 99.3% and 98.5%; overall median 31 and 32 against 30 at 100k; 99.5% or more of sent requests answered. prio: a HIGH thread skips queued long requests (61% of the work) but waits for the running one (up to about 21 us, no preemption) and for the HIGH threads queued before it, oldest first; the HIGH queue carries 0.33-0.35 of a core at these levels, so its wait is no longer w1's 5 us at p99. From the measured ratio of prio's HIGH run-queue wait to fifo's against HIGH's share of the work (w1 0.09 at 2.4%, w4 0.72-0.78 at 69%, w3 0.95 at 82%), HIGH at 39% should keep about 0.4-0.45 of fifo's wait: about 16 us at 380k and 25 at 400k, on top of the roughly 33 us a tail request spends outside the run queue (w1 prio: 52 = 14 + 33 + 5). Lookup about 55-68 at 380k and 65-80 at 400k (0.9-1.15x and 1.1-1.35x; p99.9 110-160; deadline-met 97-99%), range read about 72-85 and 85-100 (0.72-0.85x and 0.85-1.0x; p99.9 150-210; deadline-met 99-99.5%), long request about 88-100 and 120-130 (fifo's plus 8-12%: NORMAL kinds paid 12-13% in w4 with HIGH at 69% of the work and 3.5% in w1 at 2.4%; p99.9 290-330), all answered. The champion after generation 2 is prio and measures as above. Open question for a policy: within HIGH, a lookup that runs ahead of the range reads queued before it saves 21 us per range passed and costs each passed range read 2-3 us. Shortest hinted run time first within HIGH would bring the lookup's p99 to about 52-60 at 400k (its floor: the running request and the packet wait, which no order reaches) and raise the range read's p99 by about 1-3 us (1-3%), since about 0.6 lookups arrive per core during a tail range read's 60 us of wait; earliest deadline first within HIGH passes a range read only while it has waited less than 40 us, so it gains the lookups less at the tail and protects the range reads more. The 5% rule leaves the range reads about 4-5 us of p99 at 400k, and their budget leaves 0-15 us; the question is whether a policy can take the lookups to their floor inside both.",
+  "family": "key-value",
+  "cell": "deadline spread: two budgets"
+}
