@@ -245,12 +245,85 @@ static uint32_t choose_prio(struct kthread *k, uint32_t n)
 	return best;
 }
 
+/*
+ * p2 "rescue": prio's strict class order, plus one rationed pass inside the
+ * chosen class. The oldest thread keeps its turn unless a younger thread of
+ * the same class
+ *   (a) carries a deadline and is due earlier than every thread of the class
+ *       ahead of it (so a request never passes one of its own kind),
+ *   (b) would miss that deadline if it waited for them: the hinted run times
+ *       of the threads ahead, its own run time, and the latency the hints do
+ *       not see add up to more than the time it has left, and
+ *   (c) the oldest thread has waited less than the run time it would be asked
+ *       to absorb: the queue formed within the last request's run and the
+ *       pass at most doubles that wait, leaving the passed request in the
+ *       body of its latency, not its tail.
+ * A passed thread is older than one run time afterwards, so it is passed at
+ * most once. Without deadlines, or with one deadline window per class, the
+ * pass can never trigger and the pick is prio's.
+ */
+
+/*
+ * Latency the hint clock does not see, in microseconds: the packet's wait
+ * before its handler thread exists plus the reply. The gen 1 report measured
+ * 12 us at light load and 45 us at the tail of a loaded server (176 - 37 - 94
+ * on w2 at 202k req/s); 30 sits between, so a sub-request that the hints say
+ * will finish with less than 30 us to spare counts as about to miss.
+ */
+#define POLICY_UNSEEN_US 30
+
+static uint32_t choose_rescue(struct kthread *k, uint32_t n)
+{
+	uint32_t i, best = 0;
+	uint8_t rank = prio_rank[sched_rq_at(k, 0)->prio_class];
+	bool any_due = sched_rq_at(k, 0)->deadline_tsc != 0;
+	uint64_t now, head_age, ahead, unseen, due_ahead;
+	thread_t *th;
+
+	/* prio's choice: the oldest thread of the highest class present */
+	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
+		th = sched_rq_at(k, i);
+		if (prio_rank[th->prio_class] > rank) {
+			rank = prio_rank[th->prio_class];
+			best = i;
+		}
+		any_due |= th->deadline_tsc != 0;
+	}
+
+	/* nothing to rescue: no deadlines, a helper thread, or nobody behind */
+	if (!any_due || rank == prio_rank[THREAD_PRIO_SOFTIRQ] || best + 1 >= n)
+		return best;
+
+	now = rdtsc();
+	th = sched_rq_at(k, best);
+	head_age = now > th->ready_tsc ? now - th->ready_tsc : 0;
+	unseen = (uint64_t)POLICY_UNSEEN_US * cycles_per_us;
+	ahead = 0;			/* hinted run time of the class ahead */
+	due_ahead = ~(uint64_t)0;	/* earliest deadline of the class ahead */
+
+	for (i = best; i < n; i++) {
+		th = sched_rq_at(k, i);
+		if (prio_rank[th->prio_class] != rank)
+			continue;	/* a lower class: prio runs it later anyway */
+		if (i != best && th->deadline_tsc &&
+		    th->deadline_tsc < due_ahead &&		/* (a) */
+		    head_age < th->service_tsc &&			/* (c) */
+		    now + ahead + th->service_tsc + unseen > th->deadline_tsc) /* (b) */
+			return i;
+		ahead += th->service_tsc;
+		if (th->deadline_tsc && th->deadline_tsc < due_ahead)
+			due_ahead = th->deadline_tsc;
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
 } sched_policies[] = {
 	{ "fifo",	choose_fifo },
 	{ "prio",	choose_prio },
+	{ "rescue",	choose_rescue },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
