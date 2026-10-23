@@ -1,0 +1,53 @@
+{
+  "id": "w0",
+  "slug": "single-normal",
+  "generation": 0,
+  "title": "One request kind, no hints: overhead check",
+  "description": "Every request is the same long kind and gets no hints. No policy can help here, so any difference between policies, or between the hint-enabled build and stock Caladan, is pure overhead of the scheduling machinery. Every new policy is checked against this workload.",
+  "changed_from_previous": "First workload.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 1,
+    "burst": 0,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "req",
+      "service": "constant:1700",
+      "weight": 1.0,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    300000,
+    350000,
+    400000,
+    450000
+  ],
+  "antagonist": null,
+  "notes": "Same server setup and request length as w1's long kind.",
+  "family": "none",
+  "cell": "overhead check"
+}

@@ -1,0 +1,3 @@
+plots/*.svg linguist-generated=true
+LEADERBOARD.md linguist-generated=true
+results/**/*.csv linguist-generated=true

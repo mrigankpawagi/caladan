@@ -1,0 +1,13 @@
+{
+  "server": {"ssh": "mpawagi@hp066.utah.cloudlab.us", "ip": "192.168.1.10"},
+  "client": {"ssh": "mpawagi@hp075.utah.cloudlab.us", "ip": "192.168.1.20"},
+  "antagonist_ip": "192.168.1.11",
+  "netmask": "255.255.255.0",
+  "gateway": "192.168.1.1",
+  "port": 5000,
+  "nic_pci": "0000:03:00.1",
+  "iokernel_args": "ias",
+  "repo": "~/caladan",
+  "client_runtime": {"kthreads": 8},
+  "cargo_env": "PATH=$HOME/caladan/.cargo-local/bin:$PATH CARGO_HOME=$HOME/caladan/.cargo-local RUSTUP_HOME=$HOME/caladan/.rustup-local"
+}

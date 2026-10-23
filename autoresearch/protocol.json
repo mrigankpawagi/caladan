@@ -1,0 +1,12 @@
+{
+  "version": "2.0",
+  "epoch": 1,
+  "repeats": 3,
+  "change_pct": 5,
+  "generations_per_epoch": 10,
+  "policy_region_budget": {
+    "lines": 300,
+    "constants": 8
+  },
+  "note": "Read by run.py, judge.py and summarize.py. Changing any value is a protocol change: bump version, start a new epoch (results/e<epoch>/), re-measure the leaderboard, and record why in DESIGN.md's changelog."
+}

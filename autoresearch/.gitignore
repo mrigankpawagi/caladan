@@ -1,0 +1,12 @@
+# local node settings (hostnames change with every CloudLab experiment)
+nodes.json
+# raw client output, run metadata, logs and ledgers stay on the machine that
+# ran them; summary.csv, counters.csv, report.md and notes.md are committed
+results/**/raw/
+results/**/meta/
+results/**/*.log
+results/**/*.err
+results/**/ledger.json
+__pycache__/
+# the first loop's local data (branch autoresearch); this loop writes results/e<epoch>/
+results/gen*/

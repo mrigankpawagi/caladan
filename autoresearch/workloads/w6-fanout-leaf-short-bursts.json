@@ -1,0 +1,101 @@
+{
+  "id": "w6",
+  "slug": "fanout-leaf-short-bursts",
+  "generation": 5,
+  "title": "A fan-out leaf serving the same fetch under two budgets, with requests arriving in 1 ms waves",
+  "description": "w2's leaf server in a fan-out RPC tree, now with bursty arrivals. One document fetch (about 37 us) is served to two callers: the frontend, which calls it directly with most of the page budget left (due in 800 us), and an aggregator that sends the same fetch to every leaf and must wait for the slowest, so it passes down a tight remaining budget (due in 130 us). Both are latency-critical and cost the same, so only the propagated budget separates them; health checks (high, tiny, no deadline), export steps (normal) and index-rebuild steps (low) share the server. The traffic now comes in waves: for the first quarter of every millisecond the client sends at 1.6 times the average rate and at 0.8 times for the rest, so at the two busiest levels every core ends each wave with about three fetches queued and spends roughly half of every millisecond working off a backlog. Under first-come-first-served a sub-request that arrives late in a wave waits behind that backlog and misses its budget by more than twice; the frontend reads wait exactly as long but keep three fifths of theirs. The order inside the HIGH class is now a decision with a price: running the aggregator's fetches ahead of queued frontend fetches moves each wave's backlog from the sub-requests' tail onto the reads' tail, one fetch at a time, and the no-regression rule allows the reads' tail to move by far less than one fetch. The question for a policy is how much of the sub-requests' burst penalty it can recover inside that allowance.",
+  "changed_from_previous": "w2 plus bursty arrivals, and nothing else: burst period 1000 us, duty 0.25, factor 2, so every millisecond the client sends the first 250 us at 1.6x the average rate and the remaining 750 us at 0.8x, all 16 connections together, with the same average. Kinds, works, weights, classes, budgets, hints, the server (8 cores, all guaranteed and spinning), the client (16 connections, 3 s per level) and the load levels (56k to 202k) are w2's; the busy-phase rate at the top level is 323k req/s, under the client's 700k limit, and the measured burst anchors say the two busiest levels stay inside the headline rule, so the levels did not have to move.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 3,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "read",
+      "service": "constant:3000",
+      "weight": 0.3,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 37
+      }
+    },
+    {
+      "name": "subreq",
+      "service": "constant:3000",
+      "weight": 0.55,
+      "deadline_us": 130,
+      "hint": {
+        "class": "high",
+        "deadline_us": 130,
+        "service_us": 37
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:100",
+      "weight": 0.05,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3000",
+      "weight": 0.06,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal",
+        "service_us": 37
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3000",
+      "weight": 0.04,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 37
+      }
+    }
+  ],
+  "load_rps": [
+    56000,
+    112000,
+    157000,
+    180000,
+    191000,
+    202000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "antagonist": null,
+  "notes": "Shape: w2's fan-out leaf (gRPC and Stubby deadline propagation give the same handler a loose budget from the frontend and a tight one from an aggregator that waits for its slowest leaf: Dean and Barroso, The Tail at Scale, CACM 2013; health checks, export and rebuild as in w2) with the arrivals a leaf really sees. A leaf's traffic is not a smooth stream: an aggregator sends its sub-requests to every leaf at the same instant, and the frontends above it build pages in dependent rounds, each round a batch of parallel fetches issued once the previous round's answers are in, so many frontends and aggregators reach the same round within the same window and the leaves see waves roughly a millisecond apart with quieter stretches between (Nishtala et al., Scaling Memcache at Facebook, NSDI 2013: batched rounds from the web tier and the incast they cause; Dean and Barroso 2013: fan-out from one request lands on the leaves at the same moment, and hedged retries add a second wave). Datacenter measurements put most microbursts well under a millisecond (Benson et al., IMC 2010; Zhang et al., High-Resolution Measurement of Data Center Microbursts, IMC 2017), so this cell's period is 1 ms, the shortest step of the burst ladder; the family's next step (long, about 4 ms) leaves a backlog several times deeper that no budget survives, which the first loop found behaves differently. Invented: the burst shape (period 1000 us, duty 0.25, factor 2, which the client turns into 250 us at 1.6x the average rate and 750 us at 0.8x, all 16 connections in phase). It is the shape the first loop measured on two mixes on these nodes, w4b (8 cores, 16 connections, 17 us requests) and w17 (a fan-out leaf of 41 us fetches on 6 cores at 0.9 load), so every level below has a measured anchor. Nothing else is new: the works (3000 iterations, about 37 us; health 100), the budgets 800 and 130 us, the weights (30/55/5/6/4) and the hints the server sets on its own (class by role, the caller's propagated budget as the deadline, each handler's run time at the in-server rate of about 82 iterations per us) are w2's. Capacity: unchanged from w2. Mean work 0.95 x 3000 + 0.05 x 100 = 2855 iterations; by the in-server cost (82 iterations per us plus 1 us per request) 35.5 us per request, 8 / 35.5 us = 225k req/s; gen 1's program share at 202k (89%) says about 227k. Levels 56k/112k/157k/180k/191k/202k are 0.25/0.50/0.70/0.80/0.85/0.90 of 225k, as in w2. Bursts: multiplier 2 / (0.25 x 2 + 0.75) = 1.6. At 202k the busy phase runs at 323k req/s (1.44x capacity) for 250 us and the quiet phase at 162k (0.72x) for 750 us; per core the wave brings 10.1 arrivals (5.6 sub-requests, 3.0 reads, 0.5 health checks, 0.6 export and 0.4 rebuild steps) against 7.0 served, so it ends with about 3.1 queued requests (110 us of work) per core, which the quiet phase drains at 225k - 162k = 63k/s in about 390 us; run queues are non-empty for about 640 of every 1000 us, 40% of all requests arrive during the busy phase and about 31% during the drain. At 191k: busy 306k (1.36x), 2.5 queued per core (89 us), drained in 280 us, queues non-empty about 530 us. At 180k: 288k (1.28x), 2.0 per core (70 us), 195 us. At 157k: 251k (1.12x), 0.8 per core, 65 us. At 112k the busy phase is 179k, 0.8 of capacity, so the wave leaves no backlog, and at 56k (busy 90k) the level is w2's 56k in all but name, which anchors the headline rule's median. Client limit: 202k x 1.6 = 323k, well under 700k. The 32-slot run queue is never near full: a core's backlog peaks at about 3-5 HIGH threads plus one or two background steps. Headline rule: the median request is a 37 us fetch (95% of requests; fifo's overall median was 45 at 56k and 49 at 202k without bursts, limit 67.5). The first loop measured fifo's overall median under this burst shape at 1.02x its light-load value at 0.80 load, 1.11x at 0.85, 1.20x at 0.86-0.87 and 1.30x at 0.90 (w4b at 300k/330k/355k/380k: 30/30/31/36.5 against 29-30; w17 at 142k/150k/155k/159k: 51/55.5/60/65 against 50), with the client sending within 0.15% of the offered load and every request answered, so fifo's median here should be about 50-54 at 191k and 56-62 at 202k, both inside 67.5, and the headline is expected at 202k; if 202k fails the rule, 191k is the headline and the gate still holds there. Expectations at 191k and 202k, p99 in us (w2 without bursts, fifo at 191k/202k: fetch kinds 138-144/183-187, health 99/144, run-queue wait p99 72/107, subreq deadline-met 98.8/97.0%; prio: fetches 135-136/176-179, export 177/244-248, rebuild 180/249-253; light-load p99 49 for a fetch, 13 for a health check. First loop under this burst shape: w17 fifo fanout p99 278/300/336 at 0.85/0.87/0.90 load, p99.9 1.4-1.5x the p99, run-queue wait p99 193/217/249; prio fanout 210/230/235, export 1.44x and rebuild 1.84x fifo's at 0.90 with background 37% of the work; w4b at 0.86: fifo get 189 and query 207 against 93 and 113 without bursts at 0.90, query deadline-met 85% for a 100 us budget, prio batch 1.32x and scan 1.44x fifo's with background 20% of the work). fifo: one queue for all kinds, so a request arriving late in a wave waits behind the whole backlog: read, subreq, export and rebuild p99 about 240-290 at 191k and 290-340 at 202k (subreq 1.85-2.25x and 2.25-2.6x its budget; read 0.3-0.35x and 0.36-0.43x), p99.9 about 340-410 and 400-480, health about 40 lower (200-250 and 250-300); subreq deadline-met about 84-90% and 78-85% (its budget allows about 80 us of queue wait, which the wave's backlog exceeds for the requests arriving in its second half and the start of the drain), read deadline-met 100%; overall median 50-54 and 56-62 against 45 at 56k; p50 of a fetch the same; 99.5% or more of sent requests answered. prio: HIGH skips queued export and rebuild steps, but the backlog is 89.5% HIGH work and a HIGH thread still waits for a running background step (up to 37 us, no preemption); prio's HIGH tail was 0.94 of fifo's on w2 and 0.70 and 0.86-0.88 of fifo's under bursts with background at 37% (w17) and 20% (w4b) of the work, so here 0.92-0.95: read and subreq p99 about 220-275 at 191k and 265-320 at 202k (subreq 1.7-2.1x and 2.05-2.45x; read 0.28-0.34x and 0.33-0.4x), p99.9 310-380 and 370-450, health 185-240 and 230-285, subreq deadline-met 1-3 points above fifo's; export p99 about 330-420 at 191k and 400-520 at 202k and rebuild 370-480 and 450-600, because a background step that arrives in a wave waits until its core's HIGH queue empties, about 530-640 us later at the tail of a wave; both still fully answered (open-loop client, no drops). passonce (the champion): decides exactly as prio here, as on w2. Its pass needs a deadline-carrying thread whose hinted run time is strictly shorter than that of every thread of its class ahead of it; reads and sub-requests both hint 37 us and the health check, hinted at 1 us, carries no deadline, so no candidate ever forms and the per-core mark is never written. Bursts change the depth and age structure of the queues, not the hints, so this still holds under bursts: every number is prio's within noise. Gate: fifo's subreq p99 is above its budget (2.25-2.6x) and the champion's above 0.8x (2.05-2.45x) at both busy levels, and would be even if the headline fell to 191k. Why the order inside HIGH is now a decision, in numbers (per core at 202k; the HIGH queue is 35% reads and 65% sub-requests by count and by work). Without bursts (gen 1 report) the HIGH queue was 1.2 deep on average, a choice existed in at most 20% of picks, a tail sub-request had about 33 us of reads ahead of it, and the reads' tail could move 9 us by the rule. With bursts the queue is 3-5 deep for about 640 of every 1000 us and a choice exists in most picks during a wave and its drain. Oldest-first inside HIGH (prio, and so the champion) splits each wave's backlog evenly: a sub-request arriving at the end of a wave has about 3 fetches ahead (1.1 of them reads) and at its p99 4-5 (1.4-1.75 reads, 50-65 us), so its p99 is about 2.3x its budget while the reads sit at about 0.38x of theirs with 500 us unused. A budget-aware order (sub-requests before any queued read, earliest deadline first) changes what the core serves during the wave, not only who is ahead of whom: sub-requests alone are 79% of the busy-phase capacity (one per 45 us per core, 37 us each), so with the reads deferred the core serves every sub-request of the wave in turn and ends it with a backlog of reads and background only; a late-wave sub-request then waits only for other sub-requests and the running thread, about 150-200 us at the p99 (1.2-1.5x), a gain of 110-150 us. The reads pay for all of it: the first read of a wave is served in the 21% of the wave the sub-requests leave free, the last reads of a wave inherit the whole 110 us backlog and are passed again by the sub-requests that keep arriving during the drain (one per 90 us per core, 41% of capacity), so the reads' p99 rises from about 300 to roughly 380-450 (+25-50%), still 0.5-0.56x of their budget and 100% met, but 5-10 times what the no-regression rule allows (5% of 300 is 15 us, 0.4 of one fetch). Between the two orders every pass moves 37 us from one sub-request's latency onto one read's, one for one, and the rule prices a read's p99 at 15 us. A one-pass-per-read bound, if the hints allowed it to fire, would not help: the reads directly ahead of a late-wave sub-request are late-wave reads, the very ones that set the read p99, so each pass lands on the read tail (+37, +12%), while earlier passes leave a stale prefix that the tail sub-request cannot pass. The reads that can absorb a pass for free are those early in a wave, with at most one or two threads ahead and latencies of 100-150 us, far below the read p99, and the first loop's lesson applies: a policy can hold both tails only by spending exactly the reads' measured slack, here 15 us at the p99, and the open question for this cell is whether any order of the HIGH queue can take the sub-requests' p99 down by more than 5% (15 us) while every pass it grants lands on a read that ends below the read tail. What a candidate must not do: let a background step run ahead of a queued fetch to keep exports from ageing during a wave (each such pick costs a HIGH thread 37 us), or reorder the sub-requests among themselves (one kind, one length: no p99 gain). A rule that only speeds up health checks (shortest hinted run time first) is a free rider: health carries no deadline, so its p99 falling cannot count as an improvement, and it costs a passed fetch about 1 us.",
+  "family": "rpc-fanout-leaf",
+  "cell": "bursts: short"
+}
