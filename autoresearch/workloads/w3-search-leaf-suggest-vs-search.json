@@ -1,0 +1,86 @@
+{
+  "id": "w3",
+  "slug": "search-leaf-suggest-vs-search",
+  "generation": 2,
+  "title": "A search leaf: type-ahead suggestions beside full searches",
+  "description": "A search leaf serves two user-facing kinds that differ in both cost and budget. Type-ahead suggestions arrive on keystrokes, cost about 6 us and are due in 60 us, because a suggestion is useless once the next keystroke arrives. Full searches from the results page cost six times more (about 37 us) and are due in 200 us. Both are latency-critical, so the class hint does not separate them; only the budget and the expected run time do. The leaf also applies index updates (normal) and runs background segment merges (low), both chunked to steps below the runtime's time slice. At 0.85-0.9 of capacity, first-come-first-served queueing pushes the suggestions' p99 to about twice their budget while the searches stay within theirs, with little to spare at the top level. The question for a policy is whether it can run suggestions ahead of queued searches without raising the searches' tail.",
+  "changed_from_previous": "First workload of the search-leaf family. Keeps w1's and w2's server (8 cores, all guaranteed and spinning), client (16 connections, 3 s per level), constant work per kind, honest hints, no bursts and no antagonist. New: four kinds, of which the two HIGH kinds differ in cost (500 vs 3000 iterations) and in budget (60 vs 200 us); background work is a fifth of the total; load levels sized for this mix's capacity (about 332k req/s). Revised once after the gate: the first version (55% suggestions, 22% searches, 15% index steps) made the median request a suggestion, whose median doubles by 0.8 load, so the headline rule stopped at 0.7 of capacity before any budget was missed; the weights are now 40/45/7/8 so that the median request is a search, whose median moves little below saturation. Works, budgets, classes and hints are unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 3,
+    "burst": 0,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "suggest",
+      "service": "constant:500",
+      "weight": 0.4,
+      "deadline_us": 60,
+      "hint": {
+        "class": "high",
+        "deadline_us": 60,
+        "service_us": 6
+      }
+    },
+    {
+      "name": "search",
+      "service": "constant:3000",
+      "weight": 0.45,
+      "deadline_us": 200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 200,
+        "service_us": 37
+      }
+    },
+    {
+      "name": "index",
+      "service": "constant:1500",
+      "weight": 0.07,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal",
+        "service_us": 18
+      }
+    },
+    {
+      "name": "merge",
+      "service": "constant:3000",
+      "weight": 0.08,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 37
+      }
+    }
+  ],
+  "load_rps": [
+    83000,
+    166000,
+    232000,
+    265000,
+    282000,
+    299000
+  ],
+  "antagonist": null,
+  "notes": "Shape: a search leaf, the server of one index shard. Two user-facing kinds: type-ahead suggestions, which the search box sends on every keystroke and the leaf answers from a prefix structure (Google Suggest; Lucene's completion suggester; Bast and Weber, Type Less, Find More, SIGIR 2006), and full searches issued from the results page, which walk posting lists and score (Barroso, Dean and Hoelzle, Web Search for a Planet, IEEE Micro 2003). A suggestion is useless once the next keystroke arrives; typists produce one every 200-250 ms on average (Dhakal et al., Observations on Typing from 136 Million Keystrokes, CHI 2018), of which the leaf gets a small slice after debouncing, the network and the merge of the shards' answers. A full search gets a share of the page budget (Dean and Barroso, The Tail at Scale, CACM 2013), several times larger. The leaf also applies index updates (document adds and near-real-time refreshes, acknowledged to the indexing client within seconds: Lucene and Elasticsearch refresh) and runs background segment merges (Lucene's tiered merge policy, throttled and lowest priority in real engines); both are chunked into steps below the runtime's 100 us time slice, as w2 did. Invented: the works (500 iterations, about 6 us, for a suggestion; 3000, about 37 us, for a search, six times more and the same as w2's fetch so that its light-load numbers are known; 1500 for an index step; 3000 for a merge step), the budgets (60 us for a suggestion, ten times its run time, which leaves room for one running request but none for queueing behind other user-facing work; 200 us for a search, 5.4 times its run time, which plain queueing meets at 0.85 load with a third to spare and at 0.9 with little; their ratio of about 3 stands in for tens versus a hundred-odd milliseconds), the weights (40% suggestions and 45% searches: the frontend answers popular prefixes from its own cache, so about one keystroke per submitted search reaches the shard; 7% index steps; 8% merge steps) and the zero deadlines of the two background kinds. Hints are what this server sets on its own: class by role (suggestions and searches high, index updates normal, merges low), the caller's budget as the deadline, and each handler's run time at the in-server rate of about 82 iterations per us (500 is 6 us, 1500 is 18, 3000 is 37). Capacity: mean work = 0.40 x 500 + 0.45 x 3000 + 0.07 x 1500 + 0.08 x 3000 = 1895 iterations. By the in-server cost (82 iterations per us plus 1 us per request, the model that matched w2's 202k headline): 24.1 us per request, 8 / 24.1 us = 332k req/s (the calibration model, 99.6 per us plus 4 us, says 347k; the in-server one is the measured one for requests longer than 1700 iterations). Levels 83k/166k/232k/265k/282k/299k are 0.25/0.50/0.70/0.80/0.85/0.90 of 332k; w2 at 0.90 of the same model (202k of 225k) and w0 at 0.95 (350k of 368k) stayed inside the headline rule, so the headline is expected at 299k. Headline rule: the two short kinds are 47% of requests, so the overall median is a search's latency (about 44 us at light load), which rises only to about 47-50 at 0.9 load; the first version's median was a suggestion's, which the gate measured at 16 at light load and 26 at 0.8 (a suggestion arriving on a busy core waits for the running request), so its headline fell to 0.7 load. The gate's measured excess of p99 over the light-load p99 for the first version (mean work 1400, squared coefficient of variation 0.62) was, fifo: 69 us at 0.85 and 105 at 0.90; prio: 58 and 82. This mix has mean work 1895 and squared coefficient of variation 0.40, so by the Pollaczek-Khinchine factor (1 + cv^2) / 2 times the mean service its queueing should be about 1.15x that: fifo 80 and 120; prio's share of fifo's excess was 0.78-0.84 with HIGH at 67% of the work and should be 0.85-0.9 with HIGH at 82% (suggestions 11%, searches 71%; normal 5%, low 13%). Expectations at 282k and 299k, p99 in us (light-load p99 about 18 for a suggestion, 49 for a search, 30 for an index step, 49 for a merge step). fifo: one queue for all kinds, so suggestion about 90-105 at 282k and 130-150 at 299k (1.5-1.75x and 2.2-2.5x its budget), search about 125-140 and 160-185 (0.65-0.7x and 0.8-0.95x), index 105-120 and 140-165, merge 125-140 and 160-185; 99.5% or more delivered; overall median about 45-46 at 282k and 47-50 at 299k against about 44 at 83k. prio: HIGH skips queued index and merge steps but still waits for a running one (up to 37 us), and the HIGH queue itself carries 0.74 of capacity at the top level, so suggestion about 80-95 at 282k and 115-135 at 299k (1.35-1.6x and 1.9-2.25x; the floor for any order is about 55-60, the light-load 18 plus one running request and dispatch, as w1's prio short p99 of 52 at 0.90 shows), search about 110-125 and 145-165 (0.55-0.65x and 0.7-0.85x), index at or above fifo's (150-180 at 299k), merge 250-400 at 299k, all still answered. The champion after gen 1 is prio and measures as above. A suggestion-first order within HIGH (by deadline or by expected run time; the two agree on this mix) would bring the suggestion's p99 near its floor and raise the search's p99 by about 7-10%, since the suggestions that arrive while a search waits are 10% of capacity; the 5% rule forbids that, so the open question is a selective pass that takes a suggestion ahead of a search only while the search keeps most of its 200 us budget, of which plain queueing leaves 15-50 us at the top level's p99 and nothing in its p99.9.",
+  "family": "search-leaf",
+  "cell": "base"
+}
