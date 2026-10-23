@@ -1,0 +1,152 @@
+{
+  "id": "w16b",
+  "slug": "large-values-ninety",
+  "generation": 15,
+  "title": "The six-core large-value key-value mix run at 90% of capacity, with short bursts",
+  "description": "The same six-core key-value front end as w15, where about one lookup in a hundred returns a large value and runs 100 times longer while carrying an ordinary lookup's hints, but the service now runs at 90% of its capacity instead of about 82%. Traffic still arrives in bursts, now short ones (a quarter of every millisecond at twice the rate of the rest), as in measured datacenter microbursts. At this load more ordinary lookups are queued on a core each time a large lookup is put back after its 100 us slice, and more slow puts, syncs and flushes have waited long enough to run ahead of them, so the order in which a core picks from its queue decides more of the lookups' tail.",
+  "changed_from_previous": "w15 at 0.9 of capacity instead of about 0.82 (busiest level 81k instead of 73.75k, same 66.67 us per request), with bursts every 1000 us instead of 4000 (duty 0.25, factor 2 unchanged) so that fifo stays out of overload; mix, work, hints, deadlines, 6 cores and 16 connections unchanged.",
+  "difficulty": {
+    "load": 0.9,
+    "tails": 3,
+    "classes": 9,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 6,
+    "time_scale": [
+      1,
+      4
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 6,
+    "spinning_kthreads": 6,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:680",
+      "weight": 0.13365,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "bigget",
+      "service": "constant:68000",
+      "weight": 0.00135,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:400:12000",
+      "weight": 0.09,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:6800",
+      "weight": 0.405,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 68
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 68
+      }
+    },
+    {
+      "name": "lease",
+      "service": "constant:170",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    }
+  ],
+  "load_rps": [
+    26000,
+    54000,
+    72000,
+    76500,
+    79000,
+    81000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shapes, as in w15. Value sizes in production key-value caches have a long tail: in Facebook's memcache ETC pool most values are a few hundred bytes but some reach about 1 MB (Atikoglu et al., SIGMETRICS 2012), Twitter's cache clusters show the same spread (Yang et al., OSDI 2020), and the handler learns a value's size only after the lookup, so every lookup carries one hint. Approximation: loadgen has no Pareto shape, so lookup work is bimodal 100x, written as two client kinds that the server maps to one hint (get 680 iterations, bigget 68000, both high:400:8); the 1% and the exact 100x are invented. Short bursts follow measured datacenter microbursts, most of which last well under a millisecond (Zhang et al., IMC 2017; Benson et al., IMC 2010); the 1000 us period is the ladder's (w4-w10). The rest of the mix (puts with occasional 120 us flushes as in RocksDB, Cao et al., FAST 2020; Raft-style replica syncs through the put path; 68 us queries due in 300 us; multigets; batch; scans; Chubby-style 2 us lease renewals, Burrows, OSDI 2006) is w15's; its weights and work sizes were invented in w2-w15, not taken from a trace. Capacity, at 99.6 iterations per us (calibration.json): mean work per request 5450.3 iterations (w15's) = 54.72 us; 6 / 54.72 us = 109.6k req/s (102.2k with the calibrated 4 us per request). Sized from w15's measured light-load medians (gen 10 lesson: 83 iterations per us plus 1 us per request, which fit w15's 26k medians: query 90-91, sync 153, bigget 825): 5450.3 / 83 + 1 = 66.67 us, 6 / 66.67 us = 90.0k req/s. Levels 26k/54k/72k/76.5k/79k/81k are 28.9/60.0/80.0/85.0/87.8/90.0% of 90.0k; busy-phase rate at 81k is 129.6k req/s. Headline rule: w15's fifo overall median was 90 us at 26k and 118-122 at 73.75k with 4000 us bursts (limit 135), rising about 4.5 us per 1k near the top, so 81k with 4000 us bursts would be overloaded (about 150); the 4000 us period (w11's scaling of the ladder's 1000 us to 4x work) builds four times the backlog per burst. A central-queue simulation (100 us slice, bursts) that read w15c's measured fifo median within 1 us and w15's about 17% high gives this workload fifo medians of 122 at 79k and 136 at 81k, so both busy levels should pass at about 110-125 and 118-135; if 81k fails, 79k (87.8%) is the headline. The shorter period is not a burst step up (same factor; backlog per burst a quarter of w15's), so only load is raised. Why higher load adds runqueue pressure, unlike w15c: w15c raised load with cheap lookups, so little long work queued ahead of them and 73% of the champion's get tail was the wait for a busy core. Here the extra load is w15's own mix: each re-queued large lookup (hinted as a lookup, with an early deadline) runs ahead of the ordinary lookups queued on its core, and at 90% more of them are queued each time; puts, syncs and flushes behind the puts' 4 us hint overtake lookups once they have waited about 160 us longer, which happens more often. sjf_overrun (p15, under evaluation) demotes a large lookup only from its second return, so its first return and the puts' order remain. The real policy region in a queueing simulation (6 cores, 100 us slice, 1000 us bursts, stealing; it read w15c's share as 25% against 27% measured and w15's as 72% against 78%) gives sjf_ratio get p99 153 us with wait p99 113 (share 0.74) at 81k, against 92/23 (0.25) on w15c, and sjf_overrun 138/100 (0.72). Prediction at 81k (headline; 79k if 81k fails): fifo overall median about 118-135 us, fifo get p99 about 480-650 us (w15 812.5 with 4000 us bursts); sjf_ratio get p99 about 250-330 us with get runqueue-wait p99 about 190-260 (share 0.72-0.80; w15 0.78); sjf_overrun about 10% lower with a share of 0.70-0.78; lease wait p99 stays about 5 us; bigget p99 about 1.0-1.4 ms under the length-ranking policies. At 26k every policy's get p99 is about 36-42 us. Server hint map unchanged from w15: bigget = high:400:8, identical to get. No run.py changes are needed."
+}

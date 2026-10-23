@@ -12,6 +12,13 @@ use std::sync::{Arc, OnceLock};
 
 use crate::hintmap::HintMap;
 use crate::payload::HINT_CLASS_IGNORED;
+
+/// How long the running handler thread waited in a runqueue before it started,
+/// in 100 ns units (Caladan runtime only).
+fn queue_wait_100ns() -> u64 {
+    let waited = shenango::rdtsc().saturating_sub(thread::self_ready_tsc());
+    waited * 10 / shenango::cycles_per_us().max(1)
+}
 use crate::Connection;
 use crate::FakeWorker;
 use crate::Payload;
@@ -85,6 +92,9 @@ fn socket_worker(socket: &mut Connection, worker: Arc<FakeWorker>, hints: Server
         socket.read_exact(&mut v[..PAYLOAD_SIZE])?;
         let mut payload = Payload::deserialize(&mut &v[..PAYLOAD_SIZE])?;
         v.clear();
+        if let ServerHints::Apply(_) = &hints {
+            payload.set_wait_100ns(queue_wait_100ns());
+        }
         let class = match &hints {
             ServerHints::Ignore => HINT_CLASS_IGNORED,
             ServerHints::Apply(map) => {
@@ -159,8 +169,10 @@ pub fn run_spawner_server(addr: SocketAddrV4, workerspec: &str, hints: ServerHin
     }
     extern "C" fn echo(d: *mut shenango::ffi::udp_spawn_data) {
         unsafe {
+            let wait = queue_wait_100ns();
             let buf = slice::from_raw_parts((*d).buf as *mut u8, (*d).len as usize);
             let mut payload = Payload::deserialize(&mut &buf[..]).unwrap();
+            payload.set_wait_100ns(wait);
             #[allow(static_mut_refs)]
             let worker = SPAWNER_WORKER.as_ref().unwrap();
             let class = if SPAWNER_IGNORE_HINTS.load(Ordering::Relaxed) {

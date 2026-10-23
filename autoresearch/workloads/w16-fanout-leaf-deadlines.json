@@ -1,0 +1,107 @@
+{
+  "id": "w16",
+  "slug": "fanout-leaf-deadlines",
+  "generation": 15,
+  "title": "An RPC leaf service where cheap user-facing reads carry looser deadlines than fan-out sub-requests",
+  "description": "A leaf service in a microservice tree, on six cores, answering many callers: cheap single-object reads from the user-facing frontend (about 8 us of work, due in 800 us), fan-out sub-requests from an aggregator that queries many leaves at once and so passes down a tight per-leaf deadline (about 41 us of work, due in 300 us), load-balancer health checks, and background export and index-rebuild work. The server's hints are honest, but its deadlines conflict with request lengths: the long sub-requests are due sooner than the short reads. A scheduler that ranks by deadline keeps letting sub-requests run ahead of reads that would take a fifth of the time, even when the sub-requests have plenty of time to spare, so the reads' tail is spent waiting in the queue. The score is the reads' tail; the sub-requests must keep meeting their deadlines.",
+  "changed_from_previous": "A new service instead of the key-value mix of w14 (6 cores, same bursts): five kinds with honest constant work and hints, where the longer HIGH kind has the tighter deadline, and 48 client connections instead of 16.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 6,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 6,
+    "spinning_kthreads": 6,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "point",
+      "service": "constant:680",
+      "weight": 0.25,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "fanout",
+      "service": "constant:3400",
+      "weight": 0.4,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    55000,
+    110000,
+    140000,
+    147000,
+    151000,
+    155000
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "point",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. A leaf of a fan-out RPC tree: an aggregator sends one sub-request to every leaf and must wait for the slowest, so per-leaf deadlines are set far tighter than the user request's own budget (Dean and Barroso, The Tail at Scale, CACM 2013), and RPC stacks propagate the remaining budget as each call's deadline (gRPC and Stubby deadline propagation). The same leaf also serves cheap point reads straight from the frontend, which arrive with most of the page's budget left, so their deadline is looser although their work is a fifth as long. Load balancers and service meshes send health checks that a server answers at high priority with a long timeout (gRPC health checking, Envoy active health checks), and background export and index rebuilds run as normal and low work. Many callers means many connections (48). Approximation: every kind is constant work (the sub-request cost is the per-shard scoring of a fixed candidate count); weights, the 680/3400 work sizes and the 800/300/1000 us deadlines are invented to fit that shape, keeping the 2.7x deadline ratio and 5x work ratio of the story. Hints are what that server sets: class by role, the caller's propagated deadline, and each handler's measured run time (iterations / 83 per us). Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 680 + 0.40 x 3400 + 0.05 x 85 + 0.15 x 3400 + 0.15 x 3400 = 2554.25 iterations = 25.65 us; 6 / 25.65 us = 233.9k req/s (202.4k with the 4 us allowance). Sized from measured light-load medians (gen 10 lesson: 83 iterations per us and 1 us per request): 2554.25 / 83 + 1 = 31.77 us, 6 / 31.77 us = 188.9k req/s. Levels 55k/110k/140k/147k/151k/155k are 29.1/58.2/74.1/77.8/79.9/82.1% of 188.9k (w14's per-core pattern); busy-phase rate at 155k is 248k req/s. Headline rule: 70% of requests run 41 us, so fifo's light median is about 54 us (limit about 81); a queueing simulation (the real policy region, 6 cores, 48 connections, 100 us slice, bursts, stealing, 83 iterations per us) gives fifo overall medians 52 at 55k, 57 at 151k, 59 at 155k. FIFO penalty: points wait behind every queued sub-request, export and rebuild (simulated fifo point p99 about 740-820 us at 151k-155k against 28 at 55k). Why the champion has headroom: among HIGH threads sjf_ratio's turn is deadline plus 8 times length, so a fresh sub-request (300 + 8 x 42.5 = 640 us) runs ahead of a fresh point (800 + 8 x 9.7 = 878 us) and of any point that arrived up to about 240 us before it, and the rescue lifts a point only when it has about 50 us of slack left; the ratio rule does not apply (the point is shorter). No HIGH thread reaches the 100 us slice, so sjf_overrun decides as sjf_ratio. Learned lengths are honest (simulation: 9.7, 42.5 and 2.5 us on every core) and the unit is 6. The gap is the ordering, not the hints: a slack-guarded shortest-first order cut simulated point p99 from about 500 to 330 us at 151k for 0.75 points of sub-request deadline-met (98.3 vs 99.05), and to 160 us for 1.1 points, so a policy must spend the sub-requests' slack carefully. Prediction at 155k (headline): fifo point p99 about 800-950 us; sjf_ratio and sjf_overrun point p99 about 500-620 us with point runqueue-wait p99 about 450-560 (share about 0.85-0.9), fanout deadline-met about 98-99%, health p99 about 600-750 us (above fifo); at 55k every policy's point p99 about 25-35 us. No run.py changes are needed."
+}

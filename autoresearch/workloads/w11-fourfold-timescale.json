@@ -1,0 +1,127 @@
+{
+  "id": "w11",
+  "slug": "fourfold-timescale",
+  "generation": 10,
+  "title": "The multiget key-value mix at four times the time scale, arriving in bursts",
+  "description": "The same bursty key-value front end as w9 with every time in it multiplied by four: lookups take about 7 us (hint 8 us), puts 4 us with occasional 120 us flushes (hint 4 us), queries 68 us and replica syncs 120 us labeled as puts, all HIGH with a 400 us deadline, plus 120 us multigets that carry the lookups' 8 us hint with a 1200 us deadline, NORMAL batch and LOW scans. Nothing else changes, so a scheduler whose rules scale with the hints and deadlines would behave as it does on w9. One whose rules hold fixed microsecond constants tuned to w9 does not: it discards any timing more than 50 us above twice a label's expected run time as a glitch, so it never sees the 120 us syncs behind the '4 us' label and runs them ahead of waiting lookups, and its fixed 250 us deadline split no longer tells multigets from lookups.",
+  "changed_from_previous": "w9 with the unit of time multiplied by four: work per kind 170/100-or-3000/1700/3000 -> 680/400-or-12000/6800/12000 iterations, run-time hints 2/1/17 -> 8/4/68 us, deadlines (client and hint) 100/300 -> 400/1200 us, burst period 1000 -> 4000 us, and load levels scaled to the same core time; weights, classes, labels and burst shape unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 7,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8,
+    "time_scale": 4
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:680",
+      "weight": 0.15,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:400:12000",
+      "weight": 0.1,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:6800",
+      "weight": 0.45,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 68
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:12000",
+      "weight": 0.05,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:12000",
+      "weight": 0.05,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 68
+      }
+    }
+  ],
+  "load_rps": [
+    30000,
+    60000,
+    90000,
+    97000,
+    103000,
+    109000
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, at 99.6 iterations per us (calibration.json). Fake work per request: get 0.15 x 680/99.6 = 0.15 x 6.827 = 1.024; put 0.10 x (0.85 x 400 + 0.15 x 12000)/99.6 = 0.10 x 21.486 = 2.149; query 0.45 x 68.273 = 30.723; sync 0.05 x 120.482 = 6.024; multiget 0.05 x 120.482 = 6.024; batch 0.10 x 68.273 = 6.827; scan 6.827; total 59.598 us (4 x w9's 14.900). With about 4 us of runtime and network cost per request (not scaled: it is fixed per request), 63.598 us, so 8 / 63.598 us = 125.8k req/s. 30k/60k/90k/97k/103k/109k are 24/48/72/77/82/87% of it, matching w9's 24/47/69/76/82/87%. Bursts keep w9's shape with the period scaled with everything else (4000 us, duty 0.25, factor 2), so each busy phase again holds about 16 average per-request core times (w9: 13); busy-phase rate at 109k is 174k req/s, far under 700k. Deadlines: 400 us for every HIGH kind but multigets (3.3x a 120 us sync or flush, 5.9x a query); multigets 1200 us (10x their work), client and hint alike, as w9's 300 us. Ladder, against w9 (the champion's -59% against fifo, tied within noise with w8's -60%, and the only workload that exercises sjf_pair's deadline split): no ladder dimension moves; the new axis is the time scale (x4), recorded as difficulty.time_scale. Why the champion suffers (p9 sjf_pair; p10 sjf_mixed decides the same here because no label reaches its cap): its learning rules carry absolute microsecond constants. (1) A timed run longer than twice its label's floor (hint + 4 us) plus 50 us is dropped as a parked core or blocked thread. On w9 the '1 us' label's limit was 60 us and kept the 34 us syncs; here the '4 us' label's limit is 2 x 8 + 50 = 66 us, so every 124 us sync and flush is discarded, the label learns only its quick puts (about 8 us), and it ranks ahead of gets (about 11 us learned): turns from becoming ready are puts and syncs +464 us, gets +488, queries (about 72) +976. Gets therefore wait behind every queued sync and flush that became ready up to about 24 us after them: sjf_nohint's order on w8-w9 (gets 8 us of turn behind puts and syncs at a 100 us deadline), which measured get runqueue-wait p99 86.0/96.2 us at 345k/370k against sjf_pair's 23.6/25.6. (2) Multigets' 124 us runs are dropped from the gets' label too (limit 2 x 12 + 50 = 74 us), so today they cost gets nothing; but both deadlines (400 and 1200 us) now lie beyond the fixed 250 us split, so gets and multigets share one learning key. (3) The cap of hint + 12 us is 16 us for the '4 us' label against gets' 11. Why the policy region can fix it: all three are constants in the chooser. A policy whose drop limit, cap and deadline split scale with the hint or deadline (for example a drop limit as a multiple of the deadline, a cap that grows with the hint, and a split at a ratio of deadlines) learns the '4 us' label as long, ranks it behind gets as p8 does on w8, keeps multigets apart, and reduces to today's choices on w1-w10. Relaxing only the drop limit may not be enough: multigets then enter the gets' label (shared key) and push it toward its 20 us cap, past the '4 us' label's 16, which would put gets behind puts and syncs again. Prediction (time-dependent parts scale by about 63.6/18.9 = 3.4, the fixed ~10 us of network does not; the headline should be 103k, as w10's fell to the 82% level by the 1.5x median rule, so both top levels are given): sjf_pair and sjf_mixed get runqueue-wait p99 about 220-320 us at 103k and 260-340 at 109k (a policy that ranks the '4 us' label behind gets: about 75-95); get p99 about 330-430 us at 103k and 380-480 at 109k (about 240-290 when fixed); get deadline-met (400 us) about 96-98% at 103k; put and sync runqueue-wait p99 about 150-200 us at 103k. Built-in checks: fifo, prio and fifo/ignore read neither run-time hints nor deadlines, so they repeat w9 scaled: fifo get p99 about 550-620 us at 103k and 650-720 at 109k; every policy's get p99 at 30k about 18-30 us. Scans are LOW, so judge rule 4 still applies. Not removable by ordering: a running 120 us sync, flush or multiget cannot be passed (no preemption), so the part of the get tail outside the runqueue grows about 4x (w9: about 54 us). No run.py changes are needed."
+}

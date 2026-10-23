@@ -1,0 +1,146 @@
+{
+  "id": "w14c",
+  "slug": "membw-batch-neighbor",
+  "generation": 13,
+  "title": "The tight-query key-value mix next to a memory-bandwidth batch job, near full load",
+  "description": "The same bursty key-value front end as w13 (lookups, puts with occasional 120 us flushes, replica syncs, 120 us multigets, 300 us interactive queries, batch, scans and 2 us lease renewals), now sharing its machine with a best-effort batch job that streams through memory on every spare core, as cluster managers do to use idle cycles. The batch job fills the memory controllers and the shared cache, so the server's packet handling and its cache misses slow down unpredictably, and the IOKernel keeps throttling the job. The load levels also move up to about 90% of the server's cores at the busiest levels, so requests queue longer and the order in which waiting requests run matters more.",
+  "changed_from_previous": "w13 plus a memory-bandwidth antagonist (apps/netbench/stress, 10 threads on the 10 hardware threads the server and IOKernel leave free, membwantagonist over 64 MB, unthrottled) and load levels shifted up one step (busiest 110k and 115k, 90% and 94% of the measured-basis capacity, instead of 105k and 110k); every kind, weight, hint, deadline and the burst shape unchanged.",
+  "difficulty": {
+    "load": 0.9,
+    "tails": 0,
+    "classes": 8,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 2,
+    "conns": 16,
+    "kthreads": 8,
+    "time_scale": [
+      1,
+      4
+    ]
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:680",
+      "weight": 0.135,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:400:12000",
+      "weight": 0.09,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:6800",
+      "weight": 0.405,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 68
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 68
+      }
+    },
+    {
+      "name": "lease",
+      "service": "constant:170",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    }
+  ],
+  "load_rps": [
+    35000,
+    70000,
+    100000,
+    105000,
+    110000,
+    115000
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": {
+    "threads": 10,
+    "n": 1,
+    "spec": "membwantagonist:67108864:1:0",
+    "kthreads": 10
+  },
+  "repeats": 2,
+  "notes": "Source of the new pressure: co-location of a latency-critical service with best-effort batch work that saturates DRAM bandwidth, as in Heracles (Lo et al., ISCA 2015: websearch and memkeyval next to streaming batch jobs; DRAM bandwidth was the dominant cross-core interference) and Caladan (Fried et al., OSDI 2020: memcached next to the membwantagonist from apps/netbench/stress.cc, with the IOKernel's ias bandwidth controller throttling the antagonist above 25 GB/s). The request mix, works, hints and deadlines are w13's unchanged (a key-value front end; the earlier labels stay as they were, no new relabelling). Antagonist: stress with 10 uthreads on 10 best-effort kthreads; each thread writes a private 64 MB buffer (larger than the 25 MB LLC) with non-temporal stores, no nop throttling (period 1, 0 nops), n = 1 pass per yield (about 10 ms). Fit: 20 hardware threads - 2 for the IOKernel - 8 for the server = 10, so the antagonist's 10 kthreads fill the node exactly; the server keeps 8 guaranteed, spinning kthreads (4 reserved hyperthread pairs), so the antagonist never takes the server's cores and interferes only through the shared cache, the memory controllers and the IOKernel's own memory traffic. The cache step of the ladder is skipped (gen 5: a cache antagonist with w1 barely moved latency), at the orchestrator's request. Capacity, at 99.6 iterations per us (calibration.json): fake work per request is w13's 53.81 us, 8 / 53.81 = 148.7k req/s (138.4k with the calibrated 4 us per request). Levels are sized from w11/w12/w13's measured light-load medians (gen 10 lesson): 5359.4 iterations / 83 per us + 1 us = 65.57 us per request, 8 / 65.57 = 122.0k req/s. 35k/70k/100k/105k/110k/115k are 28.7/57.4/82.0/86.1/90.2/94.3% of it; w13 measured fifo get p99 857-883 us at 110k without saturation and fifo get wait p50 56 us there. The server's fake work (stridedmem:1024:7) stays in L1, so the antagonist should cost the work itself little; it slows LLC misses in the network path and the IOKernel, and ias throttling churns the antagonist, which may cost 1-5% of capacity, so 115k may sit at or just past saturation. Bursts as in w13 (4000 us, duty 0.25, factor 2): busy-phase rate at 115k is 184k req/s. Deadlines as in w13 (queries 300 us; leases 100; gets, puts, syncs 400; multigets 1200; all at least 3x the work). Ladder against w13: load 0.85 -> 0.9, antagonist none -> memory bandwidth. Headroom check from w13 (gen 12 summary.csv): sjf_upper get p99 / get runqueue-wait p99 at 105k 245.5 / 159.3 us (65%), at 110k 284.0 / 192.4 (68%). Prediction: at 110k and 115k, sjf_upper get runqueue-wait p99 about 190-260 us, 65-75% of a get p99 about 285-370 us; fifo get p99 about 880-1100 us; at 35k every policy's get p99 within about 10% of w13's 25 us (an antagonist effect at light load would show up there and in the outside-runqueue part, p99 minus wait p99, against w13's about 80-90 us). Server hint map unchanged from w13. No run.py changes are needed."
+}

@@ -1,0 +1,112 @@
+{
+  "id": "w19a",
+  "slug": "same-fetch-cache-neighbor",
+  "generation": 18,
+  "title": "The four-core document leaf on two guaranteed and two burstable cores next to a cache-thrashing batch job",
+  "description": "The four-core document leaf of w18 (frontend fetches due in 800 us and aggregator fetches of the same document due in 300 us, plus health checks, exports and index rebuilds, arriving in bursts) now shares its machine with a best-effort batch job that copies memory on every spare core. The service is guaranteed only two of its four cores: the other two are lent to it when requests pile up and handed back to the batch job whenever they go idle, so each burst starts on two cores, waits for the others to be won back, and runs partly on cores slowed by the batch job next door. The deeper queues this leaves are exactly where a deadline-ordered scheduler makes frontend fetches wait behind aggregator fetches that arrived after them and still had time to spare. The score is the frontend fetches' tail; the aggregator fetches must keep meeting their deadlines.",
+  "changed_from_previous": "w18 plus a best-effort cache antagonist (apps/netbench/stress, 16 threads on 16 best-effort kthreads, cacheantagonist copying within 1 MB each, as in the gen 17 probe w18a) and burstable server cores (2 guaranteed and 2 spinning of 4 kthreads, instead of 4 and 4), with levels 28k/56k/64k/66k/68k/70k instead of 28k-76k; every kind, hint, deadline, the 48 connections and the 4000 us bursts unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 1,
+    "conns": 48,
+    "kthreads": 4,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 4,
+    "guaranteed_kthreads": 2,
+    "spinning_kthreads": 2,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "point",
+      "service": "constant:3740",
+      "weight": 0.25,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 45
+      }
+    },
+    {
+      "name": "fanout",
+      "service": "constant:3400",
+      "weight": 0.4,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    28000,
+    56000,
+    64000,
+    66000,
+    68000,
+    70000
+  ],
+  "score": {
+    "kind": "point",
+    "percentile": "p99"
+  },
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "antagonist": {
+    "threads": 16,
+    "n": 10,
+    "spec": "cacheantagonist:1048576",
+    "kthreads": 16
+  },
+  "repeats": 2,
+  "notes": "Real shape. The service is w18's document leaf, unchanged: one fetch RPC called by fan-out aggregators with a tight propagated deadline and by the frontend with most of the page budget left (Dean and Barroso, The Tail at Scale, CACM 2013; gRPC and Stubby deadline propagation), plus health checks (gRPC health checking, Envoy active health checks) and export and index rebuilds as background work; the frontend fetch's 10% extra work is invented (w18). Hints stay what that server sets on its own uncontended cores: class by role, the propagated deadline, the handler's measured run time. New: co-location with best-effort batch work on a burstable CPU allocation, the way production clusters fill spare cycles (Borg, Verma et al., EuroSys 2015; Heracles, Lo et al., ISCA 2015; Kubernetes Burstable QoS, a guaranteed request plus a higher limit), in the shape of Caladan's own interference setup (Fried et al., OSDI 2020; README 'Running with interference'). Antagonist exactly as the gen 17 probe w18a, the first antagonist that took server cores (2.34 of 6 at 55k, 4.2-4.8 when busy): 16 threads on 16 best-effort kthreads (18 usable hardware threads minus the server's guaranteed pair), each memcpy within 1 MB, 16 MB inside the 25 MB LLC, so ias's bandwidth controller does not throttle it; n = 10 per yield. Here 2 of 4 kthreads are guaranteed and spinning and 2 are burstable: a burstable kthread parks after about 2 us without work, ias gives its core to the batch job, and wins it back one core at a time once the server's queueing delay passes the 10 us qdelay; a lent core shares its physical core with a stress thread. Every kind is constant work. Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 3740 + 0.40 x 3400 + 0.05 x 85 + 0.15 x 3400 + 0.15 x 3400 = 3319.25 iterations = 33.33 us; 4 / 33.33 us = 120.0k req/s (107.2k with the 4 us allowance). Measured basis (w18's light-load medians, gen 10 lesson, 83 iterations per us plus 1 us): 3319.25 / 83 + 1 = 40.99 us, 4 / 40.99 us = 97.6k req/s. Antagonist cost, measured on w18a: fifo mean HIGH runqueue wait at 136k and 150k (43.9, 77.5 us) equals w16's at about 142.5k and 154.2k, so the batch job cost 4.6% and 2.7% of six cores, 0.28 and 0.16 of a core over 2.41 and 2.82 active lent cores: a lent core gives about 6-12% less. Using 12%: 2 + 2 x 0.88 = 3.76 effective cores, 3.76 / 40.99 us = 91.7k req/s. Levels 28k/56k/64k/66k/68k/70k are 30.5/61.1/69.8/72.0/74.2/76.3% of 91.7k (28.7/57.4/65.6/67.6/69.7/71.7% of 97.6k); 28k, 56k and 70k match w18's levels for a matched-load comparison; busy-phase rate at 70k is 112k req/s. Headline rule, from measured medians: w18 fifo overall median 50 at 28k and 56.5 at 70k (repeats 57, 56). On w18a the fanout median rose over w16's at the same offered load by 4 us when lent cores did 15% of the busy core time (55k) and by 20-27 us at 52-58% (128k-150k), outside the runqueue (fifo qwait p50 0.7-9.4). Here 66k-70k is 2.7-2.9 cores of work on 2 guaranteed cores, so lent cores do about 26-30% and the median gains about 8-12 us, plus about 2 us of extra runqueue wait: fifo median about 65-71 at 70k and 61-67 at 68k against a light median of 51-53 (limit 76.5-79.5). 72k-76k are left out (estimate 70-87). FIFO penalty: frontend fetches wait behind every queued fanout, export and rebuild (w18 fifo point p99 447-449 at 70k against 77-78 at 28k). Why the champion leaves headroom: sjf_older gives a frontend fetch its turn 800 + 8 x 46 = 1168 us after it is ready and a fanout 300 + 8 x 42 = 636 us, so any fanout readied up to about 530 us later runs first, and no pass fires because the frontend fetch is 10% longer; on w18 at 70k it kept 78-82% of point p99 in the runqueue (381 of 467, 350 of 449) while prio reached 278-293 with 99.2-99.4% fanout deadline-met, so a better order exists. If p18 sjf_share is accepted, its oldest pass lets a frontend fetch go first only while the fanout keeps 90 us of its window: fanouts that waited out a core grant at a burst's start, or ran slower on a lent core, reach that reserve sooner, so the pass fires least where the antagonist deepened the queue. Where the antagonist enters the runqueue: between bursts the server runs on its 2 guaranteed cores and gives the lent ones back; each burst (1.6 times the average rate for 1 ms every 4 ms) piles up on 2 cores until ias returns the others, and lent cores run slower, so per-core queues are deeper at the same offered load (w18a: fifo mean HIGH wait +24-42% over w16 at matched load), and that extra depth is where deadline order puts frontend fetches behind younger fanouts. Prediction: server cpu_cores falls from w18's 3.96-3.99 to about 2.0-2.4 at 28k and 3.0-3.4 at 66k-70k under every policy; at matched load, fifo mean HIGH wait rises 25-45% over w18 (70k: 34.5 to about 43-50 us) and the champion's point runqueue-wait p99 rises 10-25% (70k: 350-381 to about 400-470 us), with point p99 about 520-600 us and a runqueue share of 0.78-0.85 at 68k-70k; at 28k every policy's point p99 about 95-130 us (w18: 76-78), the excess outside the runqueue (core wake-ups, slower lent cores), point qwait p99 about 15-45; fifo point p99 at 70k about 480-560; prio point p99 about 300-360 with fanout deadline-met about 98.8-99.3%; champion fanout deadline-met at least 99.7% with fanout p99 about 210-260. If cpu_cores stays above 3.8 at 28k, or the champion's point runqueue-wait p99 at 70k is within 6% of w18's, the antagonist does not compete and the design has failed. No run.py changes are needed."
+}

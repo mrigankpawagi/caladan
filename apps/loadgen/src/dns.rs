@@ -100,7 +100,7 @@ impl LoadgenProtocol for DnsProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<(usize, u64, u64)> {
         let scratch = buf.get_empty_buf();
         let len = sock.read(&mut scratch[..])?;
         if len == 0 {

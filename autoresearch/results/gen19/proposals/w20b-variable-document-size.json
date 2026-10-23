@@ -1,0 +1,118 @@
+{
+  "id": "w20b",
+  "slug": "variable-document-size",
+  "generation": 19,
+  "title": "A four-core document leaf where frontend fetches return whole documents whose size, and so cost, varies widely around the handler's 45 us hint",
+  "description": "The same document leaf as w19 on four cores (frontend fetches due in 800 us, mid-tier fetches due in 450 us, fan-out fetches due in 300 us, health checks, exports and index rebuilds over 128 connections), except that a frontend fetch now returns the whole document, and documents differ widely in size: half of the frontend fetches take under 31 us, one in ten over 100 us and about one in a hundred over 200 us, and the server can only tell the scheduler the handler's average, 45 us. Mid-tier and fan-out callers ask for a fixed-size part of the document and still cost about 41 us each. A scheduler that learns run times and leans toward the long ones, to catch requests hiding behind a short label, now counts frontend fetches as up to one and a half times their real average, so it lets other fetches arriving up to about 700 us later go first and its equal-cost passes mostly stop applying. The score is the frontend fetches' tail; the fan-out fetches must keep meeting their deadlines.",
+  "changed_from_previous": "w19 with frontend fetches' work exponential with the same 3740-iteration (45 us) mean instead of constant, so their run-time hint is the handler's mean and single fetches range from a few us to over 200 us; every other kind, hint, deadline, the load levels, bursts, 4 cores and 128 connections unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 1,
+    "classes": 6,
+    "burst": 1,
+    "inaccuracy": 1,
+    "antagonist": 0,
+    "conns": 128,
+    "kthreads": 4,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 4,
+    "guaranteed_kthreads": 4,
+    "spinning_kthreads": 4,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 128,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "point",
+      "service": "exponential:3740",
+      "weight": 0.25,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 45
+      }
+    },
+    {
+      "name": "mid",
+      "service": "constant:3400",
+      "weight": 0.2,
+      "deadline_us": 450,
+      "hint": {
+        "class": "high",
+        "deadline_us": 450,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "fanout",
+      "service": "constant:3400",
+      "weight": 0.2,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    28000,
+    56000,
+    70000,
+    72000,
+    74000,
+    76000
+  ],
+  "score": {
+    "kind": "point",
+    "percentile": "p99"
+  },
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. Stored objects and web documents have long-tailed sizes (value sizes in Facebook's memcached pools, Atikoglu et al., SIGMETRICS 2012; web file sizes, Crovella and Bestavros, SIGMETRICS 1996), so a handler that decodes and returns a whole document costs in proportion to a long-tailed size, while callers that ask for a fixed set of fields (field masks / partial responses, as in Google's API design guide) cost about the same every time. Here the frontend fetches the whole document for the user, and the mid-tier ranker and the fan-out aggregator ask for a fixed-size projection (ranking features, a snippet), as in w19's call tree (deadline propagation, Dean and Barroso, CACM 2013). The server's hint for each handler is its measured average run time (iterations / 83 per us), as in w16-w19, so the frontend hint is the mean of a variable cost. Approximation: the long-tailed size is modelled as exponential work with w19's 3740-iteration mean (about 45 us; median 31 us, 11% of fetches past 100 us, 1.2% past 200 us); real size tails are heavier than exponential, so this understates the spread. Everything else is w19. Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 3740 + 0.20 x 3400 + 0.20 x 3400 + 0.05 x 85 + 0.15 x 3400 + 0.15 x 3400 = 3319.25 iterations = 33.33 us, unchanged from w19; 4 / 33.33 us = 120.0k req/s (106.9k with the 4 us allowance). Sized from w19's measured light-load medians (fetches 50 us at 3400 iterations, points 54 at 3740: 83 iterations per us plus 1 us): 3319.25 / 83 + 1 = 40.99 us, 4 / 40.99 us = 97.6k req/s; levels 28k/56k/70k/72k/74k/76k are w19's, 28.7/57.4/71.7/73.8/75.8/77.9% of 97.6k; busy-phase rate at 76k is 121.6k req/s. Headline rule: w19's fifo medians were 50 at 28k, 62 at 74k and 66-67 at 76k (limit 75). In the gen 18 policy model (the real policy region compiled in, 4 cores, 128 flows, bursts, stealing, 100 us slice; it reads w19's fifo medians 2-2.5 us high), the variable fetches add 0-3 us to fifo's median (52 at 28k, 67 at 74k, 72 at 76k against w19's 52, 64, 69), so about 50, 64-66 and 68-70 measured; both busy levels pass. FIFO penalty: frontend fetches wait behind every queued export, rebuild and fetch (model fifo point p99 751-777 at 76k against 218 at 28k). Why the champion leaves headroom: each core learns a run time per hint and deadline class, moving up 1/16 and down 1/64 of each gap so that hidden slow requests are caught; for an honest-mean variable kind this settles at about 57-70 us (model, per core), 1.25-1.5 times the 46 us real mean, where w19's constant fetches learned 46. A frontend fetch's turn moves from 800 + 8 x 46 = 1168 to about 1260-1360 us, so mids readied up to about 470-570 us after it and fanouts up to 620-720 us after it run first (w19: 382 and 532), and the equal-cost passes of p18 and p19 (passer at most 1.5 times the chosen thread's 42 us, i.e. 63 us) fire only on cores whose estimate happens to sit below 63. Fetches longer than 200 us (1.2%) are also re-queued twice and then fall under p15's overrun rule, built for w15's hidden 100x lookups. Model at 76k (6 seeds, overheads 0.5 / 1 us): fifo point p99 751 / 777 (wait p99 542 / 558, w19 550); prio 462 / 484 with fanout deadline-met 97.56 / 97.30; sjf_share 670 / 688 (wait p99 516 / 538, w19 495 / 511 total and 417 / 434 wait); sjf_tier 675 / 700 (wait 522 / 542, w19 425 / 450): the champions gain only 10-12% over fifo, against 18% (sjf_share) and 28% (sjf_tier) on w19 in the same model, and sit about 45% above prio. Some of the gap is reachable: judging every fetch by its hint plus 4 us instead of the learned length gives 643 (-8% against sjf_tier), and with a 10% reserve 589 (-16%, fanout p99 +25%, deadline-met -0.3 points), so a policy must judge a variable kind by its typical cost without giving back the protection against mislabeled long requests. Prediction at 76k (74k fallback): fifo point p99 660-720, fifo point wait p99 455-485 (w19 463); champion point p99 620-680 (5-12% below fifo) with point wait p99 460-500 (w19 388.6), share 0.72-0.77; prio 440-470 with fanout deadline-met 97.4-97.9 (floor 98.9); champion fanout p99 200-240 and deadline-met about 99.9; at 28k every policy's point p99 210-225 us (w19: 77-78). No run.py changes are needed."
+}

@@ -1,0 +1,115 @@
+{
+  "id": "w8",
+  "slug": "syncs-as-puts",
+  "generation": 7,
+  "title": "Replica syncs labeled as puts, arriving in bursts",
+  "description": "The same bursty key-value front end as w7: quick lookups, puts that sometimes flush, ten-times-longer queries and replica syncs, all HIGH with one shared 100 us deadline, plus NORMAL batch and LOW scans. The server has now filled in the syncs' missing run-time entry by copying the puts' entry, because a sync is a write from a peer replica, so a sync claims to take 1 us although it takes about 30 us, and syncs and puts carry exactly the same hints. A scheduler that trusts the hint again runs syncs ahead of waiting lookups, and no rule that reads only the hints can tell a sync from a put: observed run times show that '1 us' requests average about 18 us, but moving all of them back makes the real puts, most of which are quick, wait behind long queries instead.",
+  "changed_from_previous": "w7 with the syncs' run-time hint set to the puts' 1 us instead of left blank, so syncs and puts carry identical hints; the client's traffic, bursts, deadlines, classes, and all other hints are unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 6,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:170",
+      "weight": 0.15,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:100:3000",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:1700",
+      "weight": 0.5,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 17
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:3000",
+      "weight": 0.05,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 17
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    300000,
+    330000,
+    355000,
+    380000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, at 99.6 iterations per us (calibration.json); the client's traffic is identical to w7's, so the estimate is too. Fake work per request: get 0.15 x 170/99.6 = 0.256; put 0.10 x (0.85 x 100 + 0.15 x 3000)/99.6 = 0.537; query 0.50 x 17.068 = 8.534; sync 0.05 x 30.120 = 1.506; batch 0.10 x 17.068 = 1.707; scan 1.707; total 14.247 us. With about 4 us of runtime and network cost per request, 18.247 us, so 8 / 18.247 us = 438k req/s; 300k/330k/355k/380k are 68/75/81/87% of it, and 380k was w7's measured headline. Bursts as in w4b-w7 (busy phase 608k req/s at 380k, under the 700k limit). Deadlines unchanged: 100 us for every HIGH kind, 3.3x a sync's 30 us; syncs still have no client deadline. Ladder, against w7: inaccuracy 2 -> 3 (some requests mislabeled: syncs carry the puts' hints, so one third of the requests labeled high:100:1 take 30 us); no other dimension changes, and the only edit is the server's hint map entry for sync, high:100:0 -> high:100:1. Why the champion suffers: sjf_nohint's 8 us length applies only to a HIGH thread without a run-time hint, so a sync is ranked by its 1 us hint again. Counted from when a thread becomes ready, a sync's turn is +108 us, tied with puts and ahead of gets (+116), and it becomes urgent only after 79 us of waiting. That is w7's sjf_guard order with syncs 8 us later; on w7 at 380k that order measured get runqueue-wait p99 96.0 us and get p99 139.0, against sjf_nohint's 61.8 and 116.5. No HIGH kind is left without a run-time hint, so sjf_guard and sjf_nohint make identical decisions here. Why no fixed ranking removes it: a sync and a put carry the same hints, so any order computed from hints alone ranks them together, ahead of gets as now or behind them both. Learning by hint value does not separate them either: '1 us' requests average about 17.6 us (two thirds puts at 5.4 + 4 us, one third syncs at 30.1 + 4 us), whose turn (+241 us) would put real puts level with queries (+236); on w7, p6 sjf_timed ranked puts at +196 to +228 us and cost them 2.4 points of deadline-met, and moving syncs that far back would also break the sync p99 cap (rule 3, +25% over the champion). A policy must therefore move the '1 us' requests behind gets without moving puts behind queries or syncs too far. Prediction at 380k: fifo, prio, edf_high, and fifo/ignore never read run-time hints, so they repeat w7's experiment (get p99 200.5 / 181.0 / 180.5 / 197.5 us); this is the built-in check, and sjf_guard should match sjf_nohint within noise. Under sjf_nohint: get runqueue-wait p99 about 85-96 us (w7: 61.8) and get p99 about 125-140 us (w7: 116.5); put runqueue-wait p99 about 80-95 us (w7: 45.5) and put deadline-met about 95.5-96.5% (w7: 97.98); sync runqueue-wait p99 about 55-70 us and sync p99 about 140-150 us (w7: 91.9 and 174.5). An offline queueing model (8 cores, per-core queues fed by 16 hashed flows, packets held while their core runs a thread, idle-core stealing; not a measurement, and it understates ordering effects: it gives sjf_guard vs sjf_nohint on w7 108 vs 103 us where the nodes measured 139 vs 116.5) puts the champion here at its w7 sjf_guard value; a learner that ranks '1 us' requests by their mean (or by p5's larger of mean and hint + 4) at -9 to -11% for gets but about -2 points of put deadline-met and +36 to +39% sync p99; and one that treats a hint its own observations contradict as missing (the 8 us length) at -12% for gets with puts -1 point and sync p99 +12%. Part of the cost cannot be removed by ordering: a sync already running when a get arrives (no preemption). Every policy's get p99 at 100k should stay near 14 us. Scans are LOW, so judge rule 4 still applies. The server's hint map entry for sync is high:100:1, identical to put's. No run.py changes are needed."
+}

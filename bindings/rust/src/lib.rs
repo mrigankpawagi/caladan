@@ -64,6 +64,11 @@ pub fn delay_us(microseconds: u64) {
 }
 
 #[inline]
+/// CPU cycles per microsecond, as measured by the runtime at startup.
+pub fn cycles_per_us() -> u64 {
+    unsafe { ffi::cycles_per_us as u64 }
+}
+
 pub fn microtime() -> u64 {
     unsafe { (rdtsc() - ffi::start_tsc as u64) / ffi::cycles_per_us as u64 }
 }

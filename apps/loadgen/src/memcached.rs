@@ -239,7 +239,7 @@ impl LoadgenProtocol for MemcachedProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<(usize, u64, u64)> {
         let scratch = buf.get_empty_buf();
         let hdr = match self.tport {
             Transport::Udp => {

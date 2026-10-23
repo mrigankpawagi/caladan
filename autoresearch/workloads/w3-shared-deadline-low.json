@@ -1,0 +1,22 @@
+{
+  "id": "w3",
+  "slug": "shared-deadline-low",
+  "generation": 2,
+  "title": "Lookups and queries share one deadline, plus a LOW kind",
+  "description": "The same key-value front end as w2, but the service now gives every user-facing request one 100 us deadline, as many real services do: quick lookups (20%) and queries ten times longer (60%) are both HIGH and differ only in their expected run time. Background work is split between batch requests (10%, NORMAL) and bulk scans (10%, LOW, run only when nothing more important is waiting). Running HIGH work in deadline order now means running it in arrival order, so a lookup again waits behind older queries; only a scheduler that reads the run-time hint can let it go first, and it must do so without pushing queries past their own 100 us deadline or starving the scans.",
+  "changed_from_previous": "w2 with lookups and queries sharing one 100 us deadline (so deadline order is arrival order and only the run-time hint tells them apart), and half of batch moved to a new LOW kind of the same length; the client's service-time mix is unchanged.",
+  "difficulty": {"load": 0.85, "tails": 0, "classes": 4, "burst": 0, "inaccuracy": 0, "antagonist": 0, "conns": 16, "kthreads": 8},
+  "server": {"kthreads": 8, "guaranteed_kthreads": 8, "spinning_kthreads": 8, "fakework": "stridedmem:1024:7"},
+  "client": {"conns": 16, "duration_s": 3, "rampup_s": 1, "discard_pct": 10},
+  "kinds": [
+    {"name": "get", "service": "constant:170", "weight": 0.2, "deadline_us": 100, "hint": {"class": "high", "deadline_us": 100, "service_us": 2}},
+    {"name": "query", "service": "constant:1700", "weight": 0.6, "deadline_us": 100, "hint": {"class": "high", "deadline_us": 100, "service_us": 17}},
+    {"name": "batch", "service": "constant:1700", "weight": 0.1, "deadline_us": 0, "hint": {"class": "normal"}},
+    {"name": "scan", "service": "constant:1700", "weight": 0.1, "deadline_us": 0, "hint": {"class": "low", "service_us": 17}}
+  ],
+  "load_rps": [100000, 200000, 300000, 350000, 400000, 440000],
+  "score": {"kind": "get", "percentile": "p99"},
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity (the same client mix as w1 and w2): fake work alone is 0.2 x 170/99.6 + 0.8 x 1700/99.6 = 0.34 + 13.65 = 14.0 us per request. Adding about 4 us of runtime and network cost per request (calibration.json) gives 0.2 x 5.7 + 0.8 x 21.1 = 1.14 + 16.88 = 18.0 us, so 8 / 18.0 us = 444k req/s. 300k/350k/400k/440k are 68/79/90/99% of that. Deadlines: one 100 us deadline for both HIGH kinds, 17x a get's expected ~5.7 us and 4.8x a query's ~21 us. Ladder: classes 3 -> 4 (a LOW kind, scan, which is half of w2's batch at the same length). The shared deadline changes the server's hint map, not the traffic, and is not a ladder step. Built-in checks: (1) fifo should reproduce w2's fifo curve (get p99 about 100 us at 400k, headline again 400k). (2) Every HIGH thread now has the same relative deadline, so edf_high should order HIGH threads by arrival and match prio. It should land near prio's w2 get p99 (84.5 us), not edf_high's 53. A policy that uses the run-time hint to let gets pass queries should approach the w1/w2 floor of about 52 us. On w2, query p99 at 400k was 103.5 us (prio) to 111.5 us (edf_high), so queries' new 100 us deadline is at stake. Scan is LOW, so judge rule 4 requires it to answer at least 90% of its requests at every level up to the headline load."
+}

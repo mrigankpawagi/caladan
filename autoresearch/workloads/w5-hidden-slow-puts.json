@@ -1,0 +1,104 @@
+{
+  "id": "w5",
+  "slug": "hidden-slow-puts",
+  "generation": 4,
+  "title": "Quick-looking puts that sometimes flush, arriving in bursts",
+  "description": "The same bursty key-value front end as w4b, plus a new kind of request: puts (writes). The server marks them HIGH with the shared 100 us deadline and an expected run time of 1 us, because most puts only append to an in-memory log. About one put in seven must first flush that log and takes 30 us, and the server cannot tell beforehand which one it is. A scheduler that trusts the run-time hint runs every put ahead of waiting lookups, so a lookup sometimes waits behind a 30 us flush that the hint called a 1 us job; one that learned from observed run times that a '1 us' put really averages about 5 us would let lookups go first.",
+  "changed_from_previous": "w4b with a new HIGH put kind (10% of traffic, taken from gets 20% to 15% and queries 60% to 55%) whose 1 us run-time hint hides a slow tail (15% of puts take 30 us); bursts, deadlines, and all other hints unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 1,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:170",
+      "weight": 0.15,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:100:3000",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:1700",
+      "weight": 0.55,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 17
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 17
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    300000,
+    340000,
+    365000,
+    390000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, at 99.6 iterations per us (calibration.json). Fake work alone: get 0.15 x 170/99.6 = 0.256; put 0.10 x (0.85 x 100 + 0.15 x 3000)/99.6 = 0.10 x 5.37 = 0.537; query 0.55 x 17.07 = 9.39; batch 0.10 x 17.07 = 1.707; scan 1.707. Total 13.60 us per request, so 8 / 13.60 us = 588k req/s at most. With about 4 us of runtime and network cost per request: 0.15 x 5.71 + 0.10 x 9.37 + 0.75 x 21.07 = 0.856 + 0.937 + 15.80 = 17.60 us, so 8 / 17.60 us = 455k req/s. That is the estimate used. 300k/340k/365k/390k are 66/75/80/86% of it, matching w4b's 68-86%. Bursts as in w4b (multiplier 1.6): the busy phase at 390k is 624k req/s, under the 700k limit and near the 608k that w4b already used. Puts: the hint is the typical put (100 iterations, 1 us); the true mean is 5.4 us, and 15% take 30 us. The 100 us deadline is over 3x a flush (30 us) and 18x the mean. Ladder, against w4b (sjf_guard's largest gain over fifo, -50%): inaccuracy 0 -> 1 (a HIGH kind with a hidden slow tail) and classes 4 -> 5 (a third HIGH kind). tails stays 0 because every kind whose hint is exact keeps a constant service time; put's bimodal service is the hidden tail that defines inaccuracy step 1. Why sjf_guard suffers: its turn is deadline + 8 x hint. A put (hint 1) goes ahead of every get that arrived less than 8 us before it, and ahead of all queries, so a flush that was queued with a get runs first and adds about 34 us to that get. A get and a put carry different hints (2 vs 1 us), so a policy can tell them apart: the policy can time consecutive picks on a core, keep per-hint run times in policy_state, and so learn that hint-1 threads average about 9 us (5.4 us of work plus about 4 us of overhead) against about 6 us for hint-2 threads. Caveat: on w3 the get tail is mostly time before the thread exists (get runqueue-wait p99 6.1 us vs latency p99 57 us). So part of the new cost, a get packet waiting behind a flush that is already running, cannot be removed by any ordering. Only the part visible in get runqueue wait is policy headroom. An offline queueing model (not a measurement) put that ordering part at a few us, but the same model overstates burst effects elsewhere (it predicts sjf_rescue at 53 us on w4b; measured 86.5). The gate and the per-kind wait counter are the real test. Built-in checks: fifo ignores hints, so its curve should track w4b's at similar utilization (get p99 about 190 us at the top level), and every policy's get p99 at 100k should stay near 13-15 us. Scans are LOW, so judge rule 4 still requires them to answer at least 90% of requests up to the headline load. No run.py changes are needed."
+}

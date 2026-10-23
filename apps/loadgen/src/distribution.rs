@@ -61,6 +61,60 @@ impl Distribution {
     }
 }
 
+/// Bursty arrivals. Every `period_ns`, the first `duty` fraction of the period
+/// runs at `factor` times the arrival rate of the rest, keeping the same
+/// average rate. All client connections share the phase (it depends only on
+/// time since the schedule start), so bursts hit the server together.
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+pub struct Burst {
+    pub period_ns: u64,
+    pub duty: f64,
+    pub factor: f64,
+}
+
+impl Burst {
+    /// Parses "period_us:duty:factor", e.g. "1000:0.2:4".
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let f: Vec<&str> = spec.split(':').collect();
+        if f.len() != 3 {
+            return Err(format!("bad burst spec '{}' (period_us:duty:factor)", spec));
+        }
+        let period_us: u64 = f[0].parse().map_err(|_| "bad burst period".to_string())?;
+        let duty: f64 = f[1].parse().map_err(|_| "bad burst duty".to_string())?;
+        let factor: f64 = f[2].parse().map_err(|_| "bad burst factor".to_string())?;
+        if period_us < 10 || !(duty > 0.0 && duty < 1.0) || !(factor >= 1.0) {
+            return Err("burst needs period_us >= 10, 0 < duty < 1, factor >= 1".to_string());
+        }
+        Ok(Burst { period_ns: period_us * 1000, duty, factor })
+    }
+
+    /// The next arrival time after `t_ns`, given an exponential gap `gap_ns`
+    /// drawn at the average rate. The gap is spent at each phase's rate in
+    /// turn, carrying over phase boundaries (exact time rescaling of a
+    /// piecewise-constant rate), so the long-run average rate is preserved.
+    pub fn advance(&self, t_ns: u64, gap_ns: u64) -> u64 {
+        let norm = self.duty * self.factor + (1.0 - self.duty);
+        let (m_on, m_off) = (self.factor / norm, 1.0 / norm);
+        let on_len = ((self.duty * self.period_ns as f64) as u64).max(1);
+        let mut t = t_ns;
+        let mut budget = gap_ns as f64;
+        loop {
+            let pos = t % self.period_ns;
+            let (m, remaining) = if pos < on_len {
+                (m_on, on_len - pos)
+            } else {
+                (m_off, self.period_ns - pos)
+            };
+            let cap = remaining as f64 * m;
+            if budget <= cap {
+                return t + (budget / m) as u64;
+            }
+            budget -= cap;
+            t += remaining;
+        }
+    }
+}
+
 /// One kind of request in a mix: a name, a service-time distribution (in
 /// work iterations), a relative weight, and an optional client-side deadline
 /// (microseconds, 0 = none) used only for reporting.

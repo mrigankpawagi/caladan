@@ -1,0 +1,107 @@
+{
+  "id": "w17a",
+  "slug": "fanout-leaf-peak",
+  "generation": 16,
+  "title": "The RPC leaf service at peak load, with more fan-out sub-requests on a tighter per-leaf deadline",
+  "description": "The fan-out leaf service of w16 during its daily peak, at 90% of what its six cores can serve: half of all requests are now fan-out sub-requests (about 41 us of work) whose aggregator, querying more leaves at once, gives each leaf only 250 us, while cheap user-facing reads (about 8 us) still have 800 us. Traffic arrives in short sub-millisecond bursts. At this load sub-requests queue long enough that their spare time runs out more often, so a scheduler can no longer quietly let the cheap reads go first, and a scheduler that ranks by deadline makes the reads wait behind sub-requests that arrived after them. The score is the reads' tail; the sub-requests must keep meeting their deadlines.",
+  "changed_from_previous": "w16 at 90% of capacity instead of about 82% (busiest level 170k instead of 155k req/s), with fan-out sub-requests raised from 40% to 50% of requests (export and rebuild 10% each) and their deadline cut from 300 to 250 us, and bursts on the ladder's 1000 us period instead of 4000 (duty 0.25, factor 2 unchanged) so that fifo is not overloaded; work per request, hints, 6 cores and 48 connections unchanged.",
+  "difficulty": {
+    "load": 0.9,
+    "tails": 0,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 6,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 6,
+    "spinning_kthreads": 6,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "point",
+      "service": "constant:680",
+      "weight": 0.25,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "fanout",
+      "service": "constant:3400",
+      "weight": 0.5,
+      "deadline_us": 250,
+      "hint": {
+        "class": "high",
+        "deadline_us": 250,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3400",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3400",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    55000,
+    120000,
+    155000,
+    162000,
+    166000,
+    170000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "point",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape, as in w16: a leaf of a fan-out RPC tree. An aggregator waits for its slowest leaf, so the per-leaf deadline is far tighter than the user request's budget and shrinks as the fan-out widens (Dean and Barroso, The Tail at Scale, CACM 2013; gRPC and Stubby propagate the remaining budget as each call's deadline); the same leaf serves cheap point reads from the frontend with most of the page budget left, load-balancer health checks (gRPC health checking, Envoy active health checks), and background export and index rebuilds. Peak: services are provisioned for their daily peak and run close to it then (Barroso, Clidaras and Hoelzle, The Datacenter as a Computer), so the busiest level is 90% of capacity; at peak the leaf takes more aggregator traffic (fanouts 50% of requests instead of 40%) and wider fan-out leaves each leaf 250 us instead of 300 (6.1x its work). Bursts follow measured datacenter microbursts, most well under a millisecond (Zhang et al., IMC 2017), on the ladder's own 1000 us period (w4-w10). Approximation: every kind is constant work, as in w16; the weights, the 250 us deadline and the 90% peak are invented to fit that shape. Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 680 + 0.50 x 3400 + 0.05 x 85 + 0.10 x 3400 + 0.10 x 3400 = 2554.25 iterations (the same as w16, since the 10% moved from export and rebuild to fanouts has the same work) = 25.65 us; 6 / 25.65 us = 233.9k req/s. Sized from w16's measured light-load medians (gen 10 lesson: 83 iterations per us plus 1 us per request; w16 point 17, fanout 50, health 10 us at 55k): 2554.25 / 83 + 1 = 31.77 us, 6 / 31.77 us = 188.9k req/s. Levels 55k/120k/155k/162k/166k/170k are 29.1/63.5/82.1/85.8/87.9/90.0% of 188.9k; busy-phase rate at 170k is 272k req/s. Headline rule: 70% of requests run 41 us, so fifo's light median sits on them (w16: 49 us, limit 73.5). w16's own 4000 us bursts cannot reach 0.9: a queueing simulation of the real policy region (6 cores, 48 flows split 9/11/6/5/9/8 by the NIC hash, per-core runqueues and receive queues, 50 us softirq watchdog, stealing, 83 iterations per us plus 1 us) that reproduces w16's fifo medians within 2 us (50.4/60.1/67.7 vs 51/58.5/66.5 at 140k/151k/155k) and its fifo point p99 within 6% gives fifo medians of 125 us at 170k with 4000 us bursts and 86 with 2000 us. With 1000 us bursts it gives 61-65 us at 166k and 66-70 at 170k over four seeds, so both probed busy levels pass. FIFO penalty: points wait behind every queued fanout, export and rebuild (simulated fifo point p99 290-320 us at 170k against 24 at 55k). Why the champion has headroom: sjf_overrun's turn for a fanout is now 250 + 8 x 41 = 578 us against a point's 864, so any fanout readied up to 286 us after a point runs first (w16: 236), and fanouts are 50% of requests; simulated point p99 405-445 us with runqueue-wait share 0.86-0.87 (the model reads w16's champion about 18% high). If p16 sjf_afford is accepted: its guard needs a chosen fanout to keep 100 us of slack (40% of 250) after a point, i.e. at most about 100 us of fanout waiting, and at 170k the simulated fanout wait p99 is about 170 us, so the guard binds in every burst; simulated p16 point p99 300-325 us with share 0.81-0.84, against 138 us (share 0.61) at the same load with w16's 300 us fanout deadline and weights. prio's oldest-first order gives about 225-235 us, and with short bursts fifo itself (290-320) beats the deadline-ranking champion, as prio beat it on w16. Prediction at 170k (headline; 166k if 170k fails): fifo overall median 64-71 us; fifo point p99 270-330 us; sjf_overrun point p99 340-420 us with point runqueue-wait p99 290-370 (share 0.84-0.88) and fanout deadline-met about 98.5-99.3%; if p16 is champion, its point p99 about 270-330 us with share 0.80-0.85, because fanouts reach its slack guard in every burst; at 55k every policy's point p99 about 24-30 us. Hints are w16's, unchanged apart from the fanout deadline (class by role, propagated deadline, run time = iterations / 83); the upper quartile of HIGH deadlines is still the points' 800 us, so p13's unit stays 8. No run.py changes are needed."
+}

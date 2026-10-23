@@ -1,0 +1,93 @@
+{
+  "id": "w4b",
+  "slug": "bursty-shared-deadline",
+  "generation": 3,
+  "title": "Lookups and queries with one shared deadline, arriving in bursts",
+  "description": "The same key-value front end as w3: quick lookups and ten-times-longer queries are both HIGH with one shared 100 us deadline, batch is NORMAL and bulk scans are LOW. Now the traffic arrives in bursts: for the first quarter of every millisecond requests come twice as fast as in the rest of it, so the server is briefly overloaded and then catches up. During each burst many queries pile up and near their deadline at the same time. A scheduler that runs nearly-late queries ahead of everything else then makes a lookup wait behind several of them, although letting the lookup go first would cost each query only a couple of microseconds.",
+  "changed_from_previous": "Identical to w4 (w3 plus bursts), re-measured after fixing the client so bursts keep the average rate exactly; w4 is superseded.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 4,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:170",
+      "weight": 0.2,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:1700",
+      "weight": 0.6,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 17
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 17
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    300000,
+    330000,
+    355000,
+    380000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Re-run of w4 after the burst generator fix (commit \"loadgen: bursts preserve the average rate exactly\"): w4 was measured while the client sent 2.5-6.3% below nominal. Original notes: Capacity (the client mix of w1-w3): fake work 0.2 x 170/99.6 + 0.8 x 1700/99.6 = 0.34 + 13.65 = 14.0 us per request; with about 4 us of runtime and network cost per request (calibration.json), 0.2 x 5.7 + 0.8 x 21.1 = 1.14 + 16.88 = 18.0 us, so 8 / 18.0 us = 444k req/s. 300k/330k/355k/380k are 68/74/80/86% of it. Bursts: multiplier 2 / (0.25 x 2 + 0.75) = 1.6, so the busy 250 us run at 1.6x the average and the quiet 750 us at 0.8x. At 380k the busy phase is 608k req/s (137% of capacity, under the 700k client limit and near the 600k already checked on w1) and leaves about (608k - 444k) x 250 us = 41 requests, 5 per core or about 100 us of queued work, which drains in about 41 / (444k - 304k) = 290 us of the quiet phase. At 355k: 568k (128%), about 4 per core (80 us); at 330k: 528k (119%), about 2.6 per core (55 us). Why sjf_guard suffers: a query (100 us deadline, 17 us hint) becomes urgent after 63 us of waiting and hopeless after 83 us. Backlogs of 55-100 us per core put many queries in that window at once, and every urgent query a get waits for costs it about 21 us. Ladder: w4 builds on w3 and adds one step, burst none -> step 1; against w2, the workload sjf_guard handles best (51.0 us, -49% vs fifo), that is two steps (classes 3 -> 4 via w3, and burst). The top level is 380k instead of 440k to keep the busy phase near the checked client range; the load dimension stays 0.85. Headline: an offline queueing model (8 cores, per-core queues with stealing; not a measurement; it reproduces fifo's no-burst overall median at 400k, 31.4 vs a measured 31) puts fifo's overall median at 30.0/32.5/39.5 us at 330k/355k/380k with bursts, against a limit of 1.5 x about 29 us = 43.5, so the headline should be 380k, or 355k if the real system is slower. The same model puts get p99 with bursts at 330k/355k/380k at fifo 128/166/200, prio 96/121/142, sjf_guard 46/75/98, and 32/38/51 for sjf_guard changed to let a get pass an urgent query whose slack exceeds a get's run time (query deadline-met 0.2/0.4/0.8 points below sjf_guard's). The model's no-burst floor is 31.5 us where the measured one is 55, so add about 20-25 us to its numbers. Built-in checks: at 100k the busy phase is only 160k, so every policy should match its w3 numbers there (get p99 about 13.5 us). Scans stay LOW; with bursts their p99 should rise to several hundred us, and judge rule 4 still requires them to answer at least 90% of requests up to the headline load."
+}

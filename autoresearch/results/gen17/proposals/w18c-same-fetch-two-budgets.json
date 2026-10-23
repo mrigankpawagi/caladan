@@ -1,0 +1,107 @@
+{
+  "id": "w18c",
+  "slug": "same-fetch-two-budgets",
+  "generation": 17,
+  "title": "A four-core document leaf where the same fetch arrives with a tight fan-out budget or a loose frontend budget",
+  "description": "A leaf server stores documents. Fan-out aggregators fetch a document with a tight 300 us deadline, and the frontend fetches the same document with 800 us left, doing about 10% more work to return the whole document to the user; health checks, exports and index rebuilds share the server, which now has 4 cores instead of 6. The two fetches cost almost the same, so the only reason to run aggregator fetches first is their tighter deadline, and they usually have time to spare. A scheduler that orders by deadline makes frontend fetches wait behind every aggregator fetch arriving up to about half a millisecond after them, and no rule that lets shorter requests pass can help, because the frontend fetch is not shorter.",
+  "changed_from_previous": "w16 on 4 server cores instead of 6 (levels scaled to load per core 3-5% below w16's), with frontend reads doing the sub-requests' work plus 10% (3740 instead of 680 iterations, hint 45 us instead of 8); deadlines, weights, other kinds, bursts and 48 connections unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 48,
+    "kthreads": 4,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 4,
+    "guaranteed_kthreads": 4,
+    "spinning_kthreads": 4,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "point",
+      "service": "constant:3740",
+      "weight": 0.25,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 45
+      }
+    },
+    {
+      "name": "fanout",
+      "service": "constant:3400",
+      "weight": 0.4,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    28000,
+    56000,
+    70000,
+    72000,
+    74000,
+    76000
+  ],
+  "score": {
+    "kind": "point",
+    "percentile": "p99"
+  },
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shape. One RPC, two callers, two budgets: gRPC and Stubby propagate the caller's remaining deadline to every downstream call, so the same handler sees a tight budget when called by a fan-out aggregator that must wait for its slowest leaf (Dean and Barroso, The Tail at Scale, CACM 2013) and a loose one when the frontend calls it directly with most of the page budget left. Here the frontend fetch is the same document fetch plus returning the whole document to the user (10% more work, invented); w16's sub-request size, weights and the 800/300/1000 us deadlines are kept; health checks (gRPC health checking, Envoy active health checks), export and index rebuilds as in w16. Fewer cores: cluster managers right-size a latency-critical service's CPU (Google Autopilot, Rzadca et al., EuroSys 2020; Heracles, Lo et al., ISCA 2015). Every kind is constant work; hints are what the server sets: class by role, the propagated deadline, the handler's measured run time (iterations / 83 per us). Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 3740 + 0.40 x 3400 + 0.05 x 85 + 0.15 x 3400 + 0.15 x 3400 = 3319.25 iterations = 33.33 us; 4 / 33.33 us = 120.0k req/s (106.9k with the 4 us allowance). Sized from w16's measured light-load medians (fanout, export and rebuild 50.0 us at 3400 iterations, point 17.0 at 680, so 82-83 iterations per us; gen 10 lesson: 83 per us plus 1 us per request): 3319.25 / 83 + 1 = 40.99 us, 4 / 40.99 us = 97.6k req/s. Levels 28k/56k/70k/72k/74k/76k are 28.7/57.4/71.7/73.8/75.8/77.9% of 97.6k (w16 ran to 82.1%); busy-phase rate at 76k is 121.6k req/s. Headline rule: the overall median is a 41 us kind (light fifo median about 50, limit about 75). A queueing model (per-core queues for 48 flows, stealing, bursts, 83 iterations per us) that overstates w16's measured fifo median rise by about 1.4x (151k: +14 vs +9.5; 155k: +24 vs +17.5) gives fifo medians 69 at 74k and 72.6 at 76k (+19, +23), so about 63-67 and 66-70 measured; 78k reached 81 in the model and is left out. FIFO penalty: points wait behind every queued fanout, export and rebuild (model fifo point p99 546-569 at 74k-76k against 78 at 28k). Why the champion leaves headroom: it ranks a HIGH thread by deadline plus 8 times its learned length, so a point's turn is 800 + 8 x 46 = 1168 us after it becomes ready and a fanout's 300 + 8 x 42 = 636 us: any fanout readied up to about 530 us after a point runs first, until the point is rescued with about 50 us of slack left (about 705 us of waiting). p16's pass needs a third of the length and p17's older pass needs the point to be shorter; a point is about 10% longer, so neither fires, and only health checks pass. Prio is not the answer: oldest-first costs fanouts about 1 point of deadline-met here (model 98.88% against 99.94%), so a policy must spend fanout slack carefully, now without any length difference to lean on. In the model, oldest-first among HIGH with fanouts run first once their slack falls to 140 us cut point p99 553 to 422 (-24%) for -0.13 points of fanout deadline-met but +39% fanout p99, so the guard must be tuned. Prediction at 76k (headline; 74k fallback): fifo point p99 about 570-680 us, fifo overall median about 66-70; sjf_afford and sjf_older equal within noise, point p99 about 560-760 with point runqueue-wait p99 about 490-690 (share about 0.85-0.9), fanout p99 about 175-260 and deadline-met above 99.5%, health p99 about 100-180; prio point p99 about 320-420 with fanout deadline-met about 98.3-98.9%. At 28k every policy's point p99 about 75-90 us. No run.py changes are needed."
+}

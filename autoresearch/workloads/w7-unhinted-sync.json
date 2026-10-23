@@ -1,0 +1,115 @@
+{
+  "id": "w7",
+  "slug": "unhinted-sync",
+  "generation": 6,
+  "title": "Replica syncs with no run-time hint, arriving in bursts",
+  "description": "The same bursty key-value front end as w5 (quick lookups, puts that sometimes flush, and ten-times-longer queries, all HIGH with one shared 100 us deadline; NORMAL batch and LOW scans), plus sync requests from peer replicas: 5% of traffic, about 30 us of work each. The server gives syncs the front end's HIGH class and 100 us deadline, but its table of expected run times has no entry for them, and no user waits on their replies. A scheduler that counts an unknown run time as zero runs every waiting sync before the waiting lookups, so during bursts a 2 us lookup often waits behind a 30 us sync; one that learns how long syncs really take can let lookups go first while still serving syncs before queries, so no kind with a deadline has to pay.",
+  "changed_from_previous": "w5 with a new HIGH sync kind (5% of traffic, taken from queries 55% to 50%; 30 us of work; the shared 100 us deadline hint but no run-time hint; no client deadline); bursts, deadlines, and all other kinds and hints unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 6,
+    "burst": 1,
+    "inaccuracy": 2,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:170",
+      "weight": 0.15,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:100:3000",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:1700",
+      "weight": 0.5,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 17
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:3000",
+      "weight": 0.05,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 0
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 17
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    300000,
+    330000,
+    355000,
+    380000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, at 99.6 iterations per us (calibration.json). Fake work: get 0.256 + put 0.537 + query 0.50 x 17.068 = 8.534 + sync 0.05 x 30.120 = 1.506 + batch 1.707 + scan 1.707 = 14.247 us per request; with about 4 us of runtime and network cost per request, 18.247 us, so 8 / 18.247 us = 438k req/s; 300k/330k/355k/380k are 68/75/81/87% of it. Bursts as in w4b-w6 (busy phase 608k at 380k). Core time: queries 57.7%, batch and scan 11.5% each, sync 9.3%, puts 5.1%, gets 4.7%. Ladder, against w5: inaccuracy 1 -> 2 (a kind's run-time hint is wrong: missing) and classes 5 -> 6 (a fourth HIGH kind). Why sjf_guard suffers: its turn is due time + 8 x hint and it counts a missing hint as zero, so relative to ready time a sync's turn is +100, a put's +108, a get's +116 and a query's +236; a sync therefore runs before every get that became ready after it or less than 16 us before it. sjf_rescue orders by the same turn; sjf_learn and sjf_timed time only hinted threads and price an unhinted one at 0 + 4 us, still ahead of a get; prio and edf_high run syncs in arrival order with all HIGH work. On w5, put flushes ranked ahead of gets cost gets about 18 us of wait p99; syncs are 3.3x as many 30 us jobs. Prediction: under sjf_guard at 380k, get runqueue-wait p99 about 65-90 us (w5: 43.3) and get p99 about 120-145 us (w5: 98.5). A policy that learns an unhinted kind's run time and runs syncs after gets and puts but before queries should bring get p99 to about 100-110 us with puts and queries unchanged or slightly better. Rules: sync has no client deadline (no user waits on it), so rule 6 does not cover it, but rule 3 caps its p99 at +25% over the champion's. Part of the new cost cannot be removed by ordering: a sync already running when a get arrives (no preemption). Built-in checks: fifo and fifo/ignore never read hints; every policy's get p99 at 100k should stay near 14 us. Scans are LOW, so judge rule 4 still applies. The server's hint map entry for sync is high:100:0 (0 = unknown run time)."
+}

@@ -1,0 +1,112 @@
+{
+  "id": "w18a",
+  "slug": "fanout-leaf-cache-neighbor",
+  "generation": 17,
+  "title": "The fan-out leaf service on burstable cores next to a cache-thrashing batch job",
+  "description": "The same RPC leaf service as w16 (cheap frontend reads due in 800 us, fan-out sub-requests due in 300 us, health checks, background export and rebuild, arriving in bursts), but it now shares its machine with a best-effort batch job that copies blocks of memory on every spare core, the way cluster managers fill idle cycles. The service is guaranteed only two of its six cores: the other four are lent to it when requests pile up, given back to the batch job whenever they go idle, and while lent they share a physical core and its caches with the batch job, so they run slower. Each burst therefore starts on fewer, slower cores and leaves deeper queues, and the reads' tail is spent waiting behind sub-requests in those queues. The score is the reads' tail; the sub-requests must keep meeting their deadlines.",
+  "changed_from_previous": "w16 plus a best-effort cache antagonist (apps/netbench/stress, 16 threads on 16 best-effort kthreads, cacheantagonist copying within 1 MB each) and burstable server cores (2 guaranteed and 2 spinning of 6 kthreads, instead of 6 and 6), with load levels lowered for the capacity the antagonist takes (busiest 143k and 150k instead of 151k and 155k); every kind, hint, deadline, the 48 connections and the 4000 us bursts unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 5,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 1,
+    "conns": 48,
+    "kthreads": 6,
+    "time_scale": [
+      6
+    ]
+  },
+  "server": {
+    "kthreads": 6,
+    "guaranteed_kthreads": 2,
+    "spinning_kthreads": 2,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 48,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "point",
+      "service": "constant:680",
+      "weight": 0.25,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "fanout",
+      "service": "constant:3400",
+      "weight": 0.4,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 300,
+        "service_us": 41
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:85",
+      "weight": 0.05,
+      "deadline_us": 1000,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1000,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3400",
+      "weight": 0.15,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 41
+      }
+    }
+  ],
+  "load_rps": [
+    55000,
+    110000,
+    128000,
+    136000,
+    143000,
+    150000
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "point",
+    "percentile": "p99"
+  },
+  "antagonist": {
+    "threads": 16,
+    "n": 10,
+    "spec": "cacheantagonist:1048576",
+    "kthreads": 16
+  },
+  "repeats": 2,
+  "notes": "Real shape. The service is w16's leaf of a fan-out RPC tree, unchanged (Dean and Barroso, The Tail at Scale, CACM 2013; gRPC and Stubby deadline propagation; gRPC and Envoy health checks; export and index rebuilds as background work); its hints stay what that server sets, run times measured on uncontended cores. New: co-location with best-effort batch work, which is how production clusters use spare cycles (Borg, Verma et al., EuroSys 2015; Heracles, Lo et al., ISCA 2015), in the shape of Caladan's own interference setup (Fried et al., OSDI 2020; README 'Running with interference': the victim's kthreads are guaranteed but not spinning, next to apps/netbench/stress with cacheantagonist). Why the gen 5 and gen 13 antagonists did nothing: every workload ran guaranteed = spinning = kthreads, so the server never parked and ias never let the best-effort job onto its cores (gen 13: cpu_cores 7.92-7.99 of 8 even at 35k). Here 2 of 6 kthreads are guaranteed and spinning (one reserved hyperthread pair) and 4 are burstable: a burstable kthread parks after 2 us without work, ias gives the core to the antagonist, and when the server's queues hold work for 10 us or more (the default qdelay) ias preempts the antagonist to hand a core back, one at a time. ias places burstable kthreads on cores whose sibling is not the server (score +3), so a lent core shares its L1, L2 and execution ports with a stress thread; run.py does not set runtime_ht_punish_us, so the hyperthread controller stays off. Antagonist sizing: Caladan's README uses cacheantagonist:4090880 with 20 threads; here 16 threads on 16 kthreads (18 usable hardware threads minus the server's reserved pair) each memcpy within 1 MB, 16 MB in all, inside the 25 MB LLC, so it thrashes L1, L2 and most of the LLC without streaming DRAM, and ias's 25 GB/s bandwidth controller has no reason to throttle it off cores (with 4 MB buffers the job would stream DRAM, be throttled, and leave idle cores for the server, as the membw proposal of gen 13 may have). n = 10 copies per yield (README). Capacity, at 99.6 iterations per us (calibration.json): mean work = 0.25 x 680 + 0.40 x 3400 + 0.05 x 85 + 0.15 x 3400 + 0.15 x 3400 = 2554.25 iterations = 25.65 us; 6 / 25.65 us = 234.0k req/s (202.4k with the 4 us allowance). Measured basis (w16 light-load medians: point 17, fanout 50 us; gen 10 lesson, 83 iterations per us plus 1 us): 31.77 us per request, 6 / 31.77 us = 188.8k req/s. Invented assumption: a lent core runs 15% slower next to the antagonist, so 2 + 4 x 0.85 = 5.4 effective cores, 5.4 / 31.77 us = 170.0k req/s. Levels 55k/110k/128k/136k/143k/150k are 32.4/64.7/75.3/80.0/84.1/88.3% of 170.0k (29.1/58.3/67.8/72.0/75.7/79.4% of 188.8k); busy-phase rate at 150k is 240k req/s. Headline rule: fifo's light median sits on the 41 us kinds (w16: 49 us, limit 73.5); w16 fifo medians were 54.5/58.5/66.5 at 147k/151k/155k, i.e. 0.78/0.80/0.82 of 188.8k. If lent cores lose 5-10%, 150k sits where w16's 155-161k would and 143k at 148-153k, so 143k passes and 150k is near the limit; at 15% (170k) they sit at w16's 159k and 167k and may both fail, and the probe's step-down to 128k/136k (w16's 142k/151k) passes; at 20% (5.2 cores, 164k) 128k/136k sit at w16's 148k/157k. FIFO penalty: reads wait behind every queued fanout, export and rebuild (w16 fifo point p99 649 at 155k against 28 at 55k). Why the champion leaves headroom: on w16 sjf_afford's point runqueue-wait p99 was 125/137-171/191-200 us at 147k/151k/155k (share 0.66-0.77); its pass rule lets reads overtake a fanout only while that fanout keeps 120 us of slack, and each burst now builds a larger backlog on fewer, slower cores, so fanouts reach that reserve sooner and the guard binds in more of each burst; the deeper the queue, the more a better order (reads' 8 us against fanouts' 41) can save. Learned lengths drift by placement: a kthread's fanouts run longer on a lent core than on the reserved pair, against an honest 41 us hint. Prediction: server cpu_cores falls from w16's 5.94 at 55k to about 2.2-3.5 (the antagonist holds the rest) and from w16's 5.98-5.99 to about 5.0-5.8 at 143k-150k under every policy; at the headline, sjf_afford point p99 about 230-330 us with point runqueue-wait p99 about 170-260 (share 0.72-0.80), 30-60% above w16 at the same offered load; fifo point p99 about 550-750; fanout deadline-met under the champion 98.0-99.0%; at 55k every policy's point p99 about 28-40 us (w16: 27-28), the excess being core wake-ups outside the runqueue. If cpu_cores stays near 6 or point runqueue wait is within 6% of w16 at matched load, the antagonist still does not compete and the design has failed. Run-to-run noise may be wider than the 6% band. No run.py changes are needed."
+}

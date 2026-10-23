@@ -1,0 +1,126 @@
+{
+  "id": "w10",
+  "slug": "multigets-as-gets",
+  "generation": 9,
+  "title": "Multigets labeled exactly as lookups, arriving in bursts",
+  "description": "The same bursty key-value front end as w9: quick lookups, puts that sometimes flush, ten-times-longer queries, and replica syncs labeled as puts, all HIGH with a 100 us deadline, NORMAL batch and LOW scans, plus 30 us multigets from an analytics client that can wait 300 us. The server now gives multigets the lookups' entire hint entry, the 2 us run time and the 100 us deadline, so to the scheduler a multiget looks exactly like a lookup and the deadline no longer tells them apart. Lookups now share their label with much longer requests, just as puts share theirs with syncs; a scheduler that lets each label's learned length rise only a fixed amount above its hint ends up counting the lookups' label as slightly longer than the puts', so lookups wait behind puts and 30 us syncs again, although the run times it measured for the lookups' label are clearly shorter.",
+  "changed_from_previous": "w9 with the server's hint map entry for multiget changed from high:300:2 to high:100:2, identical to get's, so gets and multigets carry the same hints; the client's traffic, bursts, load levels, client deadlines (multiget still 300 us) and all other hints are unchanged.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 7,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:170",
+      "weight": 0.15,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:100:3000",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:1700",
+      "weight": 0.45,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 17
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:3000",
+      "weight": 0.05,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 1
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:3000",
+      "weight": 0.05,
+      "deadline_us": 300,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:1700",
+      "weight": 0.1,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 17
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    290000,
+    320000,
+    345000,
+    370000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, unchanged from w9 (same client traffic), at 99.6 iterations per us (calibration.json). Fake work per request: get 0.15 x 170/99.6 = 0.256; put 0.10 x (0.85 x 100 + 0.15 x 3000)/99.6 = 0.537; query 0.45 x 17.068 = 7.681; sync 0.05 x 30.120 = 1.506; multiget 0.05 x 30.120 = 1.506; batch 0.10 x 17.068 = 1.707; scan 1.707; total 14.900 us. With about 4 us of runtime and network cost per request, 18.900 us, so 8 / 18.900 us = 423k req/s; 290k/320k/345k/370k are 69/76/82/87% of it. The top level stays at 370k because fifo's overall median there was already 1.5x its light-load value on w9 (45.0 vs 30.0 us), the headline limit, so a higher load would not move the headline. Bursts as in w4b-w9 (busy phase 370k x 1.6 = 592k req/s, under 700k). Deadlines: hint 100 us for every HIGH kind, 3.3x a multiget's 30 us; client deadlines as in w9 (multiget 300 us, sync none). Ladder, against w9: no dimension moves; this is a harder case of inaccuracy step 3 (mislabeled requests), where the mislabel now covers the scored kind's own label and leaves no hint field that differs. The only edit is the server's hint map entry for multiget, high:300:2 -> high:100:2. Why the champion suffers (p8 sjf_capped, and p9 sjf_pair, which decides exactly as p8 here because no deadline exceeds its 250 us split): one learned length per label, at most hint + 12 us. In the '2 us' label one run in four is a 34 us multiget (30 us of work plus overhead); on w9 multigets ranked last, ran mostly from short queues and were rarely timed, so the label sat near 10 us. Now multigets rank level with gets and are timed as often, and the estimator, which leans to long runs, settles near 22 us for this mix (it reaches the cap already at one long run in eleven), so the label counts at its 14 us cap. The '1 us' label (puts and syncs) stays at its 13 us cap, as on w8-w9. Counted from becoming ready, the turns (deadline + 8 x length) become: puts and syncs +204 us, gets and multigets +212, queries about +268. So a get waits behind every queued put and sync that became ready less than 8 us after it, and behind multigets queued before it: the order under which sjf_nohint measured get runqueue-wait p99 96-97 us on w8 and w9 (p8: 25.4 and 40.9). A get also counts as too late after 77 us of waiting and then yields to the shorter '1 us' threads. Why the policy region can fix it: the cap, not the measurements, inverts the order. Measured run times put the '2 us' label at a mean of about 13 us (raw estimate about 22) and the '1 us' label at about 18 (raw about 27), so a policy that compares two capped labels by what it measured (for example one ceiling for all labels with ties broken by the raw estimate, or a mean or short-run-share estimate per label) runs the gets' label ahead of the puts' label again, as p8 does on w8, while puts stay ahead of queries. No policy can separate gets from multigets (identical hints), so multigets would run at the gets' turn; that costs puts and syncs about 1.7 us of work per request ahead of them (multigets) on top of 0.9 (gets). Prediction at 370k: fifo, prio and fifo/ignore read neither deadlines nor run-time hints, so they repeat w9's experiment (get p99 210.5 / 188.0 / 213.5 us within drift); this is the built-in check. sjf_capped and sjf_pair: get runqueue-wait p99 about 85-110 us (w9: 40.9) and get p99 about 125-155 us (w9: 95.0); put runqueue-wait p99 about 55-75 us (w9: 82.0) and put deadline-met about 97-97.8%; multiget p99 about 150-190 us (w9: 249.0) with deadline-met (300 us) about 99.9%; query p99 about 235-265 us. sjf_nohint: gets and multigets both +116, puts and syncs +108, so get p99 about 145-165 us (w9: 142.0). A policy that keeps the gets' label ahead of the puts' label: get wait p99 about 45-60 us (gets still queue behind earlier multigets in their own label) and get p99 about 95-115 us. Not removable by ordering: about 54 us of the get tail outside the runqueue on w9, and a running 30 us multiget or sync cannot be passed (no preemption). Every policy's get p99 at 100k should stay near 14 us. Scans are LOW, so judge rule 4 still applies. The server's hint map entry for multiget is high:100:2, identical to get's. No run.py changes are needed."
+}

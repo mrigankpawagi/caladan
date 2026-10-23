@@ -1,0 +1,138 @@
+{
+  "id": "w12",
+  "slug": "two-timescales",
+  "generation": 11,
+  "title": "The fourfold multiget key-value mix plus fast lease renewals, two time scales at once",
+  "description": "The same bursty key-value front end as w11, where every request runs four times longer than in w9 and most latency-critical requests have 400 us to finish, plus lease renewals from a coordination service: 10% of traffic, about 2 us of work each, latency-critical with a 100 us deadline, still on w9's time scale. The server therefore runs requests on two time scales at once. A scheduler that reads one time scale per core from the tightest deadline it sees picks the leases' small scale for everything, so it again discards the 120 us syncs and flushes hiding behind the puts' 4 us run-time hint and lumps multigets together with lookups, and lookups wait behind puts and syncs as they did on w11.",
+  "changed_from_previous": "w11 plus a HIGH lease kind on w9's time scale (10% of traffic, constant:170 iterations, run-time hint 2 us, deadline 100 us, client and hint), with every w11 weight scaled by 0.9 to make room; all other works, hints, deadlines and the burst shape unchanged; load levels resized to the same core time from w11's measured light-load medians (100k matches w11's 90k headline, top 110k).",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 8,
+    "burst": 1,
+    "inaccuracy": 3,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8,
+    "time_scale": [1, 4]
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "constant:680",
+      "weight": 0.135,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "bimodal:0.85:400:12000",
+      "weight": 0.09,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "query",
+      "service": "constant:6800",
+      "weight": 0.405,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 68
+      }
+    },
+    {
+      "name": "sync",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 4
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "constant:12000",
+      "weight": 0.045,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.09,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 68
+      }
+    },
+    {
+      "name": "lease",
+      "service": "constant:170",
+      "weight": 0.1,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    }
+  ],
+  "load_rps": [
+    35000,
+    70000,
+    95000,
+    100000,
+    105000,
+    110000
+  ],
+  "burst": {
+    "period_us": 4000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Capacity, at 99.6 iterations per us (calibration.json). Fake work per request: get 0.135 x 680/99.6 = 0.135 x 6.827 = 0.922; put 0.09 x (0.85 x 400 + 0.15 x 12000)/99.6 = 0.09 x 21.486 = 1.934; query 0.405 x 68.273 = 27.651; sync 0.045 x 120.482 = 5.422; multiget 5.422; batch 0.09 x 68.273 = 6.145; scan 6.145; lease 0.10 x 170/99.6 = 0.10 x 1.707 = 0.171; total 53.81 us (0.9 x w11's 59.60 + 0.17), so 8 / 53.81 us = 148.7k req/s, or 138.4k with the calibrated 4 us per request. Levels are sized instead from w11's measured light-load medians (gen 10 report, section 5): long requests run at about 83 iterations per us and non-work core time is about 1 us per request, so 5359.4 iterations / 83 + 1 = 65.57 us per request and 8 / 65.57 us = 122.0k req/s (w11 on the same basis: 72.52 us, 110.3k; its 90k headline used 81.6% of the cores and 97k, which failed the 1.5x median rule, 87.9%). 35k/70k/95k/100k/105k/110k are 28.7/57.4/77.9/82.0/86.1/90.2% of 122.0k (69/72/76/79% of 138.4k for the top four): 100k matches w11's 90k headline, 105k about w11's 94k and 110k about w11's 99.5k, between w11's usable 97k and 103k. fifo's light-load overall median stays a query's ~91 us (short kinds now 31% of traffic, queries, batch and scans 58.5%), so the headline limit is about 136.5 us; predicted headline 100k, possibly 105k because the median now sits lower in the long kinds' distribution. Bursts as in w11 (4000 us period, duty 0.25, factor 2); busy-phase rate at 110k is 176k req/s, far under 700k. Deadlines: as in w11 (400 us for HIGH kinds, 3.3x a 120 us sync or flush; multigets 1200 us; syncs no client deadline); leases 100 us, client and hint, 50x their 2 us of work. Ladder, against w11 (the champion's best workload: -64% against fifo): classes 7 -> 8 (a sixth HIGH kind); no other ladder dimension moves; the new kind also brings a second time scale, recorded as time_scale [1, 4]. Why the champion and the candidate suffer: p10 sjf_mixed decides as on w11 (labels '2 us' near for leases, '4 us' relaxed for puts and syncs, '8 us' relaxed for gets and multigets, '68 us' relaxed for queries; its 50 us drop limit hides the 145 us syncs and flushes, so puts and syncs count ~6 us against gets' ~10 and run first), with leases first of all (turn about +150 us). p11 sjf_unit reads each core's time unit from the tightest relative deadline of the HIGH threads it runs: leases pin it at round(100/100) = 1 on every core, so every constant is p10's and p11 makes p10's decisions. The remembered deadline rises by 1/256 of the gap per looser HIGH pick, so a core reaches unit 2 only after about 39 HIGH picks without a lease; leases are 12.2% of HIGH picks, so that happens in about 0.6% of gaps (about 7 times per core per second at 100k, each clearing the learning table twice); unit 2 keeps the drop limit (116 us for '4 us') below 145 us, so the order does not change then either. Why the policy region can fix it: the deadlines differ by kind, and unit 4 fits every kind here (leases still count about 3 us and turn at +124, first), so a unit read from the deadline most HIGH work carries, or one unit per label from that label's own deadline, restores p11's w11 order (gets +480, puts and syncs +624, queries +1064, multigets +1456) while leases stay first. That needs five labels (leases '2', puts and syncs '4', gets '8', multigets '8' relaxed, queries '68'): p10's table has five learning slots, p11's stored unit takes one, so a fix keeps the unit elsewhere or derives it per thread; a lease label without a slot counts its 6 us floor, which is harmless. Prediction: sjf_mixed get p99 about 230-280 us at 100k (w11 90k: 242) and 280-350 at 105k; get runqueue-wait p99 about 150-190 us at 100k. sjf_unit within 6% of sjf_mixed on every kind at every level (whatever it scores on w11, where its own prediction is get p99 140-190 and get wait p99 10-60). A policy with the right unit for the 400 us kinds: get wait p99 about 10-60 us and get p99 about 140-190 at 100k. Leases under the sjf policies: p99 about 110-180 us (they still wait for a running 82-145 us request; no preemption), deadline-met about 96-99%; under fifo about 55-75%. Built-in checks: fifo, prio and fifo/ignore read neither run-time hints nor deadlines' units, so they repeat w11 at matching core time: fifo get p99 about 640-720 us at 100k, prio about 520-590; every policy's get p99 at 35k about 20-25 us and lease p50 about 11 us. Scans are LOW, so judge rule 4 still applies; lease deadline-met now falls under judge rule 6. Not removable by ordering: a running 145 us sync, flush or multiget cannot be passed, and about 80 us of the get p99 lies outside the runqueue (w11). The server's hint map entry for lease is high:100:2. No run.py changes are needed."
+}

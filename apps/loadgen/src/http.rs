@@ -189,7 +189,7 @@ impl LoadgenProtocol for HttpProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<(usize, u64, u64)> {
         let mut pstate = ParseState::new();
 
         if buf.data_size() == 0 {

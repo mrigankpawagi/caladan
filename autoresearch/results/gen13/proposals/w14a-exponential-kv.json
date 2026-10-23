@@ -1,0 +1,130 @@
+{
+  "id": "w14a",
+  "slug": "exponential-kv",
+  "generation": 13,
+  "title": "A key-value and query front end with exponential service times and honest hints",
+  "description": "A key-value store front end whose request costs vary the way real ones do: lookups, puts, secondary-index queries and multigets take an exponentially distributed time (most are quick, a few take several times the average), because value sizes and result sizes are long-tailed. Lookups, puts and queries are latency-critical and due in 400 us, multigets in 1200 us, short lease renewals in 100 us; batch work and scans run in the background, and traffic arrives in short bursts. The server's hints are honest averages, but no hint can say which individual query will run long, so a long query can still hold a core while a lookup waits, and a scheduler that treats a query cut off by the time slice as nearly finished, or rushes queries that are already late, makes lookups wait for work that is as long as a fresh query.",
+  "changed_from_previous": "w12's kinds with honest hints and exponential service: lookup, put, query and multiget work is exponential (means 680/400/6800/12000 iterations) instead of constant or a hidden-flush mix, syncs folded into multigets, leases halved to 5%, hints set to each kind's measured mean, and bursts at the ladder's 1000 us period.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 1,
+    "classes": 7,
+    "burst": 1,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8,
+    "time_scale": [
+      1,
+      4
+    ]
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "get",
+      "service": "exponential:680",
+      "weight": 0.135,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 8
+      }
+    },
+    {
+      "name": "put",
+      "service": "exponential:400",
+      "weight": 0.09,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 5
+      }
+    },
+    {
+      "name": "query",
+      "service": "exponential:6800",
+      "weight": 0.425,
+      "deadline_us": 400,
+      "hint": {
+        "class": "high",
+        "deadline_us": 400,
+        "service_us": 82
+      }
+    },
+    {
+      "name": "multiget",
+      "service": "exponential:12000",
+      "weight": 0.09,
+      "deadline_us": 1200,
+      "hint": {
+        "class": "high",
+        "deadline_us": 1200,
+        "service_us": 145
+      }
+    },
+    {
+      "name": "lease",
+      "service": "constant:170",
+      "weight": 0.05,
+      "deadline_us": 100,
+      "hint": {
+        "class": "high",
+        "deadline_us": 100,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "batch",
+      "service": "constant:6800",
+      "weight": 0.105,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    },
+    {
+      "name": "scan",
+      "service": "constant:6800",
+      "weight": 0.105,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 82
+      }
+    }
+  ],
+  "load_rps": [
+    35000,
+    70000,
+    85000,
+    90000,
+    95000,
+    100000
+  ],
+  "burst": {
+    "period_us": 1000,
+    "duty": 0.25,
+    "factor": 2
+  },
+  "score": {
+    "kind": "get",
+    "percentile": "p99"
+  },
+  "antagonist": null,
+  "repeats": 2,
+  "notes": "Real shapes and how they are approximated: Facebook's memcache ETC pool (Atikoglu et al., SIGMETRICS 2012) is GET-dominated with long-tailed value sizes, so lookups and puts get exponential work; range and secondary-index reads with long-tailed result counts (TAO's assoc_range, Bronson et al., ATC 2013) and multigets with long-tailed batch sizes get exponential work too; an LSM store (RocksDB) flushes memtables in background threads, so a put is a short insert with no hidden flush; batch jobs and paginated scans use a fixed page and stay constant; lease renewals are fixed-size and stay constant. loadgen only offers exponential (no shifted or Pareto shapes), so each long-tailed cost is an exponential with the same mean as w12's constant. Weights are invented: w12's, with syncs folded into multigets (0.09), leases halved to 0.05 and that 0.05 given to queries (+0.02), batch and scans (+0.015 each). Hints are what a server that profiles its handlers would set: class by role, the SLO as deadline, and the measured mean run time (iterations / 83 per us, gen 10 lesson): lease 2, put 5, get 8, query 82, multiget 145, scan 82 us. Capacity: mean work = lease 0.05x170 = 8.5 + put 0.09x400 = 36.0 + get 0.135x680 = 91.8 + query 0.425x6800 = 2890.0 + multiget 0.09x12000 = 1080.0 + batch 0.105x6800 = 714.0 + scan 714.0 = 5534.3 iterations. At 99.6 per us (calibration.json): 55.57 us, 8 / 55.57 = 144.0k req/s (134.3k with the 4 us allowance). Sized, as the gen 10 lesson asks, from measured medians of the parent (w11/w12: about 83 iterations per us and 1 us of non-work core time per request): 5534.3 / 83 + 1 = 67.68 us, 8 / 67.68 us = 118.2k req/s; 35k/70k/85k/90k/95k/100k are 29.6/59.2/71.9/76.1/80.4/84.6% of it. Why these levels, bursts and lease share: the headline rule (fifo overall median at most 1.5x its lightest value) binds much earlier with exponential work, because the light-load median falls into the exponential body. A FIFO simulation of this mix (8 cores, one queue, 10 us network; it reads about 10 us high against w12's measured fifo medians) gives a light median of about 64 us and keeps the median on the batch and scan point mass (about 93 us) up to 82% load with the 1000 us period; with w12's 4000 us period or with w12's 10% leases and 0% extra background, the median passed 1.5x already at 60-70%, leaving no usable busy level. Bursts are therefore the ladder's step-1 setting (period 1000 us, duty 0.25, factor 2; busy-phase rate at 100k is 160k req/s). Deadlines: lease 100 us (client and hint; 50x its work), get, put and query 400 us (query 4.9x its 82 us mean, above the 3x rule), multiget 1200 us (8.3x). Ladder, against w12 (the champion's best workload after w11): tails 0 -> 1 (exponential); nothing else moves up (inaccuracy drops to 0 because hints are now honest averages; the per-request error comes only from the exponential shapes). The champion's unit: fresh HIGH picks carry 100 us (6.3%), 400 us (82.3%) and 1200 us (11.4%); time-slice remnants add values below these; at most about 16% of picks lie above 400 us, so p13's upper-quartile estimate settles at 400 and the unit is 4, as on w11-w13: the test is the tails, not the unit. Why the champion should leave runqueue headroom: (1) about 30% of queries (work over 100 us) and half the multigets are cut by the 100 us time slice; with exponential work the remaining part is as long on average as a fresh request (memoryless), but a remnant keeps its original, earlier deadline, so p13 turns it urgent sooner and runs it ahead of waiting lookups; (2) queries become urgent after about 280 us of waiting and are rushed ahead of lookups even though an exponential query then still runs 82 us on average, and many of them miss anyway; (3) p13's estimator leans toward long runs, so exponential labels are learned at about 1.6x their mean (gets about 14 us for 9 us of core time, puts about 9), which keeps puts about 42 us of turn ahead of gets. A policy that learns remaining time after a yield, or that skips rescues that cannot succeed, can shorten get waiting without touching run times. Expected: preemptions (time-slice yields) about 35-45k per run at 100k (w12: about 17k); champion get p99 about 150-180 us at 100k with get runqueue-wait p99 about 70-110 us (share about 0.45-0.6); fifo get p99 about 280-400 us; every policy's get p99 at 35k about 45-60 us (an exponential lookup's own p99 is about 4.6x its 8 us). Query deadline-met (400 us) at 100k about 90-96% under every policy. Not removable by ordering: an exponential get's own run time (p99 about 38 us), about 10 us of network, and a core held by a running long request. No run.py changes are needed."
+}

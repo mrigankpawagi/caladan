@@ -82,6 +82,9 @@ pub struct Packet {
     kind: u8,
     /// Priority class the server reported applying, from the response.
     class_seen: Option<u8>,
+    /// Time the handler thread waited in a server runqueue (100 ns units),
+    /// if the server measured it.
+    wait_seen: Option<u32>,
     target_start: Duration,
     actual_start: Option<Duration>,
     completion_time_ns: Arc<AtomicU64>,
@@ -105,7 +108,7 @@ mod http;
 use http::HttpProtocol;
 
 mod distribution;
-use distribution::{Distribution, KindMix};
+use distribution::{Burst, Distribution, KindMix};
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum Protocol {
@@ -214,9 +217,11 @@ impl<'a> Buffer<'a> {
 trait LoadgenProtocol: Send + Sync {
     fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>);
     fn uses_ordered_requests(&self) -> bool;
-    /// Reads one response; returns (request index, server tsc, applied class).
+    /// Reads one response; returns (request index, server tsc, the reply's
+    /// hint word: applied class and queue wait for the synthetic protocol, 0
+    /// for the others).
     fn read_response(&self, sock: &Connection, scratch: &mut Buffer)
-        -> io::Result<(usize, u64, u8)>;
+        -> io::Result<(usize, u64, u64)>;
 }
 
 impl LoadgenProtocol for Protocol {
@@ -241,7 +246,7 @@ impl LoadgenProtocol for Protocol {
     }
 
     fn read_response(&self, sock: &Connection, scratch: &mut Buffer)
-        -> io::Result<(usize, u64, u8)> {
+        -> io::Result<(usize, u64, u64)> {
         match self {
             Protocol::Synthetic(proto) => proto.read_response(sock, scratch),
             Protocol::Memcached(proto) => proto.read_response(sock, scratch),
@@ -327,6 +332,8 @@ struct GroupResult {
     latencies: BTreeMap<u64, usize>,
     deadline_total: usize,
     deadline_met: usize,
+    /// server runqueue wait of answered requests, 100 ns units
+    waits: BTreeMap<u64, usize>,
 }
 
 impl GroupResult {
@@ -339,6 +346,18 @@ impl GroupResult {
         for (k, v) in &other.latencies {
             *self.latencies.entry(*k).or_insert(0) += v;
         }
+        for (k, v) in &other.waits {
+            *self.waits.entry(*k).or_insert(0) += v;
+        }
+    }
+
+    /// Queue-wait percentile in µs over answered requests that reported one.
+    fn wait_pct(&self, p: f32) -> Option<f32> {
+        let n: usize = self.waits.values().sum();
+        if n == 0 {
+            return None;
+        }
+        Some(latency_percentile(&self.waits, n, n, p) / 10.0)
     }
 }
 
@@ -373,6 +392,8 @@ pub struct AppConfig {
     pub distribution: Distribution,
     pub kinds: KindMix,
     pub groups: GroupMode,
+    /// Optional bursty arrivals within each load level (--burst).
+    pub burst: Option<Burst>,
     pub transport: Transport,
     pub protocol: Protocol,
     pub output_mode: OutputMode,
@@ -431,6 +452,7 @@ struct RequestSchedule {
     arrival: Distribution,
     kinds: KindMix,
     groups: GroupMode,
+    burst: Option<Burst>,
     output: OutputMode,
     runtime: Duration,
     rps: usize,
@@ -569,6 +591,7 @@ fn gen_classic_packet_schedule(
     output: OutputMode,
     kinds: &KindMix,
     groups: GroupMode,
+    burst: Option<Burst>,
     ramp_up_seconds: usize,
     nthreads: usize,
     discard_pct: f32,
@@ -587,6 +610,7 @@ fn gen_classic_packet_schedule(
             arrival: Distribution::Exponential((nthreads * NS_PER_SEC as usize / rate) as f64),
             kinds: kinds.clone(),
             groups,
+            burst,
             output: OutputMode::Silent,
             runtime: Duration::from_micros(1_000_000 / RAMPUP_STEPS_PER_SECOND as u64),
             rps: rate,
@@ -600,6 +624,7 @@ fn gen_classic_packet_schedule(
         arrival: Distribution::Exponential(ns_per_packet as f64),
         kinds: kinds.clone(),
         groups,
+        burst,
         output: output,
         runtime: runtime,
         rps: packets_per_second,
@@ -628,6 +653,7 @@ fn gen_loadshift_experiment(config: &AppConfig) -> Vec<RequestSchedule> {
                 arrival: Distribution::Exponential(ns_per_packet as f64),
                 kinds: config.kinds.clone(),
                 groups: config.groups,
+                burst: config.burst,
                 output: output,
                 runtime: Duration::from_micros(micros),
                 rps: packets_per_second as usize,
@@ -699,7 +725,7 @@ fn process_result_final(
             "".to_owned()
         };
         if grouped {
-            println!("Group, Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, DeadlineMet, Start, StartTsc{}", rt);
+            println!("Group, Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, DeadlineMet, QWait50, QWait99, Start, StartTsc{}", rt);
         } else {
             println!("Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, Start, StartTsc{}", rt);
         }
@@ -820,6 +846,13 @@ fn process_result_final(
                 merged.entry(k.clone()).or_default().merge(g);
             }
         }
+        let wait_cells = |g: Option<&GroupResult>| {
+            let f = |v: Option<f32>| v.map_or("-".to_string(), |x| format!("{:.1}", x));
+            match g {
+                Some(g) => format!("{}, {}", f(g.wait_pct(50.0)), f(g.wait_pct(99.0))),
+                None => "-, -".to_string(),
+            }
+        };
         let deadline_cell = |g: Option<&GroupResult>| match g {
             Some(g) if g.deadline_total > 0 => {
                 format!("{:.2}", 100.0 * g.deadline_met as f64 / g.deadline_total as f64)
@@ -827,7 +860,7 @@ fn process_result_final(
             _ => "-".to_string(),
         };
         println!(
-            "all, {}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}, {}{}",
+            "all, {}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}, {}, {}{}",
             sched.kinds.name(),
             sent_rps,
             resp_rps,
@@ -841,6 +874,7 @@ fn process_result_final(
             percentile(99.99),
             *buckets.keys().max().unwrap() as f32,
             deadline_cell(merged.get("all")),
+            wait_cells(merged.get("all")),
             start_secs,
             first_tsc,
             rt_stat_values
@@ -848,7 +882,7 @@ fn process_result_final(
         for (key, g) in merged.iter().filter(|(k, _)| sched.groups.shows(k)) {
             let pct = |p| latency_percentile(&g.latencies, g.sent, g.responses, p);
             println!(
-                "{}, {}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}, {}",
+                "{}, {}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}, {}, {}",
                 key,
                 sched.kinds.name(),
                 rps_of(g.sent),
@@ -863,6 +897,7 @@ fn process_result_final(
                 pct(99.99),
                 g.latencies.keys().max().map_or(0.0, |m| *m as f32),
                 deadline_cell(Some(g)),
+                wait_cells(Some(g)),
                 start_secs,
                 first_tsc
             );
@@ -968,6 +1003,9 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<Sch
                         g.sent += 1;
                         g.responses += 1;
                         *g.latencies.entry(lat).or_insert(0) += 1;
+                        if let Some(w) = p.wait_seen {
+                            *g.waits.entry(w as u64).or_insert(0) += 1;
+                        }
                         if spec.deadline_us > 0 {
                             g.deadline_total += 1;
                             g.deadline_met += (lat <= spec.deadline_us) as usize;
@@ -1066,7 +1104,11 @@ fn gen_packets_for_schedule(schedules: &Arc<Vec<RequestSchedule>>) -> (Vec<Packe
                 ..Default::default()
             });
 
-            let nxt = last + sched.arrival.sample(&mut rng);
+            let gap = sched.arrival.sample(&mut rng);
+            let nxt = match sched.burst {
+                Some(b) => b.advance(last, gap),
+                None => last + gap,
+            };
             if nxt >= end {
                 break;
             }
@@ -1185,11 +1227,11 @@ fn run_client_worker(
         wg2.follower_notify();
         for i in 0..receive_times.len() {
             match rproto.read_response(&socket2, &mut buf) {
-                Ok((mut idx, tsc, class)) => {
+                Ok((mut idx, tsc, hint)) => {
                     if use_ordering {
                         idx = i;
                     }
-                    receive_times[idx] = Some((Instant::now(), tsc, class));
+                    receive_times[idx] = Some((Instant::now(), tsc, hint));
                 }
                 Err(e) => {
                     match e.raw_os_error() {
@@ -1290,10 +1332,11 @@ fn run_client_worker(
                 }),
         )
         .for_each(|(c, p)| {
-            if let Some((inst, tsc, class)) = c {
+            if let Some((inst, tsc, hint)) = c {
                 (*p).completion_time = Some(inst - start);
                 (*p).completion_server_tsc = Some(tsc);
-                (*p).class_seen = Some(class);
+                (*p).class_seen = Some(Payload::class_of(hint));
+                (*p).wait_seen = Payload::wait_of(hint);
             }
         });
 
@@ -1316,6 +1359,7 @@ fn run_live_client(config: AppConfig, barrier_group: &mut lockstep::Group) {
         OutputMode::Live,
         &config.kinds,
         config.groups,
+        config.burst,
         config.rampup,
         config.nthreads,
         config.discard_pct,
@@ -1869,6 +1913,10 @@ impl AppConfig {
 
         let distribution = Self::create_distribution(matches)?;
         let kinds = Self::create_kinds(matches, &distribution)?;
+        let burst = match matches.get_one::<String>("burst") {
+            Some(spec) => Some(Burst::parse(spec)?),
+            None => None,
+        };
         let groups = match matches.get_one::<String>("groups").map(|s| s.as_str()) {
             Some("all") => GroupMode::All,
             Some("class") => GroupMode::Class,
@@ -1889,6 +1937,7 @@ impl AppConfig {
             distribution,
             kinds,
             groups,
+            burst,
             transport,
             protocol,
             output_mode,
@@ -2021,6 +2070,7 @@ fn do_run_local(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
             OutputMode::Silent,
             &config.kinds,
             config.groups,
+            config.burst,
             WARMUP_RAMPUP_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -2035,6 +2085,7 @@ fn do_run_local(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
             config.output_mode,
             &config.kinds,
             config.groups,
+            config.burst,
             WARMUP_RAMPUP_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -2100,6 +2151,7 @@ fn run_multistep_client(
             OutputMode::Silent,
             &config.kinds,
             config.groups,
+            config.burst,
             WARMUP_DURATION_SECONDS,
             config.nthreads,
             config.discard_pct,
@@ -2115,6 +2167,7 @@ fn run_multistep_client(
             config.output_mode,
             &config.kinds,
             config.groups,
+            config.burst,
             config.rampup,
             config.nthreads,
             config.discard_pct,
@@ -2258,6 +2311,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("Distribution of request lengths to use, new format")
                 .conflicts_with("distribution")
                 .conflicts_with("mean"),
+        )
+        .arg(
+            Arg::new("burst")
+                .long("burst")
+                .num_args(1)
+                .help(
+                    "Bursty arrivals, period_us:duty:factor: in every period the first \
+                     duty fraction runs at factor times the rate of the rest, same average",
+                ),
         )
         .arg(
             Arg::new("groups")
