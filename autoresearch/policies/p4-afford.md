@@ -6,7 +6,7 @@
 - status: candidate
 - builds_on: p3
 - changed_from_previous: passonce's pass fires only if every thread it would pass that carries a deadline would still, by the hints, finish with the unseen time to spare after absorbing the passer's run time (deadline − now − hinted work of its class through it − passer's run time − 30 µs unseen ≥ 0); the once-bound and the mark are unchanged.
-- commit: (set when applied)
+- commit: 8b8ed04
 
 ## What it does
 Each core runs helper threads first and then the highest class present,
