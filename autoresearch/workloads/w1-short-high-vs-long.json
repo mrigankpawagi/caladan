@@ -1,0 +1,64 @@
+{
+  "id": "w1",
+  "slug": "short-high-vs-long",
+  "generation": 0,
+  "title": "Short latency-critical requests behind long ones",
+  "description": "20% of requests are short and latency-critical; the server marks them HIGH with a 60 us deadline. The other 80% are about ten times longer and stay NORMAL. Under FIFO a short request that arrives behind long ones waits for them, so its tail latency is set by the long requests. This is the simplest case where a priority hint should help.",
+  "changed_from_previous": "w0 plus a second, short, HIGH request kind.",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 2,
+    "burst": 0,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "short",
+      "service": "constant:170",
+      "weight": 0.2,
+      "deadline_us": 60,
+      "hint": {
+        "class": "high",
+        "deadline_us": 60,
+        "service_us": 2
+      }
+    },
+    {
+      "name": "long",
+      "service": "constant:1700",
+      "weight": 0.8,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal"
+      }
+    }
+  ],
+  "load_rps": [
+    100000,
+    200000,
+    300000,
+    350000,
+    400000,
+    450000
+  ],
+  "antagonist": null,
+  "notes": "Service times in iterations of stridedmem:1024:7 (about 99.6 per us at light load); gen 0 re-calibrates them. The first loop measured short p99 about 90 us (fifo) and 52 us (prio) at 400k req/s.",
+  "family": "key-value",
+  "cell": "base"
+}
