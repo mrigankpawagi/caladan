@@ -388,6 +388,126 @@ static uint32_t choose_passonce(struct kthread *k, uint32_t n)
 	return cand;
 }
 
+/*
+ * p4 "afford": passonce's pass, allowed only when every thread it would pass
+ * can afford it by its own hints.
+ *
+ * Principle: a thread that carries a deadline and whose hinted run time is
+ * shorter than that of every thread of its class ahead of it may run before
+ * them, provided none of them has been passed before and every one of them
+ * that carries a deadline would still, by the hints, finish with the unseen
+ * time to spare: its deadline, minus the hinted run time of its class ahead
+ * of it and its own, minus the passer's run time, minus the latency the hint
+ * clock does not see, must not have run out at the moment of the pick.
+ * Where no pass is affordable the pick is prio's; where every pass is
+ * affordable the pick is passonce's.
+ *
+ * The price of a pass is the passer's run time, paid at most once by each
+ * passed thread (passonce's mark in policy_state[0] is kept as it is). What
+ * changes is who may be asked to pay. passonce charged any thread the once
+ * bound allowed, which on w4 charged reads already past their budget 10 us
+ * each to save appends that had 170 us to spare. Here the charge is priced
+ * against the passed thread's remaining slack: on w4 a read with another
+ * read ahead of it is passed only within 16 us of arriving, a read at the
+ * head of its class within 53 us, and a tail read (75 us waited) never; on
+ * w3 a search behind one search keeps 90 us minus its wait and is passed
+ * as before, so the suggestions' gain holds except in queues four searches
+ * deep.
+ *
+ * The one constant is p2's POLICY_UNSEEN_US, 30 us, reused: the latency the
+ * hint clock does not see, because the clock starts when the handler thread
+ * gets its hints, after the packet has waited for the request the core was
+ * running, and stops before the reply. The gen 3 report measures the part
+ * outside the queue at ~31 us at the tail on w4 (156 = 37 own + 12 light-
+ * load + 75.5 queue + ~31), ~31 on w3 and ~33 on w2, with the 12 us light-
+ * load floor (network, softirq, reply) on top of it. 30 is the report's
+ * figure and sits between the floor (12) and the loaded tail (42-45); a
+ * thread within that difference of the line can be mispriced by at most
+ * that much, in either direction.
+ *
+ * Cost: passonce's single scan plus, per thread of the chosen class, one
+ * add (the class's hinted work so far) and one subtract-and-min (the
+ * thread's room: its deadline minus the work through it), and one clock
+ * read only when a candidate exists and the once bound allows the pass. On
+ * w0, w1 and w2 no candidate ever forms (no deadlines; one hinted run time
+ * per class; the shorter kind without a deadline), so no clock is read,
+ * the mark is never written and the pick is prio's, exactly as passonce.
+ */
+
+/*
+ * The latest instant at which @th's class may start running and still, by
+ * the hints, deliver @th before its deadline: its deadline minus @work, the
+ * hinted run time of its class-mates ahead of it plus its own. A thread
+ * without a deadline has no slack to keep and never refuses a pass.
+ */
+static inline uint64_t afford_room(const thread_t *th, uint64_t work)
+{
+	if (!th->deadline_tsc)
+		return ~(uint64_t)0;
+	return th->deadline_tsc > work ? th->deadline_tsc - work : 0;
+}
+
+static uint32_t choose_afford(struct kthread *k, uint32_t n)
+{
+	uint32_t i, best = 0, cand = 0, passed = 0, last = 0;
+	thread_t *th = sched_rq_at(k, 0);
+	uint8_t rank = prio_rank[th->prio_class];
+	/* the shortest hinted run time seen in the chosen class; unknown = longest */
+	uint64_t shortest = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+	/* hinted work of the chosen class scanned so far, and the tightest room in it */
+	uint64_t work = th->service_tsc;
+	uint64_t room = afford_room(th, work);
+	/* the tightest room among the threads the candidate would pass */
+	uint64_t margin = 0, now;
+
+	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
+		uint8_t r;
+		uint64_t s;
+
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r < rank)
+			continue;	/* a lower class: prio runs it later anyway */
+		if (r > rank) {
+			/* a higher class: prio's choice moves here, nothing passes it yet */
+			rank = r;
+			best = i;
+			cand = 0;
+			last = i;
+			shortest = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+			work = th->service_tsc;
+			room = afford_room(th, work);
+			continue;
+		}
+		s = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+		if (th->deadline_tsc && s < shortest) {
+			/* shorter than every class-mate ahead: the pass candidate */
+			cand = i;
+			passed = last;	/* the youngest thread it would pass */
+			margin = room;	/* the tightest room among them */
+		}
+		if (s < shortest)
+			shortest = s;
+		work += th->service_tsc;
+		room = MIN(room, afford_room(th, work));
+		last = i;
+	}
+
+	/* no candidate, or the oldest of the class has been passed already */
+	if (!cand || sched_rq_at(k, best)->ready_tsc <= k->policy_state[0])
+		return best;
+
+	/* the pass must leave every passed thread its hinted slack */
+	now = rdtsc();
+	th = sched_rq_at(k, cand);
+	if (margin < now + th->service_tsc +
+		     (uint64_t)POLICY_UNSEEN_US * cycles_per_us)
+		return best;
+
+	k->policy_state[0] = sched_rq_at(k, passed)->ready_tsc;
+	return cand;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -396,6 +516,7 @@ static const struct {
 	{ "prio",	choose_prio },
 	{ "rescue",	choose_rescue },
 	{ "passonce",	choose_passonce },
+	{ "afford",	choose_afford },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
