@@ -30,8 +30,8 @@ that compare policies interleave them repeat by repeat in one session (one
 `run.py` invocation), and the judge only compares rows from the same session.
 
 **Headline load** of a workload: the highest offered load at which fifo
-delivers at least 99% of it and fifo's overall median latency is at most 1.5×
-its median at the lightest level (not saturated). Decisions are made at the
+answers at least 99% of the requests the client sent and fifo's overall median
+latency is at most 1.5× its median at the lightest level (not saturated). Decisions are made at the
 headline load; the newest workload is swept at every level.
 
 ## 3. How two policies are compared
@@ -155,3 +155,8 @@ are summarized for the agents in `prompts/lessons-from-loop-1.md`.
 ## Changelog
 
 - 2.0 (2026-10-23): first version of the second loop.
+- 2.0.1 (2026-10-23, generation 3's gate): the headline rule's delivery
+  check is against the requests the client sent, not the offered load; the
+  client misses about 0.15% of its send slots at every load, which put w4's
+  lightest level at 98.99% of the offered load. The headline loads of w0–w3
+  are unchanged, so the epoch continues.

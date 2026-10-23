@@ -13,9 +13,9 @@ protocol.json's change_pct and the two ranges do not overlap; "worse" is the
 mirror image. The judge only compares rows from one session (one run.py
 invocation, in which the compared policies alternated), never across sessions.
 
-Headline load: the highest offered load at which fifo delivers at least 99% of
-it, the client's adherence is at least 99%, and fifo's overall median latency is
-at most 1.5x its median at the lightest level.
+Headline load: the highest offered load at which fifo answers at least 99% of
+the requests the client sent, the client's adherence is at least 99%, and
+fifo's overall median latency is at most 1.5x its median at the lightest level.
 """
 
 import argparse
@@ -112,10 +112,13 @@ def headline_load(rows, s):
         rs = rows_of(rows, s["id"], "fifo", l, "all")
         if not rs:
             break
-        resp, adh, p50 = (med(vals(rs, f)) for f in ("resp_rps", "adherence", "p50"))
+        resp, sent, adh, p50 = (med(vals(rs, f)) for f in ("resp_rps", "sent_rps",
+                                                              "adherence", "p50"))
         if base is None:
             base = p50
-        if resp >= 0.99 * l and adh >= 99 and p50 <= 1.5 * base:
+        # delivered against what the client sent: its own missed send slots
+        # (adherence about 99.85%) are not server saturation
+        if resp >= 0.99 * (sent or l) and adh >= 99 and p50 <= 1.5 * base:
             head = l
         else:
             break
