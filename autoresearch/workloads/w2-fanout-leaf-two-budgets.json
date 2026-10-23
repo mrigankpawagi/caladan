@@ -1,0 +1,96 @@
+{
+  "id": "w2",
+  "slug": "fanout-leaf-two-budgets",
+  "generation": 1,
+  "title": "A fan-out leaf serving the same fetch under two budgets",
+  "description": "A leaf server in a fan-out RPC tree serves one document fetch to two callers. The frontend calls it directly with most of the page budget left (due in 800 us). An aggregator sends the same fetch to every leaf and must wait for the slowest, so it passes down a tight remaining budget (due in 130 us). Both fetches do the same work (about 37 us) and both are latency-critical, so neither class nor length separates them; only the propagated budget does. The server also answers load-balancer health checks (high class, tiny, no deadline) and runs export steps (normal) and index-rebuild steps (low) chunked to a fetch's size. At 0.85-0.9 of capacity, first-come-first-served queueing alone pushes the fetches' p99 past the aggregator's budget while the frontend's budget stays comfortably met. The question for a policy is whether it can meet the aggregator's budget without raising the frontend reads' tail.",
+  "changed_from_previous": "First workload of the RPC fan-out leaf family. Keeps w1's server (8 cores, all guaranteed and spinning), client (16 connections, 3 s per level), constant work per kind, honest hints, no bursts and no antagonist. New: five kinds, two of which are the same 3000-iteration fetch under budgets of 800 and 130 us; load levels sized for this mix's capacity (about 225k req/s).",
+  "difficulty": {
+    "load": 0.85,
+    "tails": 0,
+    "classes": 3,
+    "burst": 0,
+    "inaccuracy": 0,
+    "antagonist": 0,
+    "conns": 16,
+    "kthreads": 8
+  },
+  "server": {
+    "kthreads": 8,
+    "guaranteed_kthreads": 8,
+    "spinning_kthreads": 8,
+    "fakework": "stridedmem:1024:7"
+  },
+  "client": {
+    "conns": 16,
+    "duration_s": 3,
+    "rampup_s": 1,
+    "discard_pct": 10
+  },
+  "kinds": [
+    {
+      "name": "read",
+      "service": "constant:3000",
+      "weight": 0.3,
+      "deadline_us": 800,
+      "hint": {
+        "class": "high",
+        "deadline_us": 800,
+        "service_us": 37
+      }
+    },
+    {
+      "name": "subreq",
+      "service": "constant:3000",
+      "weight": 0.55,
+      "deadline_us": 130,
+      "hint": {
+        "class": "high",
+        "deadline_us": 130,
+        "service_us": 37
+      }
+    },
+    {
+      "name": "health",
+      "service": "constant:100",
+      "weight": 0.05,
+      "deadline_us": 0,
+      "hint": {
+        "class": "high",
+        "service_us": 1
+      }
+    },
+    {
+      "name": "export",
+      "service": "constant:3000",
+      "weight": 0.06,
+      "deadline_us": 0,
+      "hint": {
+        "class": "normal",
+        "service_us": 37
+      }
+    },
+    {
+      "name": "rebuild",
+      "service": "constant:3000",
+      "weight": 0.04,
+      "deadline_us": 0,
+      "hint": {
+        "class": "low",
+        "service_us": 37
+      }
+    }
+  ],
+  "load_rps": [
+    56000,
+    112000,
+    157000,
+    180000,
+    191000,
+    202000
+  ],
+  "antagonist": null,
+  "notes": "Shape: a leaf of a fan-out RPC tree. RPC stacks propagate the caller's remaining budget to every downstream call (gRPC deadline propagation; Stubby), so one handler sees a loose budget when the frontend calls it directly and a tight one when a fan-out aggregator calls it, because the aggregator must wait for its slowest leaf and keep time for a hedged retry and the merge (Dean and Barroso, The Tail at Scale, CACM 2013). Load balancers probe every server with a health check that the server must never let starve but whose timeout is seconds (Envoy active health checks; gRPC health checking); bulk export and index rebuilds run as background work chunked into fetch-sized steps so that no step exceeds the runtime's 100 us time slice. Invented: the fetch's work (3000 iterations, about 37 us), the budgets 800 and 130 us (21x and 3.5x the handler's run time; the first loop's version used 800/300 with bursts; this cell has none, so the tight budget is set where plain queueing at 0.85-0.9 load misses it and a sub-request-first order would not), the weights (55% sub-requests because every user query reaches every leaf while direct reads are spread over the leaves; 5% health checks, generous so that the kind has enough samples for a p99; 6% export and 4% rebuild), and the health check's zero deadline (its real timeout is a thousand times the fetch budget and is left unset rather than scaled). Hints are what this server sets on its own: class by role (user-facing fetches and probes high, export normal, rebuild low), the caller's propagated budget as the deadline, and each handler's measured run time (3000 iterations at the in-server rate of about 82 per us is 37 us; 100 is 1 us). Capacity: mean work = 0.95 x 3000 + 0.05 x 100 = 2855 iterations. By calibration.json (99.6 iterations per us plus 4 us per request): 32.7 us per request, 8 / 32.7 us = 245k req/s. By the in-server cost from gen 0's program_cycles counters (w0 21.2 us per 1700-iteration request and w1 17.4 us per 1394 at saturation, so about 82 iterations per us plus about 1 us; the two models agree at 1700 iterations and this one is the measured one for longer requests): 35.5 us, 8 / 35.5 us = 225k req/s. Levels 56k/112k/157k/180k/191k/202k are 0.25/0.50/0.70/0.80/0.85/0.90 of 225k (0.23-0.82 of 245k). w1's 400k headline is 0.87 of its in-server capacity (459k) and w0 stayed within the median rule at 0.93 of its 377k, so both top levels should be inside the headline rule; the headline is expected at 202k. Expectations at 191k and 202k, p99 in us. fifo: every kind sees the same queue, so read, subreq, export and rebuild p99 about 150-180 at 191k and 210-260 at 202k (light-load fetch p99 about 48 plus a queue wait of about 3-5 mean service times, as w0 and w1 measured at 0.85-0.9), health about 35 lower; subreq p99 1.2-2.0x its deadline, read 0.2-0.3x; overall median about 48-55 against about 45 at 56k; 99.5% or more delivered. prio: HIGH kinds are 90% of the work, so skipping queued export and rebuild helps only modestly: read and subreq p99 about 100-130 at 191k and 135-175 at 202k (subreq 1.0-1.35x its deadline, read 0.2x), health about 30 lower; export p99 about 300-450 and rebuild about 450-800 at 202k, both still fully answered. The champion after gen 0 is fifo or prio and measures as above. A sub-request-first order within HIGH would bring subreq p99 to about 95-115 (0.75-0.9x) and raise read p99 by 20-40%; the no-regression rule allows at most 5%, so the open question is whether any order can spend the reads' slack without moving their p99. The health check carries no deadline, so a shorter-first pass that only speeds up probes cannot count as an improvement; its p99 still falls under the no-regression rule.",
+  "family": "rpc-fanout-leaf",
+  "cell": "base"
+}
