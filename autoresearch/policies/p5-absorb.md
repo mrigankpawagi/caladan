@@ -3,7 +3,7 @@
 - id: p5
 - config: absorb
 - generation: 4
-- status: candidate
+- status: rejected
 - builds_on: p3
 - changed_from_previous: passonce's first pass per thread is kept unconditional; a prefix whose head has already been passed may be passed again while the passers' run times absorbed in that episode, the new one included, stay within 25% of the least hinted run time among the passed threads; policy_state[1] carries the absorbed total, the mark in policy_state[0] is passonce's.
 - commit: 996f3e6
@@ -104,4 +104,26 @@ costs were never measurable (sched_share identical within 0.2 points).
 | w0 | req p99 at 300k, throughput at 450k | within the rule | p99 ≈ fifo's 71–73 ± noise; throughput within 1% | No hints: service and deadline zero, no candidate, index 0 = passonce = prio = fifo. |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 4 (judge.py accept, results/e1/gen4/), against
+passonce in one session per workload, 3 repeats, interleaved.
+
+| Workload | Kind | passonce p99 (range) | absorb p99 (range) | Verdict |
+|---|---|---|---|---|
+| w5 (400k) | lookup (×60 µs) | 54 (54–55), ×0.90 | 51 (51–52), ×0.85 | **better** (−5.6%, ranges apart) |
+| w5 | range (×100 µs) | 86 (83–86) | 83 (83–85) | same |
+| w5 | long | 127 (121–129) | 122 (118–125) | same |
+| w4 (240k) | read / append | 156 / 97 | 152 / 95 | same / same |
+| w4 | flush p99 / p99.9 | 203 / 401 (390–412) | 206 / 430 (423–454) | same / **p99.9 worse** (+7%) |
+| w4 | compact p99 / p99.9 | 239 / 481 (472–482) | 235 / 508 (504–515) | same / **p99.9 worse** (+6%) |
+| w3, w2, w1 | every kind | | | same |
+| w0 | req p99 at 300k, throughput at 450k | fifo 69 / 377.0k | 69 / 374.5k | ok |
+
+The expectation on w5 held: the lookups cleared the line, the range reads
+and the long requests did not move. The rejection comes from the p99.9 of
+w4's two background kinds. On w4 the two policies make identical decisions
+by arithmetic (a second append would cost a read 54% of its run time
+against the 25% cap, and the first pass and the mark update are
+passonce's), so those two p99.9 values, the 32nd and 97th slowest requests
+of each run, moved for a reason other than the policy. The rule stands as
+written; the judging of p99.9 on kinds without a deadline is on the list
+for the epoch review.

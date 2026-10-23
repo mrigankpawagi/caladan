@@ -6,10 +6,11 @@ Protocol 2.0, epoch 1 (DESIGN.md). Champion: **passonce**. Every number is the m
 
 | Workload | Headline (req/s) | Session | Result |
 |---|---|---|---|
-| w1 | 400000 | 20261023-030204 | HELD against afford |
-| w2 | 202000 | 20261023-030427 | HELD against afford |
-| w3 | 299000 | 20261023-030650 | HELD against afford |
-| w4 | 240000 | 20261023-030912 | HELD against afford |
+| w1 | 400000 | 20261023-035436 | HELD against absorb |
+| w2 | 202000 | 20261023-035658 | HELD against absorb |
+| w3 | 299000 | 20261023-035919 | HELD against absorb |
+| w4 | 240000 | 20261023-040141 | HELD against absorb |
+| w5 | 400000 | 20261023-040403 | IMPROVED ON by absorb |
 
 ## Plots
 
@@ -35,7 +36,7 @@ Headline load: 400,000 req/s.
 |---|---|---|---|---|
 | fifo | 20261023-002655 | 93.0 / 257 (x1.55) | 113 / 284 | 398527 |
 | prio | 20261023-021054 | 53.0 / 133 (x0.88) | 116 / 308 | 398656 |
-| passonce (champion) | 20261023-030204 | 52.0 / 132 (x0.87) | 115 / 295 | 398046 |
+| passonce (champion) | 20261023-035436 | 51.0 / 119 (x0.85) | 109 / 285 | 398785 |
 
 ![short p99 by offered load on w1](plots/w1-load.svg)
 
@@ -49,7 +50,7 @@ Headline load: 202,000 req/s.
 |---|---|---|---|---|---|---|---|
 | fifo | 20261023-003837 | 184 / 349 (x0.23) | 187 / 341 (x1.44) | 144 / 296 | 183 / 341 | 186 / 333 | 201056 |
 | prio | 20261023-021319 | 179 / 320 (x0.22) | 179 / 318 (x1.38) | 136 / 275 | 248 / 488 | 249 / 515 | 200676 |
-| passonce (champion) | 20261023-030427 | 177 / 322 (x0.22) | 179 / 332 (x1.38) | 143 / 301 | 250 / 500 | 256 / 552 | 201316 |
+| passonce (champion) | 20261023-035658 | 166 / 307 (x0.21) | 166 / 306 (x1.28) | 134 / 272 | 230 / 500 | 241 / 473 | 201228 |
 
 ![subreq p99 by offered load on w2](plots/w2-load.svg)
 
@@ -63,7 +64,7 @@ Headline load: 299,000 req/s.
 |---|---|---|---|---|---|---|
 | fifo | 20261023-010732 | 135 / 292 (x2.25) | 167 / 320 (x0.83) | 148 / 303 | 165 / 320 | 297647 |
 | prio | 20261023-021542 | 129 / 275 (x2.15) | 161 / 301 (x0.81) | 203 / 475 | 233 / 528 | 297580 |
-| passonce (champion) | 20261023-030650 | 104 / 236 (x1.73) | 167 / 303 (x0.83) | 213 / 463 | 243 / 518 | 298305 |
+| passonce (champion) | 20261023-035919 | 90.0 / 215 (x1.50) | 150 / 282 (x0.75) | 182 / 414 | 210 / 476 | 298243 |
 
 ![suggest p99 by offered load on w3](plots/w3-load.svg)
 
@@ -77,6 +78,20 @@ Headline load: 240,000 req/s.
 |---|---|---|---|---|---|---|
 | fifo | 20261023-013951 | 188 / 360 (x1.45) | 159 / 331 (x0.53) | 189 / 357 | 201 / 369 | 239325 |
 | prio | 20261023-013951 | 156 / 278 (x1.20) | 127 / 249 (x0.42) | 213 / 429 | 248 / 509 | 239028 |
-| passonce (champion) | 20261023-030912 | 164 / 286 (x1.26) | 104 / 223 (x0.35) | 213 / 412 | 259 / 511 | 239048 |
+| passonce (champion) | 20261023-040141 | 156 / 273 (x1.20) | 97.0 / 210 (x0.32) | 203 / 401 | 239 / 481 | 238764 |
 
 ![read p99 by offered load on w4](plots/w4-load.svg)
+
+## w5: Key-value lookups and range reads under two budgets, behind long requests
+
+[workloads/w5-lookups-ranges-two-budgets.json](workloads/w5-lookups-ranges-two-budgets.json). w1's key-value server with its second user-facing read. Point lookups (20% of requests, about 2 us) are HIGH and due in 60 us, as in w1. Range reads (30%), which return the first entries of a key's list and cost ten lookups' work (about 21 us), are HIGH too and due in 100 us: more time than a lookup, but not ten times more. The remaining 50% are w1's long NORMAL requests, still the bulk of the work. Under first-come-first-served both reads queue behind the long requests and miss their budgets at the top level. A priority order skips the long requests, but inside HIGH it runs the oldest thread first, so a lookup still waits behind the range reads that arrived before it, which now carry over a third of the work. The two HIGH kinds differ in both cost and budget: running lookups ahead of queued range reads saves each lookup about 21 us per range passed and costs each range read 2-3 us, and the budgets say when a range read can no longer afford it. The question for a policy is how much of the lookups' queueing inside HIGH it can recover without raising the range reads' tail.
+
+Headline load: 400,000 req/s.
+
+| Policy | Session | lookup p99 / p99.9 (x of 60 us) | range p99 / p99.9 (x of 100 us) | long p99 / p99.9 | Responses/s |
+|---|---|---|---|---|---|
+| fifo | 20261023-022546 | 99.0 / 272 (x1.65) | 119 / 289 (x1.19) | 121 / 292 | 398536 |
+| prio | 20261023-022546 | 70.0 / 176 (x1.17) | 89.0 / 208 (x0.89) | 146 / 367 | 398781 |
+| passonce (champion) | 20261023-040403 | 54.0 / 152 (x0.90) | 86.0 / 211 (x0.86) | 127 / 358 | 398504 |
+
+![lookup p99 by offered load on w5](plots/w5-load.svg)
