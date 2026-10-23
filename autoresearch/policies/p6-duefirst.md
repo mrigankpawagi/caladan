@@ -3,7 +3,7 @@
 - id: p6
 - config: duefirst
 - generation: 5
-- status: candidate
+- status: rejected
 - builds_on: p3
 - changed_from_previous: Where passonce would run the oldest thread of the chosen class, the earliest-due class-mate runs instead if every class-mate ahead of it has the same hinted run time and is due later (unbounded, no state); passonce's shortest-first pass, its once-bound and its mark are unchanged and keep precedence; a thread never passes a class-mate of a different or unknown run time by deadline.
 - commit: 749981a
@@ -92,4 +92,23 @@ sub-request p99 up by ~10-20 us against the pure deadline order.
 | w0 | req p99 at 300k, throughput at 450k | within the rule | ≈ fifo's 69–73 ± noise; within 1% | No hints: service and deadline zero, cost 0 from the head, no candidate: index 0 = passonce = prio = fifo. |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 5 (judge.py accept, results/e1/gen5/), against
+passonce in one session per workload, 3 repeats, interleaved. As intended,
+this measures the price of the deadline order among equal-cost threads.
+
+| Workload | Kind | passonce p99 (range) | duefirst p99 (range) | Verdict |
+|---|---|---|---|---|
+| w6 (202k, waves) | subreq (×130 µs) | 276 (275–278), ×2.12 | 229 (226–235), ×1.76 | **better (−17%)**, p99.9 better |
+| w6 | read (×800 µs) | 276 (275–278), ×0.34 | 348 (339–354), ×0.43 | worse (+26%), p99.9 worse |
+| w2 (202k) | subreq (×130 µs) | 172 (170–174), ×1.32 | 147 (140–149), ×1.13 | **better (−15%)**, p99.9 better |
+| w2 | read (×800 µs) | 171 (168–171), ×0.21 | 209 (193–213), ×0.26 | worse (+22%), p99.9 worse |
+| w6, w2 | health, export, rebuild | | | same |
+| w1, w3, w4, w5 | every kind | | | same (identical decisions by construction) |
+| w0 | req p99 at 300k, throughput at 450k | fifo 69 / 377.1k | 70 / 374.3k | ok |
+
+Every expectation held. The exchange rate is about 1:1.5: each µs taken
+off the sub-requests' p99 puts about 1.5 µs on the reads' p99, while the
+reads stay far inside their budget (×0.43 at worst against ×1.76 for the
+sub-requests). By the budgets this is the right trade; by the rule (no kind
+5% worse) it is a rejection. That conflict is the main question for the
+owner's review.

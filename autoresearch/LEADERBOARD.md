@@ -6,11 +6,12 @@ Protocol 2.0, epoch 1 (DESIGN.md). Champion: **passonce**. Every number is the m
 
 | Workload | Headline (req/s) | Session | Result |
 |---|---|---|---|
-| w1 | 400000 | 20261023-035436 | HELD against absorb |
-| w2 | 202000 | 20261023-035658 | HELD against absorb |
-| w3 | 299000 | 20261023-035919 | HELD against absorb |
-| w4 | 240000 | 20261023-040141 | HELD against absorb |
-| w5 | 400000 | 20261023-040403 | IMPROVED ON by absorb |
+| w1 | 400000 | 20261023-044335 | HELD against duefirst |
+| w2 | 202000 | 20261023-044556 | HELD against duefirst |
+| w3 | 299000 | 20261023-044815 | HELD against duefirst |
+| w4 | 240000 | 20261023-045038 | HELD against duefirst |
+| w5 | 400000 | 20261023-045258 | HELD against duefirst |
+| w6 | 202000 | 20261023-045517 | HELD against duefirst |
 
 ## Plots
 
@@ -36,7 +37,7 @@ Headline load: 400,000 req/s.
 |---|---|---|---|---|
 | fifo | 20261023-002655 | 93.0 / 257 (x1.55) | 113 / 284 | 398527 |
 | prio | 20261023-021054 | 53.0 / 133 (x0.88) | 116 / 308 | 398656 |
-| passonce (champion) | 20261023-035436 | 51.0 / 119 (x0.85) | 109 / 285 | 398785 |
+| passonce (champion) | 20261023-044335 | 52.0 / 128 (x0.87) | 121 / 308 | 398708 |
 
 ![short p99 by offered load on w1](plots/w1-load.svg)
 
@@ -50,7 +51,7 @@ Headline load: 202,000 req/s.
 |---|---|---|---|---|---|---|---|
 | fifo | 20261023-003837 | 184 / 349 (x0.23) | 187 / 341 (x1.44) | 144 / 296 | 183 / 341 | 186 / 333 | 201056 |
 | prio | 20261023-021319 | 179 / 320 (x0.22) | 179 / 318 (x1.38) | 136 / 275 | 248 / 488 | 249 / 515 | 200676 |
-| passonce (champion) | 20261023-035658 | 166 / 307 (x0.21) | 166 / 306 (x1.28) | 134 / 272 | 230 / 500 | 241 / 473 | 201228 |
+| passonce (champion) | 20261023-044556 | 171 / 312 (x0.21) | 172 / 312 (x1.32) | 136 / 286 | 233 / 487 | 238 / 517 | 200705 |
 
 ![subreq p99 by offered load on w2](plots/w2-load.svg)
 
@@ -64,7 +65,7 @@ Headline load: 299,000 req/s.
 |---|---|---|---|---|---|---|
 | fifo | 20261023-010732 | 135 / 292 (x2.25) | 167 / 320 (x0.83) | 148 / 303 | 165 / 320 | 297647 |
 | prio | 20261023-021542 | 129 / 275 (x2.15) | 161 / 301 (x0.81) | 203 / 475 | 233 / 528 | 297580 |
-| passonce (champion) | 20261023-035919 | 90.0 / 215 (x1.50) | 150 / 282 (x0.75) | 182 / 414 | 210 / 476 | 298243 |
+| passonce (champion) | 20261023-044815 | 92.0 / 230 (x1.53) | 155 / 304 (x0.78) | 187 / 434 | 214 / 496 | 298154 |
 
 ![suggest p99 by offered load on w3](plots/w3-load.svg)
 
@@ -78,7 +79,7 @@ Headline load: 240,000 req/s.
 |---|---|---|---|---|---|---|
 | fifo | 20261023-013951 | 188 / 360 (x1.45) | 159 / 331 (x0.53) | 189 / 357 | 201 / 369 | 239325 |
 | prio | 20261023-013951 | 156 / 278 (x1.20) | 127 / 249 (x0.42) | 213 / 429 | 248 / 509 | 239028 |
-| passonce (champion) | 20261023-040141 | 156 / 273 (x1.20) | 97.0 / 210 (x0.32) | 203 / 401 | 239 / 481 | 238764 |
+| passonce (champion) | 20261023-045038 | 154 / 285 (x1.18) | 97.0 / 215 (x0.32) | 209 / 427 | 243 / 500 | 238738 |
 
 ![read p99 by offered load on w4](plots/w4-load.svg)
 
@@ -92,6 +93,20 @@ Headline load: 400,000 req/s.
 |---|---|---|---|---|---|
 | fifo | 20261023-022546 | 99.0 / 272 (x1.65) | 119 / 289 (x1.19) | 121 / 292 | 398536 |
 | prio | 20261023-022546 | 70.0 / 176 (x1.17) | 89.0 / 208 (x0.89) | 146 / 367 | 398781 |
-| passonce (champion) | 20261023-040403 | 54.0 / 152 (x0.90) | 86.0 / 211 (x0.86) | 127 / 358 | 398504 |
+| passonce (champion) | 20261023-045258 | 54.0 / 158 (x0.90) | 84.0 / 206 (x0.84) | 123 / 360 | 398826 |
 
 ![lookup p99 by offered load on w5](plots/w5-load.svg)
+
+## w6: A fan-out leaf serving the same fetch under two budgets, with requests arriving in 1 ms waves
+
+[workloads/w6-fanout-leaf-short-bursts.json](workloads/w6-fanout-leaf-short-bursts.json). w2's leaf server in a fan-out RPC tree, now with bursty arrivals. One document fetch (about 37 us) is served to two callers: the frontend, which calls it directly with most of the page budget left (due in 800 us), and an aggregator that sends the same fetch to every leaf and must wait for the slowest, so it passes down a tight remaining budget (due in 130 us). Both are latency-critical and cost the same, so only the propagated budget separates them; health checks (high, tiny, no deadline), export steps (normal) and index-rebuild steps (low) share the server. The traffic now comes in waves: for the first quarter of every millisecond the client sends at 1.6 times the average rate and at 0.8 times for the rest, so at the two busiest levels every core ends each wave with about three fetches queued and spends roughly half of every millisecond working off a backlog. Under first-come-first-served a sub-request that arrives late in a wave waits behind that backlog and misses its budget by more than twice; the frontend reads wait exactly as long but keep three fifths of theirs. The order inside the HIGH class is now a decision with a price: running the aggregator's fetches ahead of queued frontend fetches moves each wave's backlog from the sub-requests' tail onto the reads' tail, one fetch at a time, and the no-regression rule allows the reads' tail to move by far less than one fetch. The question for a policy is how much of the sub-requests' burst penalty it can recover inside that allowance.
+
+Headline load: 202,000 req/s.
+
+| Policy | Session | read p99 / p99.9 (x of 800 us) | subreq p99 / p99.9 (x of 130 us) | health p99 / p99.9 | export p99 / p99.9 | rebuild p99 / p99.9 | Responses/s |
+|---|---|---|---|---|---|---|---|
+| fifo | 20261023-024717 | 296 / 429 (x0.37) | 296 / 425 (x2.28) | 254 / 384 | 293 / 419 | 299 / 429 | 200937 |
+| prio | 20261023-024717 | 280 / 395 (x0.35) | 279 / 396 (x2.15) | 245 / 370 | 419 / 600 | 433 / 609 | 201107 |
+| passonce (champion) | 20261023-045517 | 276 / 401 (x0.34) | 276 / 400 (x2.12) | 237 / 358 | 415 / 610 | 422 / 642 | 201153 |
+
+![subreq p99 by offered load on w6](plots/w6-load.svg)
