@@ -3,7 +3,7 @@
 - id: p2
 - config: rescue
 - generation: 1
-- status: candidate
+- status: rejected
 - builds_on: p1
 - changed_from_previous: Inside the class prio chose, a younger thread due earlier than everything of its class ahead of it runs first when the hints say it would otherwise miss its deadline, but only while the oldest thread has waited less than the run time it would be asked to absorb.
 - commit: af7c648
@@ -62,4 +62,22 @@ thread (n ≤ 32); no state, no learning. Export and rebuild are untouched.
 | w0 | req p99, throughput | same as fifo within the rule | — | No deadlines: prio's index after prio's scan plus one field read per thread. |
 
 ## Results
-(filled after evaluation)
+Rejected in generation 1 (judge.py accept, results/e1/gen1/), against prio in
+one session per workload, 3 repeats, interleaved.
+
+| Workload | Kind | prio p99 (range) | rescue p99 (range) | Verdict |
+|---|---|---|---|---|
+| w2 (202k) | subreq (×130 µs) | 175 (175–180), ×1.35 | 181 (180–186), ×1.39 | same |
+| w2 | read (×800 µs) | 175 (174–180) | 184 (184–186) | worse (+5.1%, ranges apart) |
+| w2 | health | 135 (134–143) | 141 (141–155) | same |
+| w2 | export | 241 (240–246) | 262 (252–269) | worse (+8.7%) |
+| w2 | rebuild | 253 (241–255) | 266 (262–274) | worse (+5.1%) |
+| w1 (400k) | short / long | 52 / 116 | 53 / 122 | same / same |
+| w0 | req p99 at 300k, throughput at 450k | fifo 72 / 373.8k | 71 / 372.0k | ok |
+
+The expectation failed on both sides: the pass did not reach the
+sub-requests' tail (their p99 is within noise of prio's, so the rescuable
+fresh-queue cases are too few at the p99), and it still cost the reads 5%
+and the background kinds 5–9%, more than the "body of the distribution"
+argument allowed. A pass that fires only in freshly formed queues moves the
+wrong sub-requests: the tail ones sit in persistent queues.

@@ -6,8 +6,8 @@ Protocol 2.0, epoch 1 (DESIGN.md). Champion: **prio**. Every number is the media
 
 | Workload | Headline (req/s) | Session | Result |
 |---|---|---|---|
-| w1 | 400000 | 20261023-002655 | HELD against fifo |
-| w2 | 202000 | 20261023-003837 | HELD against fifo |
+| w1 | 400000 | 20261023-013009 | HELD against rescue |
+| w2 | 202000 | 20261023-013237 | HELD against rescue |
 
 ## Plots
 
@@ -32,7 +32,7 @@ Headline load: 400,000 req/s.
 | Policy | Session | short p99 / p99.9 (x of 60 us) | long p99 / p99.9 | Responses/s |
 |---|---|---|---|---|
 | fifo | 20261023-002655 | 93.0 / 257 (x1.55) | 113 / 284 | 398527 |
-| prio (champion) | 20261023-002655 | 52.0 / 121 (x0.87) | 117 / 280 | 398477 |
+| prio (champion) | 20261023-013009 | 52.0 / 131 (x0.87) | 116 / 294 | 397969 |
 
 ![short p99 by offered load on w1](plots/w1-load.svg)
 
@@ -45,6 +45,6 @@ Headline load: 202,000 req/s.
 | Policy | Session | read p99 / p99.9 (x of 800 us) | subreq p99 / p99.9 (x of 130 us) | health p99 / p99.9 | export p99 / p99.9 | rebuild p99 / p99.9 | Responses/s |
 |---|---|---|---|---|---|---|---|
 | fifo | 20261023-003837 | 184 / 349 (x0.23) | 187 / 341 (x1.44) | 144 / 296 | 183 / 341 | 186 / 333 | 201056 |
-| prio (champion) | 20261023-003837 | 179 / 327 (x0.22) | 176 / 326 (x1.35) | 139 / 284 | 248 / 545 | 253 / 535 | 200771 |
+| prio (champion) | 20261023-013237 | 175 / 339 (x0.22) | 175 / 338 (x1.35) | 135 / 293 | 241 / 555 | 253 / 540 | 201325 |
 
 ![subreq p99 by offered load on w2](plots/w2-load.svg)
