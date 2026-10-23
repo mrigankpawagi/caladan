@@ -1,6 +1,6 @@
 {
-  "generation": 0,
-  "measured_on": "2026-10-20, two CloudLab xl170 nodes (Intel E5-2640v4, ConnectX-4 Lx), Ubuntu 22.04, code 5786466",
+  "generation": "0 of the second loop (protocol 2.0)",
+  "measured_on": "2026-10-23, two CloudLab xl170 nodes (Intel E5-2640v4, ConnectX-4 Lx), Ubuntu 22.04, code 68cf2c1",
   "fakework": {
     "stridedmem:1024:7": {
       "iterations_per_us": 99.6,
@@ -20,9 +20,16 @@
     "w1_8_kthreads_13.9us_mean": "saturates between 400k and 450k req/s"
   },
   "noise_band": {
-    "score_relative_half_range": 0.06,
-    "evidence": "Score at the headline load, two repeats: w1 fifo 90 / 101 us, w1 prio 52 / 53, w0 fifo 173 / 184, w0 stock 163 / 175.",
-    "rule": "Differences under 6% are noise. The 10% acceptance threshold for new policies stays. If two repeats differ by more than 15%, run a third."
+    "rule": "3 repeats; a difference counts when the medians differ by more than 5% and the two ranges do not overlap (DESIGN.md section 3)",
+    "evidence_3_repeats": {
+      "w1 fifo short p99 at 400k": "93 (92-98)",
+      "w1 prio short p99 at 400k": "52 (52-53)",
+      "w1 fifo long p99 at 400k": "113 (111-116)",
+      "w0 fifo p99 at 300k": "71 (70-72)",
+      "w0 fifo p99 at 350k": "192 (189-199)",
+      "w2 fifo subreq p99 at 202k": "187 (182-195)"
+    },
+    "note": "Ranges are 1-6% of the median at and below the headline load; above it (w1 at 450k) they widen to 25% or more."
   },
   "client": {
     "verified_up_to_rps": 450000,
@@ -58,5 +65,12 @@
     "consequence": "All policies share it, so policy comparisons are fair; experiments keep the counters on.",
     "evidence": "results/gen0/notes.md, addendum; runs w0__fifo__*__{hints r3-r4, hints-nostats r1-r2, stock r3-r4}, code 810cfbf",
     "open_item": "Possible fix: inlined fast path in sched_pop_next when only one thread is queued."
+  },
+  "hint_build_overhead": {
+    "w0 fifo p99 (us), stock vs hint build with per-pick statistics vs without": {
+      "300k (0.8 of capacity)": "67 (67-69) vs 71 (70-72) vs 71 (70-71)",
+      "350k (0.93)": "163 (154-164) vs 192 (189-199) vs 179 (177-199)"
+    },
+    "note": "The hint machinery outside the policy region (per-packet classifier call, hint fields, policy table) costs about 6% of p99 at 0.8 load and 10-18% near saturation on a single-kind workload; per-pick statistics add a few percent more only near saturation. Reported to the owner in generation 0; not changed, since it lies outside the policy region."
   }
 }
