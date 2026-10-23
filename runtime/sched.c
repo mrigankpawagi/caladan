@@ -619,6 +619,103 @@ static uint32_t choose_absorb(struct kthread *k, uint32_t n)
 	return cand;
 }
 
+/*
+ * p6 "duefirst": passonce's class order and shortest-first pass, plus the
+ * deadline order among class-mates of equal hinted run time.
+ *
+ * Principle: where passonce would run the oldest thread of the chosen class,
+ * a younger class-mate runs instead if every class-mate ahead of it has the
+ * same hinted run time and is due later than it. Two threads that cost the
+ * same can exchange turns at no cost to anyone else: every other thread in
+ * the queue waits for the same work either way, so the exchange moves
+ * exactly one run time of latency from the thread with more time to spare
+ * to the one with less, which is the order the deadline hints name. The
+ * exchange needs no ration and no constant, and it is not bounded once:
+ * the earlier-due thread takes the turn every time it is offered.
+ *
+ * Where costs differ the exchange is not neutral, so the deadline alone
+ * never decides it: the shorter thread passing the longer lowers the total
+ * latency and passonce admits it, once per passed thread, when the passer
+ * carries a deadline; the longer passing the shorter raises it and is never
+ * admitted, whatever the deadlines say. passonce's pass therefore keeps
+ * precedence, and a thread never passes a class-mate of a different (or
+ * unknown) hinted run time by deadline. That keeps every thread of another
+ * cost exactly where prio put it: nothing younger can jump it, so its wait
+ * is the work of the threads older than it, as under prio. The two passes
+ * do not compose: a thread passes a prefix made entirely of equal-cost
+ * class-mates (by deadline) or entirely of longer ones (passonce), never a
+ * mixed one.
+ *
+ * The pick is passonce's wherever no two class-mates of equal hinted run
+ * time carry different deadlines: one kind per hinted run time (w3, w4, w5,
+ * w1) or no hints (w0). On w2 and w6 the two fetch kinds share one run time
+ * and differ only in budget, so the order inside HIGH becomes the deadline
+ * order, with health checks (another run time, no deadline) left in place.
+ * passonce's mark in policy_state[0] is written only by its pass; the
+ * deadline exchange writes no state and reads no clock. Per pick: passonce's
+ * single scan plus one compare of the hinted run time against the head's
+ * and, while they agree, one deadline compare (same cache line).
+ */
+static uint32_t choose_duefirst(struct kthread *k, uint32_t n)
+{
+	uint32_t i, best = 0, cand = 0, passed = 0, last = 0, due = 0;
+	thread_t *th = sched_rq_at(k, 0);
+	uint8_t rank = prio_rank[th->prio_class];
+	/* the shortest hinted run time seen in the chosen class; unknown = longest */
+	uint64_t shortest = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+	/* the hinted run time shared by every class-mate scanned so far (0 once
+	 * one of another or unknown run time appears: the equal-cost prefix is
+	 * closed) and the earliest deadline among them; none = latest */
+	uint64_t cost = th->service_tsc;
+	uint64_t soonest = th->deadline_tsc ? th->deadline_tsc : ~(uint64_t)0;
+
+	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
+		uint8_t r;
+		uint64_t s;
+
+		th = sched_rq_at(k, i);
+		r = prio_rank[th->prio_class];
+		if (r < rank)
+			continue;	/* a lower class: prio runs it later anyway */
+		if (r > rank) {
+			/* a higher class: prio's choice moves here, nothing passes it yet */
+			rank = r;
+			best = i;
+			cand = 0;
+			last = i;
+			due = i;
+			shortest = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+			cost = th->service_tsc;
+			soonest = th->deadline_tsc ? th->deadline_tsc : ~(uint64_t)0;
+			continue;
+		}
+		s = th->service_tsc ? th->service_tsc : ~(uint64_t)0;
+		if (th->deadline_tsc && s < shortest) {
+			/* shorter than every class-mate ahead: passonce's candidate */
+			cand = i;
+			passed = last;	/* the youngest thread it would pass */
+		}
+		if (s < shortest)
+			shortest = s;
+		if (th->service_tsc != cost) {
+			cost = 0;	/* another run time: the equal-cost prefix ends */
+		} else if (cost && th->deadline_tsc && th->deadline_tsc < soonest) {
+			/* costs the same as every class-mate ahead, due before all of them */
+			soonest = th->deadline_tsc;
+			due = i;
+		}
+		last = i;
+	}
+
+	/* passonce's pass, unless the oldest of the class has been passed already */
+	if (cand && sched_rq_at(k, best)->ready_tsc > k->policy_state[0]) {
+		k->policy_state[0] = sched_rq_at(k, passed)->ready_tsc;
+		return cand;
+	}
+	/* otherwise the oldest thread's turn, taken by the earliest due of its cost */
+	return due;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -629,6 +726,7 @@ static const struct {
 	{ "passonce",	choose_passonce },
 	{ "afford",	choose_afford },
 	{ "absorb",	choose_absorb },
+	{ "duefirst",	choose_duefirst },
 };
 
 /* ===== END SCHEDULING POLICY REGION ======================================== */
