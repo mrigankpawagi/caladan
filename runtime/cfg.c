@@ -235,6 +235,12 @@ static int parse_runtime_sched_policy(const char *name, const char *val)
 	return 0;
 }
 
+static int parse_runtime_sched_stats(const char *name, const char *val)
+{
+	sched_stats_enabled = !!atoi(val);
+	return 0;
+}
+
 static int parse_mac_address(const char *name, const char *val)
 {
 	log_warn("specifying mac address is deprecated.");
@@ -391,6 +397,7 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "runtime_qdelay_us", parse_runtime_qdelay_us, false },
 	{ "runtime_quantum_us", parse_runtime_quantum_us, false },
 	{ "runtime_sched_policy", parse_runtime_sched_policy, false },
+	{ "runtime_sched_stats", parse_runtime_sched_stats, false },
 	{ "static_arp", parse_static_arp_entry, false },
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },
