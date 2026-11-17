@@ -1,0 +1,6 @@
+{"id": "w3-deadlines",
+ "title": "Equal work, two deadlines, same class",
+ "server_kthreads": 4, "conns": 64,
+ "kinds": [{"name": "tight", "service_us": 10, "weight": 0.2, "deadline_us": 50, "hint": "high:50:10"},
+           {"name": "loose", "service_us": 10, "weight": 0.8, "deadline_us": 500, "hint": "high:500:10"}],
+ "rho": [0.5, 0.7, 0.8, 0.9]}

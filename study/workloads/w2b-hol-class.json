@@ -1,0 +1,6 @@
+{"id": "w2b-hol-class",
+ "title": "Head-of-line blocking, hinted by class only",
+ "server_kthreads": 4, "conns": 64,
+ "kinds": [{"name": "short", "service_us": 5, "weight": 0.8, "hint": "high"},
+           {"name": "long", "service_us": 50, "weight": 0.2, "hint": "normal"}],
+ "rho": [0.5, 0.7, 0.8, 0.9]}

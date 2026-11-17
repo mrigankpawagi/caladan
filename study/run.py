@@ -84,9 +84,18 @@ def ensure_build(cfg, server, client, sha, build):
                                              cfg["cargo_env"], want, repo), timeout=1800)
     if client.run("cat %s/%s.build 2>/dev/null" % (repo, CLIENT_BIN), check=False).strip() != want:
         log("copying loadgen to client")
-        copy_between(server, "%s/apps/loadgen/target/release/loadgen" % repo,
-                     client, "%s/%s" % (repo, CLIENT_BIN))
+        if server.ssh == client.ssh:
+            client.run("cp %s/apps/loadgen/target/release/loadgen %s/%s" % (repo, repo, CLIENT_BIN))
+        else:
+            copy_between(server, "%s/apps/loadgen/target/release/loadgen" % repo,
+                         client, "%s/%s" % (repo, CLIENT_BIN))
         client.run("echo '%s' > %s/%s.build" % (want, repo, CLIENT_BIN))
+
+
+def hosts(server, client):
+    """The distinct machines: one if the client shares the server's node
+    (the IOKernel then loops packets between the two runtimes)."""
+    return [server] if server.ssh == client.ssh else [server, client]
 
 
 def start_iokernel(node, cfg):
@@ -132,7 +141,7 @@ def load_levels(spec, cal):
 
 def setup(cfg, server, client, spec, policy, mode, stats, cal):
     repo = cfg["repo"]
-    parallel(lambda n: start_iokernel(n, cfg), [server, client])
+    parallel(lambda n: start_iokernel(n, cfg), hosts(server, client))
     server.put(runtime_config(cfg["server"]["ip"], cfg, spec["server_kthreads"], policy, stats),
                "/tmp/study_server.config")
     client.put(runtime_config(cfg["client"]["ip"], cfg, cfg["client_kthreads"]),
@@ -210,7 +219,7 @@ def experiment(args, cfg, server, client, spec, policy, repeat, out_dir, cal):
         with open(os.path.join(raw_dir, "error.txt"), "w") as f:
             f.write(str(e))
     finally:
-        parallel(lambda n: n.run(KILL, timeout=60, check=False), [server, client])
+        parallel(lambda n: n.run(KILL, timeout=60, check=False), hosts(server, client))
     append_csv(os.path.join(out_dir, "summary.csv"), summary)
     append_csv(os.path.join(out_dir, "counters.csv"), counters)
 

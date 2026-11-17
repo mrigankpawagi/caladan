@@ -1,0 +1,7 @@
+{"id": "w4-wrong-hints",
+ "title": "W2a with 10% of long requests claiming to be short",
+ "server_kthreads": 4, "conns": 64,
+ "kinds": [{"name": "short", "service_us": 5, "weight": 0.8, "hint": "normal:0:5"},
+           {"name": "long", "service_us": 50, "weight": 0.18, "hint": "normal:0:50"},
+           {"name": "liar", "service_us": 50, "weight": 0.02, "hint": "normal:0:5"}],
+ "rho": [0.5, 0.7, 0.8, 0.9]}

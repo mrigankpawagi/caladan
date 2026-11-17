@@ -1,0 +1,6 @@
+{"id": "w2a-hol-service",
+ "title": "Head-of-line blocking, hinted by service time only",
+ "server_kthreads": 4, "conns": 64,
+ "kinds": [{"name": "short", "service_us": 5, "weight": 0.8, "hint": "normal:0:5"},
+           {"name": "long", "service_us": 50, "weight": 0.2, "hint": "normal:0:50"}],
+ "rho": [0.5, 0.7, 0.8, 0.9]}
