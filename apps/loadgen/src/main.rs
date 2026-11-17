@@ -342,6 +342,15 @@ impl GroupResult {
     }
 }
 
+/// Mean latency (us) of the answered requests in `buckets`.
+fn latency_mean(buckets: &BTreeMap<u64, usize>) -> f64 {
+    let n: usize = buckets.values().sum();
+    if n == 0 {
+        return 0.0;
+    }
+    buckets.iter().map(|(k, v)| *k as f64 * *v as f64).sum::<f64>() / n as f64
+}
+
 /// Latency percentile `p` over `buckets`, where `sent` requests were issued
 /// and `responses` answered; unanswered requests count as infinitely slow.
 fn latency_percentile(buckets: &BTreeMap<u64, usize>, sent: usize, responses: usize, p: f32) -> f32 {
@@ -867,6 +876,20 @@ fn process_result_final(
                 first_tsc
             );
         }
+    }
+
+    if sched.groups.grouped() {
+        let mut merged: BTreeMap<String, GroupResult> = BTreeMap::new();
+        for res in &results {
+            for (k, g) in &res.groups {
+                merged.entry(k.clone()).or_default().merge(g);
+            }
+        }
+        let mut line = format!("Means: all={:.2}", latency_mean(&buckets));
+        for (key, g) in merged.iter().filter(|(k, _)| sched.groups.shows(k)) {
+            line += &format!(" {}={:.2}", key, latency_mean(&g.latencies));
+        }
+        println!("{}", line);
     }
 
     if let Some(deltas) = rt_stat_deltas {

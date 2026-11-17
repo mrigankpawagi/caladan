@@ -2,6 +2,7 @@
 
 ROW_FIELDS = ["group", "dist", "sent_rps", "resp_rps", "dropped", "adherence",
               "p0", "p50", "p90", "p99", "p999", "p9999", "max", "deadline_met"]
+MEAN_FIELD = "mean"  # mean latency of answered requests (the Means: line)
 
 
 def _num(v):
@@ -20,7 +21,7 @@ def parse_level(text):
     ("all", "class:<c>", "kind:<k>"). rtstats: server counter deltas over the
     measured interval. flags: client saturation and failures.
     """
-    rows, rtstats = [], {}
+    rows, rtstats, means = [], {}, {}
     flags = {"client_saturated": False, "failed": False}
     for line in text.splitlines():
         if line.startswith("RtStats: "):
@@ -30,6 +31,10 @@ def parse_level(text):
                     rtstats[k] = int(v)
                 except ValueError:
                     pass
+        elif line.startswith("Means: "):
+            for kv in line[len("Means: "):].split():
+                k, _, v = kv.partition("=")
+                means[k] = float(v)
         elif line.startswith(("all, ", "class:", "kind:")):
             parts = [p.strip() for p in line.split(",")]
             if len(parts) < 14:
@@ -41,6 +46,8 @@ def parse_level(text):
             rows.append(row)
         elif "Aborting: schedule adherance is low" in line:
             flags["client_saturated"] = True
+    for r in rows:
+        r["mean"] = means.get(r["group"])
     if not any(r["group"] == "all" for r in rows):
         flags["failed"] = True
     return rows, rtstats, flags

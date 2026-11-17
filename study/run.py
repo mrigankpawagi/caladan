@@ -170,7 +170,7 @@ def run_level(cfg, client, spec, rps, cal):
 
 
 def keep_lines(text):
-    keep = ("Group,", "all,", "class:", "kind:", "RtStats:", "WARNING", "Aborting",
+    keep = ("Group,", "all,", "class:", "kind:", "RtStats:", "Means:", "WARNING", "Aborting",
             "CLIENT_EXIT=", "thread '")
     return "\n".join(l for l in text.splitlines() if l.startswith(keep)) + "\n"
 
@@ -203,7 +203,7 @@ def experiment(args, cfg, server, client, spec, policy, repeat, out_dir, cal):
                     "build": args.build, "stats": args.stats, "repeat": repeat,
                     "load_rps": rps, "rho": rho if rho is not None else ""}
             for r in rows:
-                summary.append(dict(base, **{f: r.get(f) for f in parse.ROW_FIELDS},
+                summary.append(dict(base, **{f: r.get(f) for f in parse.ROW_FIELDS + ["mean"]},
                                     client_saturated=int(flags["client_saturated"]),
                                     failed=int(flags["failed"])))
             if rt:
