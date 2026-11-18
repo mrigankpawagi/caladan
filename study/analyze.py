@@ -33,13 +33,15 @@ from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLICY_ORDER = ["stock", "fifo (no hints)", "fifo", "prio", "sjf", "edf", "hinted",
-                "prio+steal", "hinted+steal"]
+                "prio+steal", "hinted+steal", "fifo+q25", "prio+q25", "fifo+q10", "prio+q10"]
 # reference categorical palette, fixed order; fifo is the neutral baseline
 COLORS = {"stock": "#52514e", "fifo (no hints)": "#eda100", "fifo": "#898781",
           "prio": "#2a78d6", "sjf": "#eb6834", "edf": "#1baf7a", "hinted": "#6250d6",
-          "prio+steal": "#e87ba4", "hinted+steal": "#008300"}
+          "prio+steal": "#e87ba4", "hinted+steal": "#008300",
+          "fifo+q25": "#c3c2b7", "prio+q25": "#86b6ef", "fifo+q10": "#52514e", "prio+q10": "#184f95"}
 MARKERS = {"stock": "*", "fifo (no hints)": "h", "fifo": "o", "prio": "s", "sjf": "^",
-           "edf": "D", "hinted": "P", "prio+steal": "v", "hinted+steal": "X"}
+           "edf": "D", "hinted": "P", "prio+steal": "v", "hinted+steal": "X",
+           "fifo+q25": "o", "prio+q25": "s", "fifo+q10": "o", "prio+q10": "s"}
 
 
 def erlang_c(k, a):
