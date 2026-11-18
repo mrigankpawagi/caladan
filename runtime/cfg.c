@@ -248,6 +248,12 @@ static int parse_runtime_sched_steal(const char *name, const char *val)
 	return 0;
 }
 
+static int parse_runtime_sched_softirq_first(const char *name, const char *val)
+{
+	sched_softirq_first = !!atoi(val);
+	return 0;
+}
+
 static int parse_runtime_sched_stats(const char *name, const char *val)
 {
 	sched_stats_enabled = !!atoi(val);
@@ -412,6 +418,7 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "runtime_sched_policy", parse_runtime_sched_policy, false },
 	{ "runtime_sched_stats", parse_runtime_sched_stats, false },
 	{ "runtime_sched_steal", parse_runtime_sched_steal, false },
+	{ "runtime_sched_softirq_first", parse_runtime_sched_softirq_first, false },
 	{ "static_arp", parse_static_arp_entry, false },
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },

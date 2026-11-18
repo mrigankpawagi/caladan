@@ -179,6 +179,8 @@ static void drain_overflow(struct kthread *l)
 bool sched_stats_enabled;
 /* steal the thread the victim's policy would run next (runtime_sched_steal) */
 bool sched_steal_by_policy;
+/* process arrived packets before the runqueue (runtime_sched_softirq_first) */
+bool sched_softirq_first;
 
 #ifdef CONFIG_THREAD_HINTS
 #include "sched_policy.h"
@@ -554,6 +556,17 @@ static __noinline void schedule(void)
 	/* move overflow tasks into the runqueue */
 	if (unlikely(!list_empty(&l->rq_overflow)))
 		drain_overflow(l);
+
+	/*
+	 * With runtime_sched_softirq_first, turn arrived packets into threads
+	 * before picking, so the policy sees new requests and their hints.
+	 * Otherwise packets wait until the runqueue is empty (or the 50 us
+	 * watchdog fires), behind threads of every class.
+	 */
+	if (sched_softirq_first && softirq_run_locked(l)) {
+		STAT(SOFTIRQS_LOCAL)++;
+		goto done;
+	}
 
 	/* first try the local runqueue */
 	if (l->rq_head != l->rq_tail)
