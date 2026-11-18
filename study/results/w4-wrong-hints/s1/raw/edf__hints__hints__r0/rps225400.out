@@ -1,0 +1,10 @@
+Group, Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, DeadlineMet, Start, StartTsc, CPU Used (%)
+all, mix, 223867, 223867, 0, 99.80, 6.0, 14.0, 61.0, 125.0, 202.0, 311.0, 401.0, -, 1794961530, 63397089651918783, 399.22%
+class:normal, mix, 223867, 223867, 0, 99.80, 6.0, 14.0, 61.0, 125.0, 202.0, 311.0, 401.0, -, 1794961530, 63397089651918783
+kind:liar, mix, 4533, 4533, 0, 99.80, 49.0, 53.0, 90.0, 156.0, 237.0, 314.0, 348.0, -, 1794961530, 63397089651918783
+kind:long, mix, 40514, 40514, 0, 99.80, 49.0, 53.0, 90.0, 151.0, 244.0, 334.0, 401.0, -, 1794961530, 63397089651918783
+kind:short, mix, 178818, 178818, 0, 99.80, 6.0, 10.0, 47.0, 109.0, 186.0, 288.0, 364.0, -, 1794961530, 63397089651918783
+Means: all=28.57 class:normal=28.57 kind:liar=62.79 kind:long=62.66 kind:short=19.97
+RtStats: core_migrations=0 cycles_per_us=2394 deadline_miss_at_pick=0 drops=0 flow_steering_cycles=0 hinted_overflow=0 hinted_stolen=0 local_runs=1397337 local_wakes=1566825 mag_alloc=0 mag_free=0 parks=0 pick_calls=209887 pick_cycles=8989287 pick_deadline=0 pick_high=0 pick_inversions=0 pick_low=0 pick_normal=900083 pick_scanned=2582122 pick_softirq=1251955 pool_alloc=4815 pool_free=4820 preemptions=52 program_cycles=30636068547 remote_runs=754692 remote_wakes=585176 reschedules=2152029 rq_overflow=0 rx_bytes=66570953 rx_hw_drop=0 rx_packets=899608 rx_tcp_in_order=1 rx_tcp_out_of_order=0 rx_tcp_text_cycles=0 sched_cycles=7597905663 softirqs_local=820816 softirqs_stolen=430919 threads_stolen=0 tsc=9577085250 tx_bytes=66574520 tx_packets=899644 txq_overflow=0 wait_cycles_high=0 wait_cycles_low=0 wait_cycles_normal=10452796395 wait_cycles_softirq=1919837124
+WARNING: Schedule adherance is low - the client may be saturating.
+CLIENT_EXIT=0

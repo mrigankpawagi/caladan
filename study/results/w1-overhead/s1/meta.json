@@ -1,0 +1,81 @@
+{
+ "runs": [
+  {
+   "code_sha": "55c2647192b0252621111c2d36d34a090a231820",
+   "mode": "hints",
+   "build": "hints",
+   "stats": "off",
+   "policies": [
+    "fifo",
+    "prio",
+    "sjf",
+    "edf"
+   ],
+   "repeats": 3,
+   "started": "2026-11-17T19:32:25",
+   "finished": "2026-11-17T19:50:01"
+  },
+  {
+   "code_sha": "55c2647192b0252621111c2d36d34a090a231820",
+   "mode": "ignore",
+   "build": "hints",
+   "stats": "off",
+   "policies": [
+    "fifo"
+   ],
+   "repeats": 3,
+   "started": "2026-11-17T19:50:03",
+   "finished": "2026-11-17T19:54:24"
+  },
+  {
+   "code_sha": "55c2647192b0252621111c2d36d34a090a231820",
+   "mode": "ignore",
+   "build": "stock",
+   "stats": "off",
+   "policies": [
+    "fifo"
+   ],
+   "repeats": 3,
+   "started": "2026-11-17T19:54:51",
+   "finished": "2026-11-17T19:59:12"
+  }
+ ],
+ "workload": {
+  "id": "w1-overhead",
+  "title": "Overhead: 1 us requests on 2 cores, pushed to saturation",
+  "server_kthreads": 2,
+  "conns": 64,
+  "kinds": [
+   {
+    "name": "tiny",
+    "service_us": 1,
+    "weight": 1,
+    "hint": "high:1000:1"
+   }
+  ],
+  "rps": [
+   400000,
+   800000,
+   1000000,
+   1200000,
+   1300000,
+   1400000,
+   1500000,
+   1600000
+  ],
+  "note": "Every request is hinted HIGH with the same deadline and service time, so prio, sjf and edf scan the whole runqueue at every pick (worst case for their cost) and all pick the oldest, exactly like fifo. Any difference from fifo is pure scheduling cost."
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 326.9,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node under the runtime: 32674, 32717, 32672 iterations per 100 us",
+  "overhead_us": 0.2,
+  "overhead_us_note": "per-request cost beyond the handler's work: 10 us requests on 4 kthreads saturate at 393k req/s (results/probe-10us), 4 / 393k = 10.2 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel 'ias noht' with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads"
+ },
+ "session": "s1",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}
