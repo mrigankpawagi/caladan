@@ -33,7 +33,7 @@ from lib.remote import Node, RemoteError, copy_between, parallel  # noqa: E402
 
 KILL = "pkill -9 -x loadgen; pkill -9 -x loadgen-study; sudo pkill -9 iokerneld; sleep 1; true"
 CLIENT_BIN = "apps/loadgen-study"
-POLICIES = ["fifo", "prio", "sjf", "edf"]
+POLICIES = ["fifo", "prio", "sjf", "edf", "hinted"]
 
 
 def log(msg):

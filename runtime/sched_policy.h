@@ -117,6 +117,49 @@ static uint32_t choose_edf(struct kthread *k, uint32_t n)
 	return SCHED_CHOOSE_MIN_KEY(k, n, deadline_tsc);
 }
 
+/* a missing hint (0) sorts after every given one */
+static inline uint64_t sched_hint_key(uint64_t v)
+{
+	return v ? v : UINT64_MAX;
+}
+
+/* true if @a should run before @b under "hinted" (ties keep the older) */
+static inline bool sched_hinted_before(thread_t *a, thread_t *b)
+{
+	uint64_t ka, kb;
+
+	if (prio_rank[a->prio_class] != prio_rank[b->prio_class])
+		return prio_rank[a->prio_class] > prio_rank[b->prio_class];
+	ka = sched_hint_key(a->deadline_tsc);
+	kb = sched_hint_key(b->deadline_tsc);
+	if (ka != kb)
+		return ka < kb;
+	return sched_hint_key(a->service_tsc) < sched_hint_key(b->service_tsc);
+}
+
+/*
+ * "hinted": every hint, in order of what it says. Helper threads first;
+ * then the highest class (how important the work is); within a class the
+ * earliest deadline (how urgent it is); then the smallest service time (how
+ * much it delays others); then the oldest. With only one kind of hint it
+ * picks exactly what prio, edf or sjf would.
+ */
+static uint32_t choose_hinted(struct kthread *k, uint32_t n)
+{
+	uint32_t i, best = 0;
+	thread_t *b = sched_rq_at(k, 0);
+
+	for (i = 1; i < n && b->prio_class != THREAD_PRIO_SOFTIRQ; i++) {
+		thread_t *th = sched_rq_at(k, i);
+
+		if (sched_hinted_before(th, b)) {
+			b = th;
+			best = i;
+		}
+	}
+	return best;
+}
+
 static const struct {
 	const char		*name;
 	sched_choose_fn_t	choose;
@@ -125,4 +168,5 @@ static const struct {
 	{ "prio",	choose_prio },
 	{ "sjf",	choose_sjf },
 	{ "edf",	choose_edf },
+	{ "hinted",	choose_hinted },
 };
