@@ -1,5 +1,7 @@
 # Scheduling hints in Caladan: study design
 
+> **Status:** all steps are done. The findings, and where the predictions below held or failed, are in [REPORT.md](REPORT.md). This note is kept as written before the experiments, except for the preemption caveat added before step 2.
+
 This study replaces the autoresearch loops (#5, #6). It answers the five
 review comments on #5 one step at a time. Each step makes a prediction from
 service times **before** anything runs, then checks it on the nodes.
