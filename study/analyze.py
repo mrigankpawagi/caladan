@@ -49,7 +49,7 @@ def erlang_c(k, a):
     return t / (s + t)
 
 
-def predictions(spec, cal, rho):
+def predictions(spec, cal, rho, pooled=True):
     """Predicted mean wait (us) per kind and policy at utilisation rho, or
     {} when the workload has no load in rho terms."""
     if rho is None or not rho:
@@ -64,7 +64,11 @@ def predictions(spec, cal, rho):
     es2 = sum(pi * si * si for pi, si in zip(p, s))
     cs2 = es2 / es ** 2 - 1
     lam = rho * k / es
-    wq = erlang_c(k, lam * es) / (k / es - lam) * (1 + cs2) / 2
+    if pooled:
+        wq = erlang_c(k, lam * es) / (k / es - lam) * (1 + cs2) / 2
+    else:
+        # each core its own M/G/1 queue with a quarter of the arrivals
+        wq = (lam / k) * es2 / 2 / (1 - rho)
     w0 = wq * (1 - rho)
     out = {"fifo": {x["name"]: wq for x in kinds}}
 
@@ -75,7 +79,7 @@ def predictions(spec, cal, rho):
         res, sigma_prev = {}, 0.0
         for v in order:
             members = [i for i, x in enumerate(kinds) if keyfn(x) == v]
-            rho_v = sum(lam * p[i] * s[i] for i in members) / k
+            rho_v = sum(lam * p[i] * s[i] for i in members) / k  # same per core
             sigma = sigma_prev + rho_v
             w = w0 / ((1 - sigma_prev) * (1 - sigma))
             for i in members:
@@ -167,25 +171,27 @@ def main():
     out = ["# %s, session %s" % (wid, session), "",
            spec.get("title", ""), "",
            "Median of %d repeats per cell. *wait* = mean latency minus the kind's minimum "
-           "latency; *pred* = predicted mean wait (see analyze.py). *p99 spread* = "
+           "latency; *pred* = predicted mean wait with the cores pooled into one queue, *pred/core* = with each core its own queue and no stealing (see analyze.py). *p99 spread* = "
            "(max - min) / median of p99 across repeats." % reps, ""]
     for load_ in loads:
         rho = rho_of[load_]
         pred = predictions(spec, cal, rho)
+        predc = predictions(spec, cal, rho, pooled=False)
         out.append("## %d req/s%s" % (load_, " (rho = %.2f)" % rho if rho else ""))
         out.append("")
         for g in groups:
             name = g.split(":", 1)[-1]
             dl = deadline.get(g, 0)
-            hdr = "| %s | wait | pred | mean | p50 | p99 | p99.9 | p99 spread |%s" % (
+            hdr = "| %s | wait | pred | pred/core | mean | p50 | p99 | p99.9 | p99 spread |%s" % (
                 name, " met %d us |" % dl if dl else "")
             out += [hdr, "|" + "---|" * (hdr.count("|") - 1)]
             for pol in pols:
                 if not cell[(pol, load_, g)]:
                     continue
                 pv = pred.get(pol.split("+")[0], {}).get(name) if g != "all" else None
-                line = "| %s | %s | %s | %s | %s | %s | %s | %s |" % (
-                    pol, fmt(wait(pol, load_, g), 1), fmt(pv, 1),
+                pc = predc.get(pol.split("+")[0], {}).get(name) if g != "all" else None
+                line = "| %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+                    pol, fmt(wait(pol, load_, g), 1), fmt(pv, 1), fmt(pc, 1),
                     fmt(stat(pol, load_, g, "mean"), 1), fmt(stat(pol, load_, g, "p50")),
                     fmt(stat(pol, load_, g, "p99")), fmt(stat(pol, load_, g, "p999")),
                     fmt(spread(pol, load_, g)) + "%" if spread(pol, load_, g) is not None else "-")
@@ -203,6 +209,8 @@ def main():
                          "axes.edgecolor": "#c3c2b7", "axes.labelcolor": "#52514e",
                          "xtick.color": "#898781", "ytick.color": "#898781",
                          "axes.titlecolor": "#0b0b0b", "svg.fonttype": "none"})
+    if not all(rho_of[l] for l in loads):
+        return capacity_plot(wid, session, spec, pols, loads, stat, cell, out)
     kg = [g for g in groups if g != "all"] or ["all"]
     fig, axes = plt.subplots(2, len(kg), figsize=(3.4 * len(kg) + 0.6, 5.4), squeeze=False)
     fig.patch.set_facecolor("#fcfcfb")
@@ -251,6 +259,52 @@ def main():
                  ha="left", color="#0b0b0b")
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     os.makedirs(os.path.join(HERE, "plots"), exist_ok=True)
+    for ext, kw in (("svg", {}), ("png", {"dpi": 150})):
+        fig.savefig(os.path.join(HERE, "plots", "%s-%s.%s" % (wid, session, ext)),
+                    facecolor=fig.get_facecolor(), bbox_inches="tight", **kw)
+    print("\n".join(out))
+
+
+def capacity_plot(wid, session, spec, pols, loads, stat, cell, out):
+    """For fixed-rate workloads (W1): p99 while every configuration keeps up,
+    and capacity, the throughput achieved at the highest offered load."""
+    import matplotlib.pyplot as plt
+    ok = [l for l in loads if all(stat(p, l, "all", "p99") not in (None, float("inf"))
+                                   for p in pols)]
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9, 3.4), gridspec_kw={"width_ratios": [1.1, 1]})
+    fig.patch.set_facecolor("#fcfcfb")
+    for ax in (a1, a2):
+        ax.set_facecolor("#fcfcfb")
+        ax.spines[["top", "right"]].set_visible(False)
+    a1.grid(axis="y", color="#e1e0d9", linewidth=0.6)
+    for pol in pols:
+        a1.plot([l / 1e6 for l in ok], [stat(pol, l, "all", "p99") for l in ok],
+                color=COLORS.get(pol, "#52514e"), marker=MARKERS.get(pol, "o"), markersize=5,
+                linewidth=2, markeredgecolor="#fcfcfb", label=pol)
+    a1.set_ylim(bottom=0)
+    a1.set_xlabel("offered load (M req/s)")
+    a1.set_ylabel("p99 latency (us)")
+    a1.set_title("p99 while every configuration keeps up", fontsize=10, loc="left")
+    top = max(loads)
+    caps = [(pol, med([r["resp_rps"] for r in cell[(pol, top, "all")]])) for pol in pols]
+    base = caps[0][1]
+    a2.grid(axis="x", color="#e1e0d9", linewidth=0.6)
+    for i, (pol, c) in enumerate(caps):
+        a2.barh(i, c / 1e6, height=0.6, color=COLORS.get(pol, "#52514e"))
+        a2.annotate("%.3f M  (%+.1f%%)" % (c / 1e6, (c - base) / base * 100) if i else
+                    "%.3f M" % (c / 1e6), (c / 1e6, i), xytext=(4, 0),
+                    textcoords="offset points", va="center", fontsize=8, color="#0b0b0b")
+    a2.set_yticks(range(len(caps)), [p for p, _ in caps])
+    a2.invert_yaxis()
+    a2.set_xlim(0, base / 1e6 * 1.45)
+    a2.set_xlabel("capacity (M req/s, achieved at %.1f M offered)" % (top / 1e6))
+    a2.set_title("capacity, relative to %s" % caps[0][0], fontsize=10, loc="left")
+    h, lab = a1.get_legend_handles_labels()
+    fig.legend(h, lab, loc="upper center", ncol=len(lab), frameon=False, fontsize=9,
+               bbox_to_anchor=(0.5, 1.02))
+    fig.suptitle("%s: %s" % (wid, spec.get("title", "")), y=1.1, fontsize=11, x=0.02,
+                 ha="left", color="#0b0b0b")
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
     for ext, kw in (("svg", {}), ("png", {"dpi": 150})):
         fig.savefig(os.path.join(HERE, "plots", "%s-%s.%s" % (wid, session, ext)),
                     facecolor=fig.get_facecolor(), bbox_inches="tight", **kw)
