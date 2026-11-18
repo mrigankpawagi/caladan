@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Tables, predictions and plots for one workload session.
+
+  ./analyze.py w2a-hol-service s1
+
+Reads results/<workload>/<session>/summary.csv and writes, next to it:
+  tables.md   per load level and request kind: median over repeats of the
+              mean latency, the mean wait, p50, p99, p99.9 and deadline-met,
+              the spread of p99 across repeats, and the textbook prediction
+  plots/<workload>-<session>.svg   mean wait and p99 by load, one panel per kind
+
+"Wait" is the time a request spends before running: its mean latency minus
+the smallest latency seen for its kind in that run (network round trip plus
+service time, with no queueing).
+
+Predictions use the textbook formulas from DESIGN.md, applied to the pooled
+k-core queue (work stealing approximately pools the cores):
+  - FIFO: Allen-Cunneen, Wq = ErlangC(k, a) / (k mu - lambda) * (1 + Cs^2) / 2
+  - priority to a class (non-preemptive): Cobham's split of the same residual
+    term, W_1 = W0 / (1 - rho_1), W_2 = W0 / ((1 - rho_1)(1 - rho)), with
+    W0 = Wq_fifo * (1 - rho), so that the formulas agree with FIFO's
+For all-equal service times FIFO, SJF and EDF move waiting but cannot change
+the mean (Kleinrock's conservation law).
+"""
+
+import csv
+import json
+import math
+import os
+import statistics
+import sys
+from collections import defaultdict
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+POLICY_ORDER = ["stock", "fifo (no hints)", "fifo", "prio", "sjf", "edf", "hinted",
+                "prio+steal", "hinted+steal"]
+# reference categorical palette, fixed order; fifo is the neutral baseline
+COLORS = {"stock": "#52514e", "fifo (no hints)": "#eda100", "fifo": "#898781",
+          "prio": "#2a78d6", "sjf": "#eb6834", "edf": "#1baf7a", "hinted": "#6250d6",
+          "prio+steal": "#e87ba4", "hinted+steal": "#008300"}
+MARKERS = {"stock": "*", "fifo (no hints)": "h", "fifo": "o", "prio": "s", "sjf": "^",
+           "edf": "D", "hinted": "P", "prio+steal": "v", "hinted+steal": "X"}
+
+
+def erlang_c(k, a):
+    """Probability of waiting in M/M/k with offered load a = lambda / mu."""
+    s = sum(a ** n / math.factorial(n) for n in range(k))
+    t = a ** k / math.factorial(k) * k / (k - a)
+    return t / (s + t)
+
+
+def predictions(spec, cal, rho):
+    """Predicted mean wait (us) per kind and policy at utilisation rho, or
+    {} when the workload has no load in rho terms."""
+    if rho is None or not rho:
+        return {}
+    k = spec["server_kthreads"]
+    kinds = spec["kinds"]
+    tot = sum(x["weight"] for x in kinds)
+    o = cal["overhead_us"]
+    s = [x["service_us"] + o for x in kinds]
+    p = [x["weight"] / tot for x in kinds]
+    es = sum(pi * si for pi, si in zip(p, s))
+    es2 = sum(pi * si * si for pi, si in zip(p, s))
+    cs2 = es2 / es ** 2 - 1
+    lam = rho * k / es
+    wq = erlang_c(k, lam * es) / (k / es - lam) * (1 + cs2) / 2
+    w0 = wq * (1 - rho)
+    out = {"fifo": {x["name"]: wq for x in kinds}}
+
+    def classes_by(keyfn):
+        """Cobham waits when kinds are served in increasing keyfn order (None
+        = no hint: served last, FIFO among themselves)."""
+        order = sorted(set(keyfn(x) for x in kinds), key=lambda v: (v is None, v))
+        res, sigma_prev = {}, 0.0
+        for v in order:
+            members = [i for i, x in enumerate(kinds) if keyfn(x) == v]
+            rho_v = sum(lam * p[i] * s[i] for i in members) / k
+            sigma = sigma_prev + rho_v
+            w = w0 / ((1 - sigma_prev) * (1 - sigma))
+            for i in members:
+                res[kinds[i]["name"]] = w
+            sigma_prev = sigma
+        return res
+
+    def hint(x, idx):
+        f = (x.get("hint") or "").split(":")
+        return f[idx] if len(f) > idx and f[idx] not in ("", "0") else None
+
+    rank = {"high": 0, "normal": 1, "low": 2}
+    out["prio"] = classes_by(lambda x: rank.get((x.get("hint") or "normal").split(":")[0], 1))
+    out["sjf"] = classes_by(lambda x: float(hint(x, 2)) if hint(x, 2) else None)
+    out["edf"] = classes_by(lambda x: float(hint(x, 1)) if hint(x, 1) else None)
+    # hinted: class, then deadline, then service time
+    out["hinted"] = classes_by(lambda x: (rank.get((x.get("hint") or "normal").split(":")[0], 1),
+                                          float(hint(x, 1)) if hint(x, 1) else math.inf,
+                                          float(hint(x, 2)) if hint(x, 2) else math.inf))
+    return out
+
+
+def load(path):
+    rows = list(csv.DictReader(open(path)))
+    for r in rows:
+        for f in ("load_rps", "repeat"):
+            r[f] = int(r[f])
+        for f in ("mean", "p0", "p50", "p99", "p999", "deadline_met", "resp_rps", "sent_rps"):
+            v = r.get(f)
+            r[f] = float(v) if v not in (None, "", "None") else None
+        r["rho"] = float(r["rho"]) if r.get("rho") else None
+        if r.get("build") == "stock":
+            r["policy"] = "stock"
+        elif r.get("mode") == "ignore":
+            r["policy"] = r["policy"] + " (no hints)"
+    return rows
+
+
+def med(xs):
+    xs = [x for x in xs if x is not None]
+    return statistics.median(xs) if xs else None
+
+
+def fmt(v, nd=0):
+    if v is None:
+        return "-"
+    if v == float("inf"):
+        return "inf"
+    return ("%%.%df" % nd) % v
+
+
+def main():
+    wid, session = sys.argv[1], sys.argv[2]
+    d = os.path.join(HERE, "results", wid, session)
+    rows = load(os.path.join(d, "summary.csv"))
+    meta = json.load(open(os.path.join(d, "meta.json")))
+    spec, cal = meta["workload"], meta["calibration"]
+    pols = [p for p in POLICY_ORDER if any(r["policy"] == p for r in rows)]
+    pols += sorted(set(r["policy"] for r in rows) - set(pols))
+    loads = sorted(set(r["load_rps"] for r in rows))
+    rho_of = {r["load_rps"]: r["rho"] for r in rows}
+    groups = ["kind:" + k["name"] for k in spec["kinds"]] + (["all"] if len(spec["kinds"]) > 1 else [])
+    if len(spec["kinds"]) == 1:
+        groups = ["all"]
+    deadline = {"kind:" + k["name"]: k.get("deadline_us", 0) for k in spec["kinds"]}
+
+    # cell[(policy, load, group)] = list of per-repeat rows
+    cell = defaultdict(list)
+    for r in rows:
+        cell[(r["policy"], r["load_rps"], r["group"])].append(r)
+
+    def stat(pol, load_, g, f):
+        return med([r[f] for r in cell[(pol, load_, g)]])
+
+    def wait(pol, load_, g):
+        if g == "all" and len(spec["kinds"]) > 1:
+            return None  # kinds differ in minimum latency; a pooled wait means nothing
+        xs = [r["mean"] - r["p0"] for r in cell[(pol, load_, g)]
+              if r["mean"] is not None and r["p0"] is not None]
+        return med(xs)
+
+    def spread(pol, load_, g):
+        xs = [r["p99"] for r in cell[(pol, load_, g)] if r["p99"] not in (None, float("inf"))]
+        if len(xs) < 2:
+            return None
+        return (max(xs) - min(xs)) / statistics.median(xs) * 100
+
+    reps = max(r["repeat"] for r in rows) + 1
+    out = ["# %s, session %s" % (wid, session), "",
+           spec.get("title", ""), "",
+           "Median of %d repeats per cell. *wait* = mean latency minus the kind's minimum "
+           "latency; *pred* = predicted mean wait (see analyze.py). *p99 spread* = "
+           "(max - min) / median of p99 across repeats." % reps, ""]
+    for load_ in loads:
+        rho = rho_of[load_]
+        pred = predictions(spec, cal, rho)
+        out.append("## %d req/s%s" % (load_, " (rho = %.2f)" % rho if rho else ""))
+        out.append("")
+        for g in groups:
+            name = g.split(":", 1)[-1]
+            dl = deadline.get(g, 0)
+            hdr = "| %s | wait | pred | mean | p50 | p99 | p99.9 | p99 spread |%s" % (
+                name, " met %d us |" % dl if dl else "")
+            out += [hdr, "|" + "---|" * (hdr.count("|") - 1)]
+            for pol in pols:
+                if not cell[(pol, load_, g)]:
+                    continue
+                pv = pred.get(pol.split("+")[0], {}).get(name) if g != "all" else None
+                line = "| %s | %s | %s | %s | %s | %s | %s | %s |" % (
+                    pol, fmt(wait(pol, load_, g), 1), fmt(pv, 1),
+                    fmt(stat(pol, load_, g, "mean"), 1), fmt(stat(pol, load_, g, "p50")),
+                    fmt(stat(pol, load_, g, "p99")), fmt(stat(pol, load_, g, "p999")),
+                    fmt(spread(pol, load_, g)) + "%" if spread(pol, load_, g) is not None else "-")
+                if dl:
+                    line += " %s |" % fmt(stat(pol, load_, g, "deadline_met"), 2)
+                out.append(line)
+            out.append("")
+    open(os.path.join(d, "tables.md"), "w").write("\n".join(out) + "\n")
+
+    # plots: row 1 mean wait, row 2 p99, one column per kind
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 9,
+                         "axes.edgecolor": "#c3c2b7", "axes.labelcolor": "#52514e",
+                         "xtick.color": "#898781", "ytick.color": "#898781",
+                         "axes.titlecolor": "#0b0b0b", "svg.fonttype": "none"})
+    kg = [g for g in groups if g != "all"] or ["all"]
+    fig, axes = plt.subplots(2, len(kg), figsize=(3.4 * len(kg) + 0.6, 5.4), squeeze=False)
+    fig.patch.set_facecolor("#fcfcfb")
+    xs_of = lambda: [rho_of[l] if rho_of[l] else l / 1e6 for l in loads]
+    xlabel = "offered load (rho)" if all(rho_of[l] for l in loads) else "offered load (M req/s)"
+    for c, g in enumerate(kg):
+        for rr, (metric, label) in enumerate([("wait", "mean wait (us)"), ("p99", "p99 latency (us)")]):
+            ax = axes[rr][c]
+            ax.set_facecolor("#fcfcfb")
+            ax.grid(axis="y", color="#e1e0d9", linewidth=0.6)
+            ax.spines[["top", "right"]].set_visible(False)
+            for pol in pols:
+                ys = [wait(pol, l, g) if metric == "wait" else stat(pol, l, g, "p99") for l in loads]
+                pts = [(x, y) for x, y in zip(xs_of(), ys) if y is not None and y != float("inf")]
+                if not pts:
+                    continue
+                ax.plot([p[0] for p in pts], [p[1] for p in pts], color=COLORS.get(pol, "#52514e"),
+                        marker=MARKERS.get(pol, "o"), markersize=5, linewidth=2,
+                        markeredgecolor="#fcfcfb", markeredgewidth=1, label=pol)
+            if metric == "wait" and g != "all":
+                for pol in pols:
+                    pv = [(rho_of[l], predictions(spec, cal, rho_of[l])
+                           .get(pol.split("+")[0], {}).get(g.split(":", 1)[-1])) for l in loads]
+                    pv = [p for p in pv if p[0] and p[1] is not None]
+                    if pv and "+" not in pol:
+                        ax.plot([p[0] for p in pv], [p[1] for p in pv], color=COLORS.get(pol),
+                                linewidth=1, linestyle=(0, (3, 2)))
+            if metric == "p99" and deadline.get(g):
+                ax.axhline(deadline[g], color="#898781", linestyle=(0, (4, 3)), linewidth=1)
+                ax.annotate("deadline", (ax.get_xlim()[0], deadline[g]), color="#898781",
+                            fontsize=8, va="bottom")
+            ax.set_ylim(bottom=0)
+            if rr == 0:
+                ax.set_title(g.split(":", 1)[-1] + " requests", fontsize=10, loc="left")
+            if c == 0:
+                ax.set_ylabel(label)
+            if rr == 1:
+                ax.set_xlabel(xlabel)
+    h, lab = axes[0][0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="upper center", ncol=len(lab), frameon=False, fontsize=9,
+               bbox_to_anchor=(0.5, 1.0))
+    if all(rho_of[l] for l in loads):
+        fig.text(0.99, 0.955, "dashed: predicted mean wait", ha="right", fontsize=8,
+                 color="#898781")
+    fig.suptitle("%s: %s" % (wid, spec.get("title", "")), y=1.06, fontsize=11, x=0.02,
+                 ha="left", color="#0b0b0b")
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    os.makedirs(os.path.join(HERE, "plots"), exist_ok=True)
+    for ext, kw in (("svg", {}), ("png", {"dpi": 150})):
+        fig.savefig(os.path.join(HERE, "plots", "%s-%s.%s" % (wid, session, ext)),
+                    facecolor=fig.get_facecolor(), bbox_inches="tight", **kw)
+    print("\n".join(out))
+
+
+if __name__ == "__main__":
+    main()
