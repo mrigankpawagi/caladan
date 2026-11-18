@@ -61,7 +61,13 @@ def runtime_config(ip, cfg, kthreads, policy=None, stats=False):
              "runtime_guaranteed_kthreads %d" % kthreads,
              "runtime_spinning_kthreads %d" % kthreads, "runtime_priority lc"]
     if policy:
-        lines.append("runtime_sched_policy %s" % policy)
+        # "<policy>+steal": the policy plus hint-aware stealing
+        base, _, extra = policy.partition("+")
+        lines.append("runtime_sched_policy %s" % base)
+        if extra == "steal":
+            lines.append("runtime_sched_steal policy")
+        elif extra:
+            sys.exit("unknown policy option '+%s'" % extra)
     if stats:
         lines.append("runtime_sched_stats 1")
     return "\n".join(lines) + "\n"

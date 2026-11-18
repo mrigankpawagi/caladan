@@ -1,0 +1,7 @@
+{"id": "w5-even",
+ "title": "W2b over 64 connections: the even reference for W5",
+ "server_kthreads": 4, "conns": 64,
+ "kinds": [{"name": "short", "service_us": 5, "weight": 0.8, "hint": "high"},
+           {"name": "long", "service_us": 50, "weight": 0.2, "hint": "normal"}],
+ "rho": [0.5, 0.7, 0.8, 0.9],
+ "policies": ["fifo", "prio", "prio+steal"]}

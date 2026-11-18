@@ -177,6 +177,8 @@ static void drain_overflow(struct kthread *l)
 
 /* count every pick in the hint-aware statistics (runtime_sched_stats) */
 bool sched_stats_enabled;
+/* steal the thread the victim's policy would run next (runtime_sched_steal) */
+bool sched_steal_by_policy;
 
 #ifdef CONFIG_THREAD_HINTS
 #include "sched_policy.h"
@@ -345,8 +347,11 @@ static uint32_t drain_threads(struct kthread *k, struct list_head *l, uint32_t n
 			if (!th)
 				break;
 		}
-		if (update_tail && thread_is_hinted(th))
-			STAT(HINTED_STOLEN)++;
+		if (update_tail) {
+			STAT(THREADS_STOLEN)++;
+			if (thread_is_hinted(th))
+				STAT(HINTED_STOLEN)++;
+		}
 		list_add_tail(l, &th->link);
 	}
 
@@ -404,6 +409,39 @@ static void merge_runqueues(struct kthread *l, uint32_t lsize, struct kthread *r
 	update_oldest_tsc(l);
 }
 
+#ifdef CONFIG_THREAD_HINTS
+/*
+ * Hint-aware stealing (runtime_sched_steal policy): instead of the oldest
+ * half of @r's runqueue, take the one thread @r's policy would run next.
+ * Stock stealing leaves a newly arrived urgent thread behind on a busy core,
+ * where it waits for the running thread to finish while this core is idle.
+ * Called with both locks held and the local runqueue empty (so the ring
+ * stays in ready-time order); releases @r's lock.
+ */
+static void steal_policy_pick(struct kthread *l, struct kthread *r)
+{
+	uint32_t tail = r->rq_tail, n = load_acquire(&r->rq_head) - tail, best, i;
+	thread_t *th;
+
+	best = n > 1 ? sched_choose(r, n) : 0;
+	th = r->rq[(tail + best) % RUNTIME_RQ_SIZE];
+	for (i = best; i > 0; i--)
+		r->rq[(tail + i) % RUNTIME_RQ_SIZE] =
+			r->rq[(tail + i - 1) % RUNTIME_RQ_SIZE];
+	r->rq_tail = tail + 1;
+	ACCESS_ONCE(r->q_ptrs->rq_tail)++;
+	update_oldest_tsc(r);
+	spin_unlock(&r->lock);
+
+	STAT(THREADS_STOLEN)++;
+	if (thread_is_hinted(th))
+		STAT(HINTED_STOLEN)++;
+	l->rq[l->rq_head++ % RUNTIME_RQ_SIZE] = th;
+	ACCESS_ONCE(l->q_ptrs->rq_head)++;
+	update_oldest_tsc(l);
+}
+#endif
+
 static bool steal_work(struct kthread *l, struct kthread *r)
 {
 	uint64_t now_tsc = rdtsc();
@@ -420,6 +458,13 @@ static bool steal_work(struct kthread *l, struct kthread *r)
 	rsize = ACCESS_ONCE(r->q_ptrs->rq_head) - r->q_ptrs->rq_tail;
 	if (lsize < rsize)
 		num_to_steal = MIN(div_up(rsize - lsize, 2), RUNTIME_RQ_SIZE);
+#ifdef CONFIG_THREAD_HINTS
+	if (num_to_steal && sched_steal_by_policy && lsize == 0 &&
+	    r->rq_head != r->rq_tail) {
+		steal_policy_pick(l, r);
+		return true;
+	}
+#endif
 	if (num_to_steal) {
 		merge_runqueues(l, lsize, r, num_to_steal);
 		return true;

@@ -772,6 +772,7 @@ extern void thread_mark_softirq(thread_t *th);
 extern int sched_policy_select(const char *name);
 extern const char *sched_policy_name(void);
 extern bool sched_stats_enabled;
+extern bool sched_steal_by_policy;
 
 /**
  * thread_is_hinted - true if @th carries scheduling hints. Compiles to false
