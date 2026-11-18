@@ -61,14 +61,13 @@ def runtime_config(ip, cfg, kthreads, policy=None, stats=False):
              "runtime_guaranteed_kthreads %d" % kthreads,
              "runtime_spinning_kthreads %d" % kthreads, "runtime_priority lc"]
     if policy:
-        # "<policy>[+steal][+rx][+q<us>]": the policy, plus hint-aware
-        # stealing, packets before the runqueue, a different quantum
+        # "<policy>[+rx][+q<us>]": the policy, plus packets before the
+        # runqueue and/or a different quantum. ("+steal", hint-aware
+        # stealing, was tested in W5 at 677952d and removed: no effect.)
         base, *extras = policy.split("+")
         lines.append("runtime_sched_policy %s" % base)
         for extra in extras:
-            if extra == "steal":
-                lines.append("runtime_sched_steal policy")
-            elif extra == "rx":
+            if extra == "rx":
                 lines.append("runtime_sched_softirq_first 1")
             elif extra.startswith("q") and extra[1:].isdigit():
                 lines.append("runtime_quantum_us %s" % extra[1:])
