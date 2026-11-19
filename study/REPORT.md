@@ -70,9 +70,15 @@ Each rung only breaks the ties the rung below leaves. On the headline metric, th
 
   The SLO-load ratios (≥ 1.57, ≥ 1.24, ≥ 1.14) are lower bounds, because `prio` is censored at the top of the grid.
 - **Where requests wait.** The deeper answer is where requests wait (next section): most of a favoured request's remaining wait happens before it becomes a thread, where no policy can act.
-- **Burstable cores: ordering does not change the IOKernel's core grants** (session `v2b`; 2 guaranteed + 2 burstable cores next to a best-effort batch job). The pre-registered prediction **failed**.
-  - In runs where the cores were granted, every policy used the same cores (3.10–3.11 at ρ = 0.7, 3.43–3.45 at 0.8).
-  - The batch job's work rate was within 2% across policies (ρ = 0.7: fifo 1.60 M, `hinted` 1.61 M, `prio` 1.58 M units/s), not ≥ 5% lower under hint-aware ordering.
+- **Burstable cores: no effect of ordering detected on the IOKernel's core grants, in the runs where the cores were granted** (session `v2b`; 2 guaranteed + 2 burstable cores next to a best-effort batch job). The pre-registered prediction **failed** there.
+  - **Cores:** every policy used the same cores (3.10–3.11 at ρ = 0.7, 3.43–3.45 at 0.8).
+  - **The batch job's rate relative to fifo,** paired within each repeat at levels where both runs were healthy:
+    - `prio`: 0.955–1.004 (4 paired levels);
+    - `hinted`: 1.000–1.028 (5);
+    - `hinted+rx`: 0.996–1.004 (3).
+
+    None reaches the predicted ≥ 5% drop.
+  - **Post hoc, untested:** at ρ ≥ 0.6 the server is congested at nearly every IOKernel poll under any order, so grants track the total work (3.1 cores at ρ = 0.7 is about what the work needs), leaving the order no room to matter.
   - Separately, 14 of 36 runs at ρ ≥ 0.6 collapsed under every policy, because the IOKernel did not reclaim the batch job's cores (Limitations).
 
 **Q4. A handful of workloads, explained by service times.** The six workloads are ordered by the information they need:
