@@ -1,5 +1,6 @@
 use clap::Arg;
 
+use crate::payload::HINT_CLASS_IGNORED;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cmp::min;
 use std::io;
@@ -237,7 +238,7 @@ impl LoadgenProtocol for HttpProtocol {
                 }
             }
 
-            return Ok((0, 0, 0));
+            return Ok((0, 0, HINT_CLASS_IGNORED));
         }
     }
 }
