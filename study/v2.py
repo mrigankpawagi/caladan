@@ -397,18 +397,22 @@ def knee(wid, session, bound=70.0):
     out = ["# %s, session %s: capacity (knee)" % (wid, session), "",
            "Capacity = highest offered load at which every repeat has zero drops and p99 <= "
            "%d us; a fresh server for every level. Each cell: repeats passing / run." % bound, "",
-           "| config | capacity | vs fifo | " + " | ".join("%.2fM" % (g / 1e6) for g in grid)
-           + " |", "|---|---|---|" + "---|" * len(grid)]
-    caps = {}
+           "| config | capacity | vs fifo | contiguous | " + " | ".join("%.2fM" % (g / 1e6) for g in grid)
+           + " |", "|---|---|---|---|" + "---|" * len(grid)]
+    caps, contig = {}, {}
     for c in configs:
-        cap = None
-        for g in grid:
-            v = ok.get((c, g), {})
-            if v and all(v.values()):
-                cap = g
+        tested = [g for g in grid if ok.get((c, g))]
+        passing = [g for g in tested if all(ok[(c, g)].values())]
+        # pre-registered: the highest level that passes in every repeat
+        caps[c] = max(passing) if passing else None
+        # for reference: the highest level below which every tested level passes
+        cg = None
+        for g in tested:
+            if all(ok[(c, g)].values()):
+                cg = g
             else:
                 break
-        caps[c] = cap
+        contig[c] = cg
     for c in configs:
         cells = []
         for g in grid:
@@ -416,8 +420,9 @@ def knee(wid, session, bound=70.0):
             cells.append("%d/%d" % (sum(v.values()), len(v)) if v else "-")
         rel = ("%+.1f%%" % ((caps[c] - caps["fifo"]) / caps["fifo"] * 100)
                if caps.get(c) and caps.get("fifo") else "-")
-        out.append("| %s | %s | %s | %s |" % (c, "%.2fM" % (caps[c] / 1e6) if caps[c] else
-                                               "< %.2fM" % (grid[0] / 1e6), rel, " | ".join(cells)))
+        out.append("| %s | %s | %s | %s | %s |" % (
+            c, "%.2fM" % (caps[c] / 1e6) if caps[c] else "< %.2fM" % (grid[0] / 1e6), rel,
+            "%.2fM" % (contig[c] / 1e6) if contig[c] else "-", " | ".join(cells)))
     open(os.path.join(d, "knee.md"), "w").write("\n".join(out) + "\n")
     print("\n".join(out))
     return caps

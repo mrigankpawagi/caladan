@@ -42,7 +42,7 @@ Each rung only breaks the ties the rung below leaves. On the headline metric, th
 **Q1. The cost of scheduling.** Measured three ways:
 1. **Microbenchmark, depth 32, in cache:** `prio_edf`, `hinted` and `edf` cost 428–456 cycles per pick. v1's `hinted` cost 867. `prio` costs 288, so the pre-registered "all within 15%" **failed** for `prio`. Timing the choice alone, `prio` 220 vs `hinted` 266: `prio`'s 2-bit class gives fewer distinct key values, so its "new minimum" branch is easier to predict.
 2. **In real runs** (W2b, stats on): 52–68 cycles per call for every key policy (about 25 of them are the counter's own clock reads). The policy uses at most 0.11% of server CPU. A pick sees 1.3–2.9 threads on average.
-3. **Capacity knee (W1):** *see below.*
+3. **Capacity knee (W1, worst case):** carrying hints costs 4% (`stock` 1.30 M vs `fifo` 1.25 M req/s). The key policies cost another 2.4–4.8%, with `hinted` at −4.8%, inside the 5% budget, against 7.1% of collapsed goodput in v1. `+rx` costs a further 2.5%. See *Cost* below.
 
 **Q2. Load balancing across cores.**
 - **Two levels of stealing.** Caladan balances load at two levels, and v2 measures both per request:
@@ -153,7 +153,29 @@ Predictions are from DESIGN-v2.md; full tables are in `results/<workload>/v2/tab
 
 ## Cost (W1)
 
-*Being completed: the knee per configuration, from a 40 k grid and a 10 k second stage.*
+**The workload is a deliberate worst case:**
+- 1 µs requests on 2 cores;
+- every thread carries identical hints, so every pick scans the whole ring, 32 deep at saturation.
+
+**The capacity knee** is the highest offered load at which every repeat has zero drops and p99 ≤ 70 µs. Each level runs on a fresh server for 10 s. The search uses a 40 k grid, then a 10 k second stage inside each bracket, 2 repeats each ([knee.md](results/w1-overhead/v2/knee.md)).
+
+| configuration | knee | vs `fifo` |
+|---|---|---|
+| `stock` (hints compiled out) | 1.30 M req/s | +4.0% |
+| `fifo` | 1.25 M | – |
+| `prio` | 1.22 M | −2.4% |
+| `prio_edf` | 1.21 M | −3.2% |
+| `edf` | 1.21 M | −3.2% |
+| `hinted` | 1.19 M | −4.8% |
+| `hinted+rx` | 1.16 M | −7.2% |
+
+**Against the pre-registered predictions:**
+- **`stock` above `fifo` by more than one step:** holds. Carrying hints costs 4% here: the classifier on every packet, and the hint fields.
+- **Each key policy within 5% of `fifo`:** holds, though `hinted` only just (−4.8%).
+- **`hinted+rx` has the lowest knee:** holds.
+- **The four key policies within one 10 k step of each other:** **fails.** They span three steps (1.19–1.22 M, 2.5%), with `hinted` lowest. One step is about the run-to-run noise here (`prio_edf` passes 1.20 M and 1.21 M in both repeats but 1.19 M in only one).
+
+In v1, `hinted` cost 7.1% of collapsed goodput, about twice a single rule. Below saturation the policy's cost is invisible (Q1, item 2).
 
 ## Noise and the decision rule
 

@@ -1,0 +1,207 @@
+{
+ "runs": [
+  {
+   "code_sha": "699fc2828cfb3a9aab80757d3e5c7d082792b8ca",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "stock",
+    "fifo",
+    "prio",
+    "prio_edf",
+    "hinted",
+    "edf",
+    "hinted+rx"
+   ],
+   "repeats": 2,
+   "order": [
+    "hinted",
+    "hinted+rx",
+    "stock",
+    "prio_edf",
+    "fifo",
+    "edf",
+    "prio",
+    "edf",
+    "prio_edf",
+    "hinted",
+    "prio",
+    "hinted+rx",
+    "stock",
+    "fifo"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.749\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T02:38:16",
+   "finished": "2026-11-19T04:00:01"
+  },
+  {
+   "code_sha": "de795fbaf56ad1e9819c8632991bb1ccd9e14aa7",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "stock"
+   ],
+   "repeats": 2,
+   "order": [
+    "stock",
+    "stock"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.755\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T04:05:02",
+   "finished": "2026-11-19T04:08:38"
+  },
+  {
+   "code_sha": "87114c2099bb2c1ce36d976f00c7992efa52bf9f",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "hinted"
+   ],
+   "repeats": 2,
+   "order": [
+    "hinted",
+    "hinted"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.699\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T04:09:13",
+   "finished": "2026-11-19T04:12:44"
+  },
+  {
+   "code_sha": "87114c2099bb2c1ce36d976f00c7992efa52bf9f",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "fifo"
+   ],
+   "repeats": 2,
+   "order": [
+    "fifo",
+    "fifo"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.783\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T04:12:48",
+   "finished": "2026-11-19T04:16:22"
+  },
+  {
+   "code_sha": "87114c2099bb2c1ce36d976f00c7992efa52bf9f",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "edf"
+   ],
+   "repeats": 2,
+   "order": [
+    "edf",
+    "edf"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.742\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T04:16:26",
+   "finished": "2026-11-19T04:19:58"
+  },
+  {
+   "code_sha": "87114c2099bb2c1ce36d976f00c7992efa52bf9f",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "prio"
+   ],
+   "repeats": 2,
+   "order": [
+    "prio",
+    "prio"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.810\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T04:20:02",
+   "finished": "2026-11-19T04:23:35"
+  },
+  {
+   "code_sha": "87114c2099bb2c1ce36d976f00c7992efa52bf9f",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "hinted+rx"
+   ],
+   "repeats": 2,
+   "order": [
+    "hinted+rx",
+    "hinted+rx"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.808\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T04:23:40",
+   "finished": "2026-11-19T04:27:10"
+  },
+  {
+   "code_sha": "87114c2099bb2c1ce36d976f00c7992efa52bf9f",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "prio_edf"
+   ],
+   "repeats": 2,
+   "order": [
+    "prio_edf",
+    "prio_edf"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.778\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T04:27:15",
+   "finished": "2026-11-19T04:30:46"
+  }
+ ],
+ "workload": {
+  "id": "w1-overhead",
+  "title": "Cost: 1 us requests on 2 cores, every thread with identical hints (full scan at every pick)",
+  "server_kthreads": 2,
+  "conns": 64,
+  "duration_s": 10,
+  "fresh_per_level": true,
+  "rps": [
+   1190000,
+   1200000,
+   1210000
+  ],
+  "kinds": [
+   {
+    "name": "tiny",
+    "service_us": 1,
+    "weight": 1,
+    "hint": "high:1000:1"
+   }
+  ],
+  "policies": [
+   "stock",
+   "fifo",
+   "prio",
+   "prio_edf",
+   "hinted",
+   "edf",
+   "hinted+rx"
+  ],
+  "knee_rule": "capacity = highest offered load at which every repeat has zero drops and p99 <= 70 us (10x the 7 us p99 at light load in s1); collapses are recorded"
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 318.99,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node, clock pinned at 2.4 GHz (performance governor, no turbo): 31899, 31900, 31899 iterations per 100 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel \"ias noht\" with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads; clock pinned at 2.4 GHz",
+  "handler_us": {
+   "1": 1.22,
+   "5": 5.225,
+   "10": 10.235,
+   "50": 50.26
+  },
+  "handler_us_note": "mean handler start-to-end time per nominal service time, measured in place (results/cal-handler/cal, fifo, 20k req/s, 2 repeats, Segments svc); rho = rate x mean handler time / cores"
+ },
+ "session": "v2",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}
