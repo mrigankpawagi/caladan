@@ -237,7 +237,7 @@ In v1, `hinted` cost 7.1% of collapsed goodput, about twice a single rule. Below
 - **send → enqueue mixes delivery and RX-queue wait.** There is no IOKernel arrival stamp. Delivery is attributed from the flat reply path and the light-load value.
 - **W5 burst (2 guaranteed + 2 burstable cores, a best-effort batch job).**
   - **First runs (session `v2`):** one server instance swept all six levels. Many levels collapsed: the burstable cores were not granted, and the server stayed at 2.0 cores with zero parks.
-    - Collapsed = failed or p99 > 100 ms. At ρ = 0.6–0.8 that was fifo 3/9, `prio` 7/9, `hinted` 3/9 and `hinted+rx` 6/9 levels. An earlier count of 5/9 for `prio` used an unstated definition.
+    - Collapsed = a failed level, unanswered requests (infinite p99), or p99 > 100 ms. At ρ = 0.6–0.8 that was fifo 3/9, `prio` 7/9, `hinted` 3/9 and `hinted+rx` 6/9 levels. An earlier count of 5/9 for `prio` used an unstated definition.
     - Collapses were not monotone in load, and the batch job's rate was lost to a harness bug.
   - **Diagnostic (session `diag`):** fifo at ρ = 0.7, a fresh server for each of 6 runs, IOKernel statistics on. **All 6 were healthy:** 3.1 cores, about 55 k batch-job preemptions per run, batch job at about 1.70 M units/s.
   - From that diagnostic I concluded, in the third amendment, that the collapses came from state carried over between levels. **The rerun refuted that.**

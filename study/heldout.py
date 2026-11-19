@@ -11,6 +11,7 @@ Only W3 has a different service mix; W2a, W4, W6 and W5's 2- and 6-core
 variants share W2b's mix, and the forms ignore the core count, so for those
 the "prediction" is W2b's own measurement: they test whether the stage
 depends on policy and on core count, not the form.
+"""
 
 import csv
 import json
