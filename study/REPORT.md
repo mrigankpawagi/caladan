@@ -70,7 +70,10 @@ Each rung only breaks the ties the rung below leaves. On the headline metric, th
 
   The SLO-load ratios (≥ 1.57, ≥ 1.24, ≥ 1.14) are lower bounds, because `prio` is censored at the top of the grid.
 - **Where requests wait.** The deeper answer is where requests wait (next section): most of a favoured request's remaining wait happens before it becomes a thread, where no policy can act.
-- **Burstable cores were not resolved.** The variant with 2 guaranteed + 2 burstable cores next to a batch job, which tests how ordering interacts with the IOKernel's core grants, did not give an answer (see Limitations).
+- **Burstable cores: ordering does not change the IOKernel's core grants** (session `v2b`; 2 guaranteed + 2 burstable cores next to a best-effort batch job). The pre-registered prediction **failed**.
+  - In runs where the cores were granted, every policy used the same cores (3.10–3.11 at ρ = 0.7, 3.43–3.45 at 0.8).
+  - The batch job's work rate was within 2% across policies (ρ = 0.7: fifo 1.60 M, `hinted` 1.61 M, `prio` 1.58 M units/s), not ≥ 5% lower under hint-aware ordering.
+  - Separately, 14 of 36 runs at ρ ≥ 0.6 collapsed under every policy, because the IOKernel did not reclaim the batch job's cores (Limitations).
 
 **Q4. A handful of workloads, explained by service times.** The six workloads are ordered by the information they need:
 
@@ -231,8 +234,12 @@ In v1, `hinted` cost 7.1% of collapsed goodput, about twice a single rule. Below
     - Collapsed = failed or p99 > 100 ms. At ρ = 0.6–0.8 that was fifo 3/9, `prio` 7/9, `hinted` 3/9 and `hinted+rx` 6/9 levels. An earlier count of 5/9 for `prio` used an unstated definition.
     - Collapses were not monotone in load, and the batch job's rate was lost to a harness bug.
   - **Diagnostic (session `diag`):** fifo at ρ = 0.7, a fresh server for each of 6 runs, IOKernel statistics on. **All 6 were healthy:** 3.1 cores, about 55 k batch-job preemptions per run, batch job at about 1.70 M units/s.
-  - So the collapses came from **state carried over between levels in one server instance**, not from the IOKernel's core grants as such. The first runs are invalid for the burst question.
-  - **The rerun under the third amendment** (fresh server per level, prediction unchanged) is reported below.
+  - From that diagnostic I concluded, in the third amendment, that the collapses came from state carried over between levels. **The rerun refuted that.**
+  - **The rerun (session `v2b`):** a fresh server per level, prediction unchanged. Collapses still occurred at random levels from ρ = 0.6 up: fifo 3/9, `prio` 4/9, `hinted` 2/9 and `hinted+rx` 5/9.
+    - In each, the server stayed near 2 cores while the batch job kept its full rate (about 1.825 M units/s, its light-load rate). The IOKernel did not reclaim the burstable cores.
+    - The diagnostic's 6/6 healthy runs happened to fall at a level that was also healthy in all 3 rerun repeats.
+  - **Why the IOKernel sometimes fails to reclaim cores** from a best-effort job here (one node, loopback, `noht`) is not diagnosed. It occurs under every policy.
+  - **The pre-registered question was answered from the healthy runs:** no policy effect on cores granted or on the batch job's rate (within 2%).
 - **Hint-aware stealing** (v1) was tested only with `prio` and the stock packet order, not with `+rx`.
 
 ## Reproducing

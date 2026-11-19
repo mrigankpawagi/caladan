@@ -241,3 +241,8 @@ Mean waits predicted at ρ = 0.9, from `analyze.predictions()` with the handler 
 - The **prediction is unchanged:** at ρ ≥ 0.6, the batch job's work rate is at least 5% lower under `prio`/`hinted` than under `fifo`, and the short-request gain is preserved.
 - `hinted+rx` stays exploratory.
 - The first burst runs stay in the record (session `v2`), reported as invalid for the batch-rate question.
+
+**Note added after the rerun (2026-11-19).** The rerun refuted the third amendment's diagnosis.
+- **What happened:** collapses still occurred with a fresh server per level (14 of 36 runs at ρ ≥ 0.6, under every policy). In each, the IOKernel did not reclaim the batch job's cores.
+- **The prediction** was evaluated on the runs where the cores were granted, and failed: core grants and the batch job's rate were within 2% across policies.
+- **The diagnosis** ("carry-over between levels") was wrong. It rested on 6 healthy runs at a single level.
