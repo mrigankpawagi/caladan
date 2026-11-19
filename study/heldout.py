@@ -2,12 +2,16 @@
 """Held-out test of the post-hoc two-stage explanation (design review, round 3).
 
 The send->enqueue stage is taken to be FIFO and the same under every
-policy: a request's packet waits for the job running on its core, so its mean
-should follow the per-core residual work R = rho * E[S^2] / (2 E[S]) (handler
-times measured in place). Fit in = a + b R on W2b only (all policies without
-+rx, every load), then predict every other workload and core count, and
-report the error. Run after the data exist; the fit uses W2b alone.
-"""
+policy. Two functional forms were tried, both fitted on W2b only (all
+policies without +rx, every load) and both reported, so the better one's
+error is optimistic:
+  - linear in the per-core residual work R = rho E[S^2] / 2E[S]
+  - the Pollaczek-Khinchine wait shape R / (1 - rho)
+Only W3 has a different service mix; W2a, W4, W6 and W5's 2- and 6-core
+variants share W2b's mix, and the forms ignore the core count, so for those
+the "prediction" is W2b's own measurement: they test whether the stage
+depends on policy and on core count, not the form.
+
 import csv
 import json
 import os
