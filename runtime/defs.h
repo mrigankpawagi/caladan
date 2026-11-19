@@ -302,6 +302,10 @@ enum {
 
 	/*
 	 * thread-hint scheduler counters (only counted with CONFIG_THREAD_HINTS).
+	 * The PICK_, WAIT_CYCLES_, DEADLINE and INVERSIONS counters are kept
+	 * only with runtime_sched_stats 1 (they read as 0 otherwise; the
+	 * reported sched_stats value says which); HINTED_STOLEN and
+	 * HINTED_OVERFLOW are always kept.
 	 * The four PICK_ and four WAIT_CYCLES_ entries are indexed by prio_class
 	 * and must stay in THREAD_PRIO_* order: NORMAL, HIGH, LOW, SOFTIRQ.
 	 */
@@ -761,6 +765,7 @@ extern void thread_ready_head_locked(thread_t *th);
 extern void thread_mark_softirq(thread_t *th);
 extern int sched_policy_select(const char *name);
 extern const char *sched_policy_name(void);
+extern int sched_policy_index(void);
 extern bool sched_stats_enabled;
 
 /**

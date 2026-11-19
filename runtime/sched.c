@@ -229,8 +229,10 @@ static const uint8_t prio_rank[THREAD_PRIO_NR] = {
 
 /*
  * "prio": strict priority by class (helper threads, then HIGH, NORMAL,
- * LOW), oldest first within a class. Without hints every thread is NORMAL,
- * so it picks exactly what fifo picks.
+ * LOW), oldest first within a class. Without hints it keeps fifo's order,
+ * except that runtime helper threads always run first; it reads the class
+ * of each queued thread. The stock-equivalent baseline is fifo (or a build
+ * with CONFIG_THREAD_HINTS=n).
  */
 static uint32_t choose_prio(const struct kthread *k, uint32_t n)
 {
@@ -259,6 +261,7 @@ static const struct {
 /* the active policy (default: strict priority, so hints take effect) */
 static sched_choose_fn_t sched_choose = choose_prio;
 static const char *sched_choose_name = "prio";
+static int sched_choose_index = 1;
 
 /**
  * sched_policy_select - selects the scheduling policy by name
@@ -274,6 +277,7 @@ int sched_policy_select(const char *name)
 		if (!strcmp(name, sched_policies[i].name)) {
 			sched_choose = sched_policies[i].choose;
 			sched_choose_name = sched_policies[i].name;
+			sched_choose_index = i;
 			return 0;
 		}
 	}
@@ -283,6 +287,12 @@ int sched_policy_select(const char *name)
 const char *sched_policy_name(void)
 {
 	return sched_choose_name;
+}
+
+/* the active policy's index in sched_policies[] (reported in stats) */
+int sched_policy_index(void)
+{
+	return sched_choose_index;
 }
 
 /* per-class counters are indexed by prio_class */
@@ -375,6 +385,11 @@ int sched_policy_select(const char *name)
 const char *sched_policy_name(void)
 {
 	return "fifo";
+}
+
+int sched_policy_index(void)
+{
+	return 0;
 }
 #endif
 
