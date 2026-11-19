@@ -240,7 +240,7 @@ static void sched_count_pick(struct kthread *k, uint32_t n, uint32_t best,
 			     thread_t *th)
 {
 	uint64_t now = rdtsc();
-	uint8_t rank = prio_rank[th->prio_class];
+	uint8_t cls = sched_key_class[th->prio_class];
 	uint32_t i;
 
 	k->stats[STAT_PICK_NORMAL + th->prio_class]++;
@@ -250,7 +250,7 @@ static void sched_count_pick(struct kthread *k, uint32_t n, uint32_t best,
 
 	for (i = 0; i < n; i++) {
 		if (i != best &&
-		    prio_rank[sched_rq_at(k, i)->prio_class] > rank) {
+		    sched_key_class[sched_rq_at(k, i)->prio_class] < cls) {
 			k->stats[STAT_PICK_INVERSIONS]++;
 			break;
 		}
@@ -535,10 +535,14 @@ static __noinline void schedule(void)
 	/*
 	 * With runtime_sched_softirq_first, turn arrived packets into threads
 	 * before picking, so the policy sees new requests and their hints.
-	 * Otherwise packets wait until the runqueue is empty (or the 50 us
-	 * watchdog fires), behind threads of every class.
+	 * Otherwise packets wait until the runqueue is empty, the 50 us
+	 * watchdog fires, a thread yields, or an idle core steals the work. Only
+	 * while the ring has room: threads beyond it go to the overflow list,
+	 * which no policy sees.
 	 */
-	if (sched_softirq_first && softirq_run_locked(l)) {
+	if (sched_softirq_first &&
+	    l->rq_head - l->rq_tail < RUNTIME_RQ_SIZE &&
+	    softirq_run_locked(l)) {
 		STAT(SOFTIRQS_LOCAL)++;
 		goto done;
 	}
@@ -653,6 +657,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 	/* slow path: switch from the uthread stack to the runtime stack */
 	if (k->rq_head == k->rq_tail ||
 	    preempt_cede_needed(k) ||
+	    (sched_softirq_first && softirq_pending(k, now_tsc)) ||
 	    (!disable_watchdog &&
 	     unlikely(now_tsc - k->last_softirq_tsc >
 		      cycles_per_us * RUNTIME_WATCHDOG_US))) {
@@ -741,6 +746,7 @@ static void thread_ready_prepare(struct kthread *k, thread_t *th)
 	/* prepare thread to be runnable */
 	th->thread_ready = true;
 	th->ready_tsc = th->enqueue_tsc = rdtsc();
+	th->enqueue_kthread = k - ks;
 	if (cores_have_affinity(th->last_cpu, k->curr_cpu))
 		STAT(LOCAL_WAKES)++;
 	else
@@ -1019,6 +1025,9 @@ static __always_inline thread_t *__thread_create(void)
 	th->prio_class = THREAD_PRIO_NORMAL;
 	if (thread_self() && thread_self()->prio_class < THREAD_PRIO_NR_USER)
 		th->prio_class = thread_self()->prio_class;
+#ifdef CONFIG_THREAD_HINTS
+	th->sched_key = sched_key_make(th->prio_class, 0, 0);
+#endif
 	preempt_enable();
 
 	th->stack = s;
@@ -1067,7 +1076,32 @@ int thread_set_hints(thread_t *th, const struct thread_hints *h)
 	th->service_tsc = h->service_us * cycles_per_us;
 	th->hinted = (th->prio_class != THREAD_PRIO_NORMAL ||
 		      th->deadline_tsc != 0);
+#ifdef CONFIG_THREAD_HINTS
+	th->sched_key = sched_key_make(h->prio_class, h->deadline_us,
+				       h->service_us);
+#endif
 	return 0;
+}
+
+/**
+ * thread_self_sched_info - when and where the running thread was last readied
+ * @enqueue_tsc: set to the rdtsc() value when it was last made runnable
+ * @enqueue_kthread: set to the kthread that made it runnable
+ * @run_kthread: set to the kthread running it now
+ *
+ * For measurement: e.g. a request handler can report how long it waited in
+ * the runqueue and whether it was stolen.
+ */
+void thread_self_sched_info(uint64_t *enqueue_tsc, unsigned int *enqueue_kthread,
+			    unsigned int *run_kthread)
+{
+	thread_t *th = thread_self();
+
+	*enqueue_tsc = th->enqueue_tsc;
+	*enqueue_kthread = th->enqueue_kthread;
+	preempt_disable();
+	*run_kthread = myk() - ks;
+	preempt_enable();
 }
 
 /**
@@ -1097,6 +1131,7 @@ void thread_mark_softirq(thread_t *th)
 	th->deadline_tsc = 0;
 	th->service_tsc = 0;
 	th->hinted = false;
+	th->sched_key = 0;	/* helper threads sort first */
 }
 
 /**

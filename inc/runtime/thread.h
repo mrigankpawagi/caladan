@@ -55,6 +55,8 @@ struct thread {
 	uint16_t	cur_kthread;
 	uint64_t	ready_tsc;	/* may be backdated (see thread_ready_head) */
 	uint64_t	enqueue_tsc;	/* when last readied (wait accounting) */
+	uint64_t	sched_key;	/* hints packed for the policy (sched_policy.h) */
+	uint16_t	enqueue_kthread; /* kthread that last readied it */
 	uint64_t	total_cycles;
 	uint64_t	deadline_tsc;	/* absolute rdtsc() value; 0 = none */
 	uint64_t	service_tsc;	/* expected run time in cycles; 0 = unknown */
@@ -83,6 +85,9 @@ extern void thread_set_fsbase(thread_t *th, uint64_t fsbase);
 extern void thread_free(thread_t *th);
 extern int thread_set_hints(thread_t *th, const struct thread_hints *h);
 extern void thread_get_hints(const thread_t *th, struct thread_hints *out);
+extern void thread_self_sched_info(uint64_t *enqueue_tsc,
+				   unsigned int *enqueue_kthread,
+				   unsigned int *run_kthread);
 
 DECLARE_PERTHREAD(thread_t *, __self);
 DECLARE_PERTHREAD_ALIAS(thread_t * const, __self, __const_self);

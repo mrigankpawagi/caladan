@@ -14,8 +14,8 @@
  *   cold - every thread struct is flushed from the cache before the pick
  *          (an upper bound: threads stolen from or woken on another core)
  *
- * Thread hints are random (class, deadline, service time), so branches
- * cannot be learned. Output: CSV of policy, depth, case, median and p99
+ * Thread hints are random (class, deadline, service time, packed into the
+ * sort key), so branches cannot be learned. Output: CSV of policy, depth, case, median and p99
  * cycles per pick, with the cost of reading the clock subtracted.
  *
  *   cc -O3 -march=native -o pickbench pickbench.c && ./pickbench
@@ -39,19 +39,17 @@ enum {
 	THREAD_PRIO_NR,
 };
 
-/* same first cache line as runtime's struct thread for the fields read */
+/* the fields a policy reads sit in the first cache line, as in the runtime */
 typedef struct thread {
-	uint8_t		flags;
-	uint8_t		thread_running;
-	uint8_t		interrupt_state;
+	uint8_t		flags[4];
 	uint8_t		prio_class;
 	void		*stack;
-	uint16_t	last_cpu;
-	uint16_t	cur_kthread;
 	uint64_t	ready_tsc;
 	uint64_t	total_cycles;
 	uint64_t	deadline_tsc;
 	uint64_t	service_tsc;
+	uint64_t	enqueue_tsc;
+	uint64_t	sched_key;
 	char		rest[512];	/* trap frame etc.: threads are far apart */
 } __attribute__((aligned(64))) thread_t;
 
@@ -106,10 +104,11 @@ static void fill(uint32_t n)
 		for (i = 0; i < n; i++) {
 			thread_t *th = &threads[s][i];
 
+			/* random hints, so branches cannot be learned */
 			th->prio_class = classes[rand() % 3];
-			th->ready_tsc = 1000000 + i * 100;
-			th->deadline_tsc = (rand() % 4) ? 2000000 + rand() % 100000 : 0;
-			th->service_tsc = (rand() % 4) ? 1000 + rand() % 100000 : 0;
+			th->sched_key = sched_key_make(th->prio_class,
+				(rand() % 4) ? 1000000 + rand() % 100000 : 0,
+				(rand() % 4) ? 1 + rand() % 100 : 0);
 			ks[s].rq[(ks[s].rq_tail + i) % RUNTIME_RQ_SIZE] = th;
 		}
 		memcpy(orig[s], ks[s].rq, sizeof(orig[s]));
