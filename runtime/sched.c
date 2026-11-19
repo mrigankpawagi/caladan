@@ -3,6 +3,7 @@
  */
 
 #include <sched.h>
+#include <string.h>
 #include <immintrin.h>
 
 #include <base/stddef.h>
@@ -174,7 +175,50 @@ static void drain_overflow(struct kthread *l)
 	}
 }
 
+/* count every pick in the hint-aware statistics (runtime_sched_stats) */
+bool sched_stats_enabled;
+
 #ifdef CONFIG_THREAD_HINTS
+/*
+ * Intra-process scheduling policies.
+ *
+ * A policy decides which ready thread in this kthread's runqueue runs next.
+ * All policies are compiled in, listed in sched_policies[], and one is
+ * selected at startup with the runtime config option
+ * "runtime_sched_policy <name>" (default: prio).
+ *
+ * A policy is a choose function. Contract:
+ *  - it is called with k->lock held and preemption disabled, only when the
+ *    ring holds 2 or more ready threads
+ *  - the ring holds n ready threads, 2 <= n <= RUNTIME_RQ_SIZE, oldest first:
+ *    the i-th one (0 <= i < n) is sched_rq_at(k, i)
+ *  - it returns the index i of the thread to run; sched_pop_next() removes
+ *    that thread and keeps the order of the others
+ *  - it gets a read-only view of the kthread, must not block, allocate
+ *    memory or take locks, and must run in O(n) time
+ *  - it may read any thread field (prio_class, ready_tsc, deadline_tsc,
+ *    service_tsc, ...) and call rdtsc()
+ *  - runtime helper threads (prio_class THREAD_PRIO_SOFTIRQ) carry packet,
+ *    timer, and storage processing; a policy should run them first
+ */
+typedef uint32_t (*sched_choose_fn_t)(const struct kthread *k, uint32_t n);
+
+/* the i-th oldest ready thread in @k's ring */
+static inline thread_t *sched_rq_at(const struct kthread *k, uint32_t i)
+{
+	return k->rq[(k->rq_tail + i) % RUNTIME_RQ_SIZE];
+}
+
+/*
+ * "fifo": run the oldest ready thread, ignoring hints. Picks what stock
+ * Caladan picks; its only extra cost is this call when 2 or more threads
+ * are queued.
+ */
+static uint32_t choose_fifo(const struct kthread *k, uint32_t n)
+{
+	return 0;
+}
+
 /* run order by priority class: higher rank runs first */
 static const uint8_t prio_rank[THREAD_PRIO_NR] = {
 	[THREAD_PRIO_LOW] = 0,
@@ -183,36 +227,140 @@ static const uint8_t prio_rank[THREAD_PRIO_NR] = {
 	[THREAD_PRIO_SOFTIRQ] = 3,
 };
 
+/*
+ * "prio": strict priority by class (helper threads, then HIGH, NORMAL,
+ * LOW), oldest first within a class. Without hints it keeps fifo's order,
+ * except that runtime helper threads always run first; it reads the class
+ * of each queued thread. The stock-equivalent baseline is fifo (or a build
+ * with CONFIG_THREAD_HINTS=n).
+ */
+static uint32_t choose_prio(const struct kthread *k, uint32_t n)
+{
+	uint32_t i, best = 0;
+	uint8_t rank = prio_rank[sched_rq_at(k, 0)->prio_class];
+
+	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
+		uint8_t r = prio_rank[sched_rq_at(k, i)->prio_class];
+
+		if (r > rank) {
+			rank = r;
+			best = i;
+		}
+	}
+	return best;
+}
+
+static const struct {
+	const char		*name;
+	sched_choose_fn_t	choose;
+} sched_policies[] = {
+	{ "fifo",	choose_fifo },
+	{ "prio",	choose_prio },
+};
+
+/* the active policy (default: strict priority, so hints take effect) */
+static sched_choose_fn_t sched_choose = choose_prio;
+static const char *sched_choose_name = "prio";
+static int sched_choose_index = 1;
+
+/**
+ * sched_policy_select - selects the scheduling policy by name
+ * @name: a policy name from sched_policies[]
+ *
+ * Returns 0 if successful, or -EINVAL if there is no such policy.
+ */
+int sched_policy_select(const char *name)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(sched_policies); i++) {
+		if (!strcmp(name, sched_policies[i].name)) {
+			sched_choose = sched_policies[i].choose;
+			sched_choose_name = sched_policies[i].name;
+			sched_choose_index = i;
+			return 0;
+		}
+	}
+	return -EINVAL;
+}
+
+const char *sched_policy_name(void)
+{
+	return sched_choose_name;
+}
+
+/* the active policy's index in sched_policies[] (reported in stats) */
+int sched_policy_index(void)
+{
+	return sched_choose_index;
+}
+
+/* per-class counters are indexed by prio_class */
+BUILD_ASSERT(STAT_PICK_HIGH == STAT_PICK_NORMAL + THREAD_PRIO_HIGH);
+BUILD_ASSERT(STAT_PICK_LOW == STAT_PICK_NORMAL + THREAD_PRIO_LOW);
+BUILD_ASSERT(STAT_PICK_SOFTIRQ == STAT_PICK_NORMAL + THREAD_PRIO_SOFTIRQ);
+BUILD_ASSERT(STAT_WAIT_CYCLES_SOFTIRQ ==
+	     STAT_WAIT_CYCLES_NORMAL + THREAD_PRIO_SOFTIRQ);
+
+/*
+ * Records what a pick looked like, for hint-aware measurement (only with
+ * runtime_sched_stats 1, since this bookkeeping is itself overhead): the
+ * class of the chosen thread and how long it waited since it was readied,
+ * the runqueue depth, whether a thread of a higher class was left waiting
+ * (a pick prio would have made differently), and whether a thread with a
+ * deadline was picked after it. The deadline counters count picks, not
+ * requests: a thread that blocks or is preempted is counted again.
+ */
+static void sched_count_pick(struct kthread *k, uint32_t n, uint32_t best,
+			     thread_t *th)
+{
+	uint64_t now = rdtsc();
+	uint8_t rank = prio_rank[th->prio_class];
+	uint32_t i;
+
+	k->stats[STAT_PICK_NORMAL + th->prio_class]++;
+	k->stats[STAT_WAIT_CYCLES_NORMAL + th->prio_class] +=
+		now - MIN(th->enqueue_tsc, now);
+	k->stats[STAT_PICK_SCANNED] += n;
+
+	for (i = 0; i < n; i++) {
+		if (i != best &&
+		    prio_rank[sched_rq_at(k, i)->prio_class] > rank) {
+			k->stats[STAT_PICK_INVERSIONS]++;
+			break;
+		}
+	}
+
+	if (th->deadline_tsc) {
+		k->stats[STAT_PICK_DEADLINE]++;
+		if (now > th->deadline_tsc)
+			k->stats[STAT_DEADLINE_MISS_AT_PICK]++;
+	}
+}
+
 /**
  * sched_pop_next - removes and returns the next thread to run
  * @k: the kthread (its lock must be held and its runqueue non-empty)
  *
- * Policy: strict priority by class, FIFO within a class. Scans the runqueue
- * ring for the highest-ranked thread (the earliest one among equals), then
- * closes the gap it leaves by shifting the entries ahead of it, so the order
- * of the remaining threads is preserved. Threads in the overflow list are not
+ * Asks the active policy which ready thread to run, removes it from the ring,
+ * and slides the threads queued before it back by one slot so the order of
+ * the remaining threads is preserved. Threads in the overflow list are not
  * considered until they move into the ring.
  */
 static thread_t *sched_pop_next(struct kthread *k)
 {
-	uint32_t tail = k->rq_tail, i, best = 0;
+	uint32_t tail = k->rq_tail, i, best;
 	uint32_t n = load_acquire(&k->rq_head) - tail;
-	thread_t *th, *t;
-	uint8_t rank;
+	thread_t *th;
 
 	assert_spin_lock_held(&k->lock);
 	assert(n > 0 && n <= RUNTIME_RQ_SIZE);
 
-	th = k->rq[tail % RUNTIME_RQ_SIZE];
-	rank = prio_rank[th->prio_class];
-	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
-		t = k->rq[(tail + i) % RUNTIME_RQ_SIZE];
-		if (prio_rank[t->prio_class] > rank) {
-			rank = prio_rank[t->prio_class];
-			best = i;
-			th = t;
-		}
-	}
+	best = n > 1 ? sched_choose(k, n) : 0;
+	BUG_ON(best >= n);
+	th = k->rq[(tail + best) % RUNTIME_RQ_SIZE];
+	if (unlikely(sched_stats_enabled))
+		sched_count_pick(k, n, best, th);
 
 	/* close the gap: slide the threads queued before @th back by one slot */
 	for (i = best; i > 0; i--)
@@ -226,6 +374,22 @@ static thread_t *sched_pop_next(struct kthread *k)
 static inline thread_t *sched_pop_next(struct kthread *k)
 {
 	return k->rq[k->rq_tail++ % RUNTIME_RQ_SIZE];
+}
+
+/* without hint support only the stock FIFO order exists */
+int sched_policy_select(const char *name)
+{
+	return strcmp(name, "fifo") ? -EINVAL : 0;
+}
+
+const char *sched_policy_name(void)
+{
+	return "fifo";
+}
+
+int sched_policy_index(void)
+{
+	return 0;
 }
 #endif
 
@@ -265,6 +429,8 @@ static uint32_t drain_threads(struct kthread *k, struct list_head *l, uint32_t n
 			if (!th)
 				break;
 		}
+		if (update_tail && thread_is_hinted(th))
+			STAT(HINTED_STOLEN)++;
 		list_add_tail(l, &th->link);
 	}
 
@@ -625,7 +791,7 @@ static void thread_ready_prepare(struct kthread *k, thread_t *th)
 
 	/* prepare thread to be runnable */
 	th->thread_ready = true;
-	th->ready_tsc = rdtsc();
+	th->ready_tsc = th->enqueue_tsc = rdtsc();
 	if (cores_have_affinity(th->last_cpu, k->curr_cpu))
 		STAT(LOCAL_WAKES)++;
 	else
@@ -657,6 +823,8 @@ void thread_ready_locked(thread_t *th)
 		list_add_tail(&k->rq_overflow, &th->link);
 		ACCESS_ONCE(k->q_ptrs->rq_head)++;
 		STAT(RQ_OVERFLOW)++;
+		if (thread_is_hinted(th))
+			STAT(HINTED_OVERFLOW)++;
 		return;
 	}
 
@@ -692,6 +860,8 @@ void thread_ready_head_locked(thread_t *th)
 		list_add(&k->rq_overflow, &oldestth->link);
 		k->rq_head--;
 		STAT(RQ_OVERFLOW)++;
+		if (thread_is_hinted(oldestth))
+			STAT(HINTED_OVERFLOW)++;
 	}
 	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;
 	ACCESS_ONCE(k->q_ptrs->rq_head)++;
@@ -719,8 +889,10 @@ void thread_ready(thread_t *th)
 		drain_overflow(k);
 		spin_unlock(&k->lock);
 		ACCESS_ONCE(k->q_ptrs->rq_head)++;
-		putk();
 		STAT(RQ_OVERFLOW)++;
+		if (thread_is_hinted(th))
+			STAT(HINTED_OVERFLOW)++;
+		putk();
 		return;
 	}
 
@@ -754,6 +926,8 @@ void thread_ready_head(thread_t *th)
 		list_add(&k->rq_overflow, &oldestth->link);
 		k->rq_head--;
 		STAT(RQ_OVERFLOW)++;
+		if (thread_is_hinted(oldestth))
+			STAT(HINTED_OVERFLOW)++;
 	}
 	spin_unlock(&k->lock);
 	ACCESS_ONCE(k->q_ptrs->oldest_tsc) = th->ready_tsc;

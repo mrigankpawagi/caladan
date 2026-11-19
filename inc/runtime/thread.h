@@ -53,7 +53,8 @@ struct thread {
 	struct stack	*stack;
 	uint16_t	last_cpu;
 	uint16_t	cur_kthread;
-	uint64_t	ready_tsc;
+	uint64_t	ready_tsc;	/* may be backdated (see thread_ready_head) */
+	uint64_t	enqueue_tsc;	/* when last readied (wait accounting) */
 	uint64_t	total_cycles;
 	uint64_t	deadline_tsc;	/* absolute rdtsc() value; 0 = none */
 	uint64_t	service_tsc;	/* expected run time in cycles; 0 = unknown */

@@ -1,5 +1,6 @@
 use clap::Arg;
 
+use crate::payload::HINT_CLASS_IGNORED;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cmp::min;
 use std::io;
@@ -185,7 +186,11 @@ impl LoadgenProtocol for HttpProtocol {
         buf.extend("\r\n\r\n".as_bytes());
     }
 
-    fn read_response(&self, mut sock: &Connection, buf: &mut Buffer) -> io::Result<(usize, u64)> {
+    fn read_response(
+        &self,
+        mut sock: &Connection,
+        buf: &mut Buffer,
+    ) -> io::Result<(usize, u64, u8)> {
         let mut pstate = ParseState::new();
 
         if buf.data_size() == 0 {
@@ -233,7 +238,7 @@ impl LoadgenProtocol for HttpProtocol {
                 }
             }
 
-            return Ok((0, 0));
+            return Ok((0, 0, HINT_CLASS_IGNORED));
         }
     }
 }

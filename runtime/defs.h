@@ -300,6 +300,30 @@ enum {
 	STAT_REMOTE_WAKES,
 	STAT_RQ_OVERFLOW,
 
+	/*
+	 * thread-hint scheduler counters (only counted with CONFIG_THREAD_HINTS).
+	 * The PICK_, WAIT_CYCLES_, DEADLINE and INVERSIONS counters are kept
+	 * only with runtime_sched_stats 1 (they read as 0 otherwise; the
+	 * reported sched_stats value says which); HINTED_STOLEN and
+	 * HINTED_OVERFLOW are always kept.
+	 * The four PICK_ and four WAIT_CYCLES_ entries are indexed by prio_class
+	 * and must stay in THREAD_PRIO_* order: NORMAL, HIGH, LOW, SOFTIRQ.
+	 */
+	STAT_PICK_NORMAL,		/* threads run, by class */
+	STAT_PICK_HIGH,
+	STAT_PICK_LOW,
+	STAT_PICK_SOFTIRQ,
+	STAT_WAIT_CYCLES_NORMAL,	/* cycles spent in the runqueue, by class */
+	STAT_WAIT_CYCLES_HIGH,
+	STAT_WAIT_CYCLES_LOW,
+	STAT_WAIT_CYCLES_SOFTIRQ,
+	STAT_PICK_SCANNED,		/* sum of runqueue depth at each pick */
+	STAT_PICK_INVERSIONS,		/* picks that left a higher class waiting */
+	STAT_PICK_DEADLINE,		/* picks of a thread with a deadline */
+	STAT_DEADLINE_MISS_AT_PICK,	/* ... made after that deadline */
+	STAT_HINTED_STOLEN,		/* hinted threads taken by work stealing */
+	STAT_HINTED_OVERFLOW,		/* hinted threads sent to the overflow list */
+
 	/* network stack counters */
 	STAT_RX_BYTES,
 	STAT_RX_PACKETS,
@@ -739,6 +763,10 @@ extern void thread_cede(void);
 extern void thread_ready_locked(thread_t *th);
 extern void thread_ready_head_locked(thread_t *th);
 extern void thread_mark_softirq(thread_t *th);
+extern int sched_policy_select(const char *name);
+extern const char *sched_policy_name(void);
+extern int sched_policy_index(void);
+extern bool sched_stats_enabled;
 
 /**
  * thread_is_hinted - true if @th carries scheduling hints. Compiles to false

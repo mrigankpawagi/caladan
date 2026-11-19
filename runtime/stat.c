@@ -36,6 +36,22 @@ static const char *stat_names[] = {
 	"remote_wakes",
 	"rq_overflow",
 
+	/* thread-hint scheduler counters */
+	"pick_normal",
+	"pick_high",
+	"pick_low",
+	"pick_softirq",
+	"wait_cycles_normal",
+	"wait_cycles_high",
+	"wait_cycles_low",
+	"wait_cycles_softirq",
+	"pick_scanned",
+	"pick_inversions",
+	"pick_deadline",
+	"deadline_miss_at_pick",
+	"hinted_stolen",
+	"hinted_overflow",
+
 	/* network stack counters */
 	"rx_bytes",
 	"rx_packets",
@@ -120,6 +136,14 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 
 	/* report the clock rate */
 	ret = append_stat(&pos, end, "cycles_per_us", cycles_per_us);
+	if (ret)
+		return ret;
+
+	/* report which policy produced these numbers, and if picks are counted */
+	ret = append_stat(&pos, end, "sched_policy", sched_policy_index());
+	if (ret)
+		return ret;
+	ret = append_stat(&pos, end, "sched_stats", sched_stats_enabled);
 	if (ret)
 		return ret;
 

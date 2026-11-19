@@ -10,6 +10,7 @@
 #include <net/udp.h>
 #include <runtime/net.h>
 #include <runtime/poll.h>
+#include <runtime/thread.h>
 #include <sys/uio.h>
 
 /* the maximum possible payload size (for the largest possible MTU) */
@@ -103,8 +104,25 @@ struct udp_spawn_data {
 
 typedef void (*udpspawn_fn_t)(struct udp_spawn_data *d);
 
+/*
+ * A classifier inspects a datagram (payload and addresses, in @d) and fills
+ * in scheduling hints for the thread that will handle it. It runs in the
+ * runtime's packet processing thread before the handler thread is queued,
+ * so it must be short and must not block. @arg is the pointer given to
+ * udp_create_spawner_classified(). Leaving @h zeroed means "no hints";
+ * invalid hints are ignored and the handler runs unhinted.
+ */
+typedef void (*udpspawn_classify_fn_t)(void *arg,
+				       const struct udp_spawn_data *d,
+				       struct thread_hints *h);
+
 extern int udp_create_spawner(struct netaddr laddr, udpspawn_fn_t fn,
 			      udpspawner_t **s_out);
+extern int udp_create_spawner_classified(struct netaddr laddr,
+					 udpspawn_fn_t fn,
+					 udpspawn_classify_fn_t classify,
+					 void *classify_arg,
+					 udpspawner_t **s_out);
 extern void udp_destroy_spawner(udpspawner_t *s);
 extern ssize_t udp_send(const void *buf, size_t len,
 			struct netaddr laddr, struct netaddr raddr);

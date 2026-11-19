@@ -1,4 +1,5 @@
 use crate::Buffer;
+use crate::payload::HINT_CLASS_IGNORED;
 use crate::Connection;
 use crate::LoadgenProtocol;
 use crate::Packet;
@@ -96,7 +97,11 @@ impl LoadgenProtocol for DnsProtocol {
             .unwrap();
     }
 
-    fn read_response(&self, mut sock: &Connection, buf: &mut Buffer) -> io::Result<(usize, u64)> {
+    fn read_response(
+        &self,
+        mut sock: &Connection,
+        buf: &mut Buffer,
+    ) -> io::Result<(usize, u64, u8)> {
         let scratch = buf.get_empty_buf();
         let len = sock.read(&mut scratch[..])?;
         if len == 0 {
@@ -109,6 +114,6 @@ impl LoadgenProtocol for DnsProtocol {
 
         let pos = Header::size();
         let end = pos + scratch[pos] as usize + 1;
-        Ok((pull_usize(&scratch[pos + 1..end]), 0))
+        Ok((pull_usize(&scratch[pos + 1..end]), 0, HINT_CLASS_IGNORED))
     }
 }
