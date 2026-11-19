@@ -121,7 +121,8 @@ def ensure_stock_build(cfg, server, sha):
         return
     log("building %s (stock) on server in %s" % (sha[:10], repo))
     server.run(
-        "set -e; [ -d %s ] || git clone -q %s %s; cd %s; git fetch -q origin; "
+        "set -e; [ -d %s ] || git clone -q %s %s; cd %s; "
+        "git remote set-url origin $(git -C %s remote get-url origin); git fetch -q origin; "
         "git checkout -q -f --detach %s; "
         "sed -i 's/^CONFIG_THREAD_HINTS=.*/CONFIG_THREAD_HINTS=n/' build/config; "
         "[ -d deps/pcm/build ] || (cp -r %s/deps %s/ && cp -r %s/rdma-core %s/ && "
@@ -130,7 +131,8 @@ def ensure_stock_build(cfg, server, sha):
         "make -C bindings/cc -j20 > /dev/null 2>&1; "
         "cd apps/loadgen && touch build.rs src/main.rs; "
         "env %s cargo build --release > /tmp/study_cargo_stock.log 2>&1; "
-        "echo '%s' > %s/.study_build" % (repo, cfg["repo"], repo, repo, sha, cfg["repo"], repo,
+        "echo '%s' > %s/.study_build" % (repo, cfg["repo"], repo, repo, cfg["repo"], sha,
+                                         cfg["repo"], repo,
                                          cfg["repo"], repo, cfg["repo"], repo,
                                          cfg["cargo_env"], want, repo), timeout=3600)
 
@@ -264,14 +266,25 @@ def keep_lines(text):
 
 
 def append_csv(path, rows):
+    """Appends rows; if they bring columns the file lacks (e.g. a variant
+    with a batch job), the file is rewritten with the union of columns, so
+    no value is silently dropped."""
     if not rows:
         return
-    new = not os.path.exists(path)
-    fields = list(rows[0].keys())
-    with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        if new:
-            w.writeheader()
+    fields = []
+    for r in rows:
+        fields += [k for k in r if k not in fields]
+    old = []
+    if os.path.exists(path):
+        with open(path, newline="") as f:
+            rd = csv.DictReader(f)
+            old_fields = rd.fieldnames or []
+            old = list(rd)
+        fields = old_fields + [k for k in fields if k not in old_fields]
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(old)
         w.writerows(rows)
 
 

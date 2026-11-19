@@ -1,0 +1,123 @@
+{
+ "runs": [
+  {
+   "code_sha": "699fc2828cfb3a9aab80757d3e5c7d082792b8ca",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "fifo",
+    "prio",
+    "prio_edf",
+    "hinted",
+    "edf",
+    "fifo+rx",
+    "prio+rx",
+    "prio_edf+rx",
+    "hinted+rx",
+    "edf+rx"
+   ],
+   "repeats": 3,
+   "order": [
+    "edf+rx",
+    "hinted+rx",
+    "prio",
+    "hinted",
+    "fifo+rx",
+    "fifo",
+    "prio+rx",
+    "prio_edf+rx",
+    "prio_edf",
+    "edf",
+    "fifo",
+    "hinted+rx",
+    "prio+rx",
+    "prio_edf+rx",
+    "prio_edf",
+    "edf",
+    "fifo+rx",
+    "edf+rx",
+    "prio",
+    "hinted",
+    "fifo+rx",
+    "edf+rx",
+    "prio+rx",
+    "fifo",
+    "hinted+rx",
+    "prio",
+    "edf",
+    "hinted",
+    "prio_edf+rx",
+    "prio_edf"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.767\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-18T23:52:04",
+   "finished": "2026-11-19T00:25:11"
+  }
+ ],
+ "workload": {
+  "id": "w3-deadlines",
+  "title": "Deadline within a class: equal work, 50 us vs 500 us deadlines, all HIGH",
+  "server_kthreads": 4,
+  "conns": 64,
+  "rho": [
+   0.5,
+   0.6,
+   0.7,
+   0.8,
+   0.85,
+   0.9
+  ],
+  "kinds": [
+   {
+    "name": "tight",
+    "service_us": 10,
+    "weight": 0.2,
+    "deadline_us": 50,
+    "slo_us": 50,
+    "scored": true,
+    "hint": "high:50:10"
+   },
+   {
+    "name": "loose",
+    "service_us": 10,
+    "weight": 0.8,
+    "deadline_us": 500,
+    "slo_us": 500,
+    "scored": true,
+    "hint": "high:500:10"
+   }
+  ],
+  "policies": [
+   "fifo",
+   "prio",
+   "prio_edf",
+   "hinted",
+   "edf",
+   "fifo+rx",
+   "prio+rx",
+   "prio_edf+rx",
+   "hinted+rx",
+   "edf+rx"
+  ],
+  "ladder": "deadline decides: prio_edf, hinted and edf separate from fifo and prio (which tie: one class); hinted ties prio_edf (equal sizes)"
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 318.99,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node, clock pinned at 2.4 GHz (performance governor, no turbo): 31899, 31900, 31899 iterations per 100 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel \"ias noht\" with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads; clock pinned at 2.4 GHz",
+  "handler_us": {
+   "1": 1.22,
+   "5": 5.225,
+   "10": 10.235,
+   "50": 50.26
+  },
+  "handler_us_note": "mean handler start-to-end time per nominal service time, measured in place (results/cal-handler/cal, fifo, 20k req/s, 2 repeats, Segments svc); rho = rate x mean handler time / cores"
+ },
+ "session": "v2",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}

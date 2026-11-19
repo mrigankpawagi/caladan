@@ -1,0 +1,11 @@
+Group, Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, ClientDeadlineMet, Start, StartTsc, CPU Used (%)
+all, mix, 237172, 237172, 0, 99.85, 7.0, 30.0, 103.0, 219.0, 362.0, 490.0, 711.0, -, 1795068768, 63653858167637648, 399.56%
+class:normal, mix, 237172, 237172, -, -, 7.0, 30.0, 103.0, 219.0, 362.0, 490.0, 711.0, -, 1795068768, 63653858167637648, -
+kind:long, mix, 47439, 47439, 0, 99.85, 52.0, 64.0, 133.0, 251.0, 398.0, 524.0, 711.0, -, 1795068768, 63653858167637648, -
+kind:short, mix, 189733, 189733, 0, 99.85, 7.0, 19.0, 89.0, 206.0, 350.0, 481.0, 711.0, -, 1795068768, 63653858167637648, -
+Means: all=45.80 class:normal=45.80 kind:long=81.81 kind:short=36.80
+Segments: kind:long mean n=171977 lag=-4.15 in=14.18 rq=15.79 svc=50.17 out=2.18 stolen=16.8% pktstolen=34.0% | tail99 n=1721 lag=-4.15 in=33.22 rq=222.93 svc=54.49 out=2.26 stolen=27.7% pktstolen=0.4% | tscerr mean=0.51 max=2.92
+Segments: kind:short mean n=687819 lag=-4.15 in=14.17 rq=15.88 svc=5.09 out=2.16 stolen=17.0% pktstolen=34.0% | tail99 n=6880 lag=-4.12 in=33.54 rq=225.65 svc=5.37 out=2.29 stolen=28.4% pktstolen=0.2% | tscerr mean=0.50 max=3.49
+RtStats: core_migrations=0 cycles_per_us=2394 deadline_miss_at_pick=0 drops=0 flow_steering_cycles=0 hinted_overflow=0 hinted_stolen=0 local_runs=1366076 local_wakes=1527887 mag_alloc=1 mag_free=0 parks=0 pick_calls=0 pick_cycles=0 pick_deadline=0 pick_high=0 pick_inversions=0 pick_low=0 pick_normal=0 pick_scanned=0 pick_softirq=0 pool_alloc=7951 pool_free=7948 preemptions=78 program_cycles=33980765240 remote_runs=603654 remote_wakes=441844 reschedules=1969730 rq_overflow=39 rx_bytes=70694307 rx_hw_drop=0 rx_packets=955329 rx_tcp_in_order=1 rx_tcp_out_of_order=0 rx_tcp_text_cycles=0 sched_cycles=4289822692 sched_policy=0 sched_stats=0 softirqs_local=688644 softirqs_stolen=325004 threads_stolen=169146 tsc=9578097744 tx_bytes=70695500 tx_packets=955333 txq_overflow=0 wait_cycles_high=0 wait_cycles_low=0 wait_cycles_normal=0 wait_cycles_softirq=0
+WARNING: Schedule adherance is low - the client may be saturating.
+CLIENT_EXIT=0

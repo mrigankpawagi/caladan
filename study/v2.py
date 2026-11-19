@@ -298,6 +298,12 @@ def analyze_workload(wid, session, variant=None):
                 "%.0f" % statistics.median(ar[(c, g)]) if ar.get((c, g)) else "-" for g in grid)))
         out.append("")
 
+    out += ["## Mean-wait check (pre-registered)", "",
+            "dwait = growth of the kind's mean latency over rho %.2f, net of the change in "
+            "its handler time, paired by repeat; predicted = pred(rho) - pred(%.2f) pooled / "
+            "per core." % (grid[0], grid[0]), ""]
+    out += delta_wait_table(wid, session, variant)
+    out.append("")
     name = "%s-%s%s" % (wid, session, "-" + variant if variant else "")
     open(os.path.join(d, "tables%s.md" % ("-" + variant if variant else "")), "w").write(
         "\n".join(out) + "\n")
@@ -417,14 +423,239 @@ def knee(wid, session, bound=70.0):
     return caps
 
 
+def delta_wait_table(wid, session, variant=None):
+    """The pre-registered mean-wait check (DESIGN-v2.md, amendments):
+    measured dwait(rho) = [mean(rho) - mean(0.5)] - [handler(rho) - handler(0.5)]
+    per kind, paired within each repeat (median over repeats), against the
+    predicted pred(rho) - pred(0.5). Pass: within [pooled, per-core] for
+    priority orders; within +-25% of pooled for fifo."""
+    d, meta, spec, rows, segs, ctr = load_session(wid, session, variant)
+    if variant:
+        spec = dict(spec, **spec.get("variants", {}).get(variant, {}))
+    cal = meta["calibration"]
+    grid = sorted(set(float(r["rho"]) for r in rows if r["rho"]))
+    base_rho = grid[0]
+    mean = {}
+    for r in rows:
+        if r["rho"] and r["group"].startswith("kind:") and fnum(r["mean"]) is not None:
+            mean[(r["policy"], r["group"][5:], float(r["rho"]), int(r["repeat"]))] = fnum(r["mean"])
+    svc = {}
+    for x in segs:
+        if x["rho"] and x["part"] == "mean":
+            svc[(x["policy"], x["group"][5:], float(x["rho"]), int(x["repeat"]))] = float(x["svc"])
+    configs = order(set(r["policy"] for r in rows))
+    kinds = [k["name"] for k in spec["kinds"]]
+    out = ["| config | rho | " + " | ".join("%s dwait meas (pooled / per core) ok" % k
+                                            for k in kinds) + " |",
+           "|---|---|" + "---|" * len(kinds)]
+    verdicts = []
+    for c in configs:
+        base = c.split("+")[0]
+        for rho in [g for g in grid if g >= 0.8]:
+            p1, p0 = analyze.predictions(spec, cal, rho), analyze.predictions(spec, cal, base_rho)
+            c1 = analyze.predictions(spec, cal, rho, pooled=False)
+            c0 = analyze.predictions(spec, cal, base_rho, pooled=False)
+            cells = []
+            for n in kinds:
+                ds = []
+                for rep in range(5):
+                    k1, k0 = (c, n, rho, rep), (c, n, base_rho, rep)
+                    if k1 in mean and k0 in mean and k1 in svc and k0 in svc:
+                        ds.append((mean[k1] - mean[k0]) - (svc[k1] - svc[k0]))
+                if not ds or base not in p1:
+                    cells.append("-")
+                    continue
+                m = statistics.median(ds)
+                lo = p1[base][n] - p0[base][n]
+                hi = c1[base][n] - c0[base][n]
+                if base == "fifo" or base == "stock":
+                    ok = abs(m - lo) <= 0.25 * lo
+                else:
+                    ok = min(lo, hi) <= m <= max(lo, hi)
+                if "+" not in c:
+                    verdicts.append(ok)
+                cells.append("%.1f (%.1f / %.0f) %s" % (m, lo, hi, "yes" if ok else "NO"))
+            out.append("| %s | %.2f | %s |" % (c, rho, " | ".join(cells)))
+    out.append("")
+    out.append("Pre-registered check passes in %d of %d cells (policies without +rx)."
+               % (sum(verdicts), len(verdicts)))
+    return out
+
+
+WORKLOAD_ORDER = [("w2b-hol-class", "W2b class"), ("w3-deadlines", "W3 deadline"),
+                  ("w2a-hol-service", "W2a size"), ("w4-wrong-hints", "W4 wrong size"),
+                  ("w6-mixed-hints", "W6 all hints")]
+# cells where the ladder makes two configurations identical by construction
+# (DESIGN-v2.md): workload -> groups of policies that must tie
+CONSTRUCTION_TIES = {
+    "w2b-hol-class": [["prio", "prio_edf", "hinted"], ["fifo", "edf"]],
+    "w3-deadlines": [["fifo", "prio"], ["prio_edf", "hinted", "edf"]],
+    "w2a-hol-service": [["fifo", "prio", "prio_edf", "edf"]],
+    "w4-wrong-hints": [["fifo", "prio", "prio_edf", "edf"]],
+    "w6-mixed-hints": [["prio_edf", "hinted"]],
+}
+
+
+def scorecard(session):
+    """SLO-load of every configuration on every workload, ladder order."""
+    res = {}
+    for wid, _ in WORKLOAD_ORDER:
+        try:
+            res[wid] = analyze_workload(wid, session)
+        except FileNotFoundError:
+            pass
+    configs = order(set(c for r in res.values() for c in r["configs"]))
+    lines = ["# Ladder scorecard, session %s" % session, "",
+             "SLO-load (median of repeats; >= means it never crossed within the grid). Workloads "
+             "ordered by the information they need. Cells marked = must tie with the others "
+             "marked = in the same column by construction.", "",
+             "| config | " + " | ".join(lab for wid, lab in WORKLOAD_ORDER if wid in res) + " |",
+             "|---|" + "---|" * len(res)]
+    fig, ax = plt.subplots(figsize=(1.6 * len(res) + 2.2, 0.42 * len(configs) + 1.4))
+    fig.patch.set_facecolor("#fcfcfb")
+    ax.set_facecolor("#fcfcfb")
+    cols = [wid for wid, _ in WORKLOAD_ORDER if wid in res]
+    import matplotlib.colors as mcolors
+    cmap = mcolors.LinearSegmentedColormap.from_list("seq", ["#f0efec", "#86b6ef", "#2a78d6",
+                                                             "#184f95"])
+    for i, c in enumerate(configs):
+        cells = []
+        for j, wid in enumerate(cols):
+            per = res[wid]["sload"].get(c)
+            if not per:
+                cells.append("-")
+                continue
+            m = statistics.median(v for v, _ in per.values())
+            ge = all(cz == ">=" for _, cz in per.values())
+            tie = any(c.split("+")[0] in g and "+" not in c
+                      for g in CONSTRUCTION_TIES.get(wid, []))
+            txt = "%s%.2f%s" % (">=" if ge else "", m, " =" if tie else "")
+            cells.append(txt)
+            shade = min(max((m - 0.7) / 0.2, 0), 1)
+            ax.add_patch(plt.Rectangle((j, i), 0.96, 0.9, color=cmap(shade)))
+            ax.text(j + 0.48, i + 0.45, txt, ha="center", va="center", fontsize=8.5,
+                    color="#ffffff" if shade > 0.55 else "#0b0b0b")
+        lines.append("| %s | %s |" % (c, " | ".join(cells)))
+    ax.set_xlim(0, len(cols))
+    ax.set_ylim(len(configs), 0)
+    ax.set_xticks([j + 0.48 for j in range(len(cols))],
+                  [lab for wid, lab in WORKLOAD_ORDER if wid in res], fontsize=8.5)
+    ax.xaxis.tick_top()
+    ax.set_yticks([i + 0.45 for i in range(len(configs))], configs, fontsize=8.5)
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    ax.tick_params(length=0)
+    ax.set_title("SLO-load: highest load meeting every scored SLO (higher is better; "
+                 "= marks a tie by construction)", fontsize=9.5, loc="left", pad=28,
+                 color="#0b0b0b")
+    fig.tight_layout()
+    for ext, kw in (("svg", {}), ("png", {"dpi": 150})):
+        fig.savefig(os.path.join(HERE, "plots", "v2-scorecard-%s.%s" % (session, ext)),
+                    facecolor=fig.get_facecolor(), bbox_inches="tight", **kw)
+    out = os.path.join(HERE, "results", "scorecard-%s.md" % session)
+    open(out, "w").write("\n".join(lines) + "\n")
+    print("\n".join(lines))
+
+
+def timesplit(wid, session, kind, variant=None):
+    """Where the scored kind's time goes at the top load: mean and slowest 1%,
+    per configuration (client lag, which is negative, is left out)."""
+    d, meta, spec, rows, segs, ctr = load_session(wid, session, variant)
+    grid = sorted(set(float(r["rho"]) for r in rows if r["rho"]))
+    top = grid[-1]
+    acc = defaultdict(list)
+    for x in segs:
+        if x["rho"] and abs(float(x["rho"]) - top) < 1e-9 and x["group"] == "kind:" + kind:
+            acc[(x["policy"], x["part"])].append(x)
+    configs = order(set(c for c, _ in acc))
+    parts = [("in", "send to enqueue (delivery, RX queue)", "#eb6834"),
+             ("rq", "runqueue", "#2a78d6"), ("svc", "handler", "#c3c2b7"),
+             ("out", "reply path", "#898781")]
+    fig, axes = plt.subplots(1, 2, figsize=(10, 0.42 * len(configs) + 1.6), sharey=True)
+    fig.patch.set_facecolor("#fcfcfb")
+    for ax, part, title in zip(axes, ("mean", "tail99"), ("mean request", "slowest 1%")):
+        setup_axes(ax)
+        ax.grid(axis="x", color="#e1e0d9", linewidth=0.6)
+        ax.grid(axis="y", visible=False)
+        for i, c in enumerate(configs):
+            xs = acc.get((c, part))
+            if not xs:
+                continue
+            left = 0
+            for k, lab, col in parts:
+                v = statistics.mean(float(x[k]) for x in xs)
+                ax.barh(i, v, left=left, color=col, height=0.7, edgecolor="#fcfcfb",
+                        linewidth=1, label=lab if i == 0 else None)
+                left += v
+            ax.annotate("%.0f" % left, (left, i), xytext=(3, 0), textcoords="offset points",
+                        va="center", fontsize=7.5, color="#0b0b0b")
+        ax.set_yticks(range(len(configs)), configs)
+        ax.set_title("%s: %s" % (kind, title), fontsize=9.5, loc="left", color="#0b0b0b")
+        ax.set_xlabel("us")
+    axes[0].invert_yaxis()  # shared axis: once, so the ladder reads top-down
+    h, lab = axes[0].get_legend_handles_labels()
+    fig.legend(h, lab, loc="upper center", ncol=4, frameon=False, fontsize=8.5,
+               bbox_to_anchor=(0.5, 1.04))
+    fig.suptitle("%s at rho %.2f: where %s requests spend their time" % (wid, top, kind),
+                 x=0.01, ha="left", y=1.1, fontsize=10.5, color="#0b0b0b")
+    fig.tight_layout()
+    name = "v2-%s-%s%s-split" % (wid, session, "-" + variant if variant else "")
+    for ext, kw in (("svg", {}), ("png", {"dpi": 150})):
+        fig.savefig(os.path.join(HERE, "plots", name + "." + ext),
+                    facecolor=fig.get_facecolor(), bbox_inches="tight", **kw)
+    plt.close(fig)
+
+
+def knee_brackets(wid, session, bound=70.0):
+    """Stage-2 levels: a 10k grid strictly inside each configuration's
+    stage-1 bracket (last level passing in every repeat, first failing)."""
+    d, meta, spec, rows, segs, ctr = load_session(wid, session)
+    grid = sorted(set(int(r["load_rps"]) for r in rows))
+    ok = defaultdict(dict)
+    for r in rows:
+        if r["group"] != "all":
+            continue
+        p = fnum(r.get("p99"))
+        good = not int(r.get("failed") or 0) and p is not None and not math.isinf(p) \
+            and p <= bound and (fnum(r.get("dropped")) or 0) == 0
+        ok[(r["policy"], int(r["load_rps"]))][int(r["repeat"])] = good
+    out = {}
+    for c in order(set(r["policy"] for r in rows)):
+        last = None
+        for g in grid:
+            v = ok.get((c, g), {})
+            if v and all(v.values()):
+                last = g
+            else:
+                break
+        if last is None or last == grid[-1]:
+            out[c] = []
+            continue
+        nxt = grid[grid.index(last) + 1]
+        out[c] = list(range(last + 10000, nxt, 10000))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("args", nargs="+")
     ap.add_argument("--variant")
     ap.add_argument("--knee", action="store_true")
+    ap.add_argument("--brackets", action="store_true")
+    ap.add_argument("--scorecard", action="store_true")
+    ap.add_argument("--split", help="kind for the time-split figure")
     a = ap.parse_args()
     if a.knee:
         knee(*a.args)
+        return
+    if a.brackets:
+        print(json.dumps(knee_brackets(*a.args)))
+        return
+    if a.scorecard:
+        scorecard(a.args[0])
+        return
+    if a.split:
+        timesplit(a.args[0], a.args[1], a.split, a.variant)
         return
     res = analyze_workload(a.args[0], a.args[1], a.variant)
     d = os.path.join(HERE, "results", a.args[0], a.args[1])

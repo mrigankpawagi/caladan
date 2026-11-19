@@ -1,0 +1,109 @@
+{
+ "runs": [
+  {
+   "code_sha": "699fc2828cfb3a9aab80757d3e5c7d082792b8ca",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "fifo",
+    "prio",
+    "prio_edf",
+    "hinted",
+    "edf",
+    "hinted+rx"
+   ],
+   "repeats": 3,
+   "order": [
+    "edf",
+    "hinted+rx",
+    "fifo",
+    "hinted",
+    "prio",
+    "prio_edf",
+    "edf",
+    "hinted",
+    "prio_edf",
+    "hinted+rx",
+    "fifo",
+    "prio",
+    "edf",
+    "fifo",
+    "prio_edf",
+    "hinted+rx",
+    "hinted",
+    "prio"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.699\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T01:17:26",
+   "finished": "2026-11-19T01:37:02"
+  }
+ ],
+ "workload": {
+  "id": "w4-wrong-hints",
+  "title": "Wrong sizes: W2a with 10% of long requests claiming to be short",
+  "server_kthreads": 4,
+  "conns": 64,
+  "rho": [
+   0.5,
+   0.6,
+   0.7,
+   0.8,
+   0.85,
+   0.9
+  ],
+  "kinds": [
+   {
+    "name": "short",
+    "service_us": 5,
+    "weight": 0.8,
+    "slo_us": 100,
+    "scored": true,
+    "hint": "normal:0:5"
+   },
+   {
+    "name": "long",
+    "service_us": 50,
+    "weight": 0.18,
+    "slo_us": 550,
+    "scored": true,
+    "hint": "normal:0:50"
+   },
+   {
+    "name": "liar",
+    "service_us": 50,
+    "weight": 0.02,
+    "slo_us": 550,
+    "scored": true,
+    "hint": "normal:0:5"
+   }
+  ],
+  "policies": [
+   "fifo",
+   "prio",
+   "prio_edf",
+   "hinted",
+   "edf",
+   "hinted+rx"
+  ],
+  "ladder": "as W2a; how much hinted keeps when 10% of long requests lie"
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 318.99,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node, clock pinned at 2.4 GHz (performance governor, no turbo): 31899, 31900, 31899 iterations per 100 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel \"ias noht\" with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads; clock pinned at 2.4 GHz",
+  "handler_us": {
+   "1": 1.22,
+   "5": 5.225,
+   "10": 10.235,
+   "50": 50.26
+  },
+  "handler_us_note": "mean handler start-to-end time per nominal service time, measured in place (results/cal-handler/cal, fifo, 20k req/s, 2 repeats, Segments svc); rho = rate x mean handler time / cores"
+ },
+ "session": "v2",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}
