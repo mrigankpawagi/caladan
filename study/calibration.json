@@ -1,8 +1,13 @@
 {
  "fakework": "sqrt",
- "iters_per_us": 326.9,
- "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node under the runtime: 32674, 32717, 32672 iterations per 100 us",
- "overhead_us": 0.2,
- "overhead_us_note": "per-request cost beyond the handler's work: 10 us requests on 4 kthreads saturate at 393k req/s (results/probe-10us), 4 / 393k = 10.2 us",
- "testbed_note": "server and client on one node (hp070), IOKernel 'ias noht' with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads"
+ "iters_per_us": 318.99,
+ "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node, clock pinned at 2.4 GHz (performance governor, no turbo): 31899, 31900, 31899 iterations per 100 us",
+ "testbed_note": "server and client on one node (hp070), IOKernel \"ias noht\" with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads; clock pinned at 2.4 GHz",
+ "handler_us": {
+  "1": 1.22,
+  "5": 5.225,
+  "10": 10.235,
+  "50": 50.26
+ },
+ "handler_us_note": "mean handler start-to-end time per nominal service time, measured in place (results/cal-handler/cal, fifo, 20k req/s, 2 repeats, Segments svc); rho = rate x mean handler time / cores"
 }

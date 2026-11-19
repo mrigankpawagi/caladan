@@ -1,0 +1,9 @@
+workload,variant,policy,stats,repeat,load_rps,rho,group,part,n,lag,in,rq,svc,out,stolen,tscerr_mean,tscerr_max
+cal-client,k4c4,fifo,0,0,267000,0.95,kind:long,mean,191621.0,-4.15,26.86,138.6,50.21,2.18,10.9,0.53,2.95
+cal-client,k4c4,fifo,0,0,267000,0.95,kind:long,tail99,1918.0,-4.14,52.63,1258.54,54.42,2.18,5.7,0.53,2.95
+cal-client,k4c4,fifo,0,0,267000,0.95,kind:short,mean,768860.0,-4.15,26.98,138.15,5.07,2.17,10.9,0.52,3.74
+cal-client,k4c4,fifo,0,0,267000,0.95,kind:short,tail99,7690.0,-4.16,57.54,1262.17,5.13,2.23,5.8,0.52,3.74
+cal-client,k6c2,fifo,0,0,400500,0.95,kind:long,mean,288570.0,-4.33,25.76,107.98,50.18,1.97,17.1,0.52,1.87
+cal-client,k6c2,fifo,0,0,400500,0.95,kind:long,tail99,2887.0,-4.33,33.97,1143.46,51.39,1.96,46.6,0.52,1.87
+cal-client,k6c2,fifo,0,0,400500,0.95,kind:short,mean,1151417.0,-4.33,25.73,107.6,5.07,1.97,17.0,0.51,180.81
+cal-client,k6c2,fifo,0,0,400500,0.95,kind:short,tail99,11516.0,-4.33,34.44,1139.04,5.09,1.98,47.0,0.51,180.81

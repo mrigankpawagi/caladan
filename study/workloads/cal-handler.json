@@ -1,0 +1,9 @@
+{"id": "cal-handler",
+ "title": "Calibration: in-place handler time of each service time, at light load",
+ "server_kthreads": 4, "conns": 64,
+ "kinds": [{"name": "s1", "service_us": 1, "weight": 1},
+           {"name": "s5", "service_us": 5, "weight": 1},
+           {"name": "s10", "service_us": 10, "weight": 1},
+           {"name": "s50", "service_us": 50, "weight": 1}],
+ "rps": [20000],
+ "duration_s": 6}

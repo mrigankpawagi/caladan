@@ -1,6 +1,47 @@
-{"id": "w3-deadlines",
- "title": "Equal work, two deadlines, same class",
- "server_kthreads": 4, "conns": 64,
- "kinds": [{"name": "tight", "service_us": 10, "weight": 0.2, "deadline_us": 50, "hint": "high:50:10"},
-           {"name": "loose", "service_us": 10, "weight": 0.8, "deadline_us": 500, "hint": "high:500:10"}],
- "rho": [0.5, 0.7, 0.8, 0.9]}
+{
+ "id": "w3-deadlines",
+ "title": "Deadline within a class: equal work, 50 us vs 500 us deadlines, all HIGH",
+ "server_kthreads": 4,
+ "conns": 64,
+ "rho": [
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.85,
+  0.9
+ ],
+ "kinds": [
+  {
+   "name": "tight",
+   "service_us": 10,
+   "weight": 0.2,
+   "deadline_us": 50,
+   "slo_us": 50,
+   "scored": true,
+   "hint": "high:50:10"
+  },
+  {
+   "name": "loose",
+   "service_us": 10,
+   "weight": 0.8,
+   "deadline_us": 500,
+   "slo_us": 500,
+   "scored": true,
+   "hint": "high:500:10"
+  }
+ ],
+ "policies": [
+  "fifo",
+  "prio",
+  "prio_edf",
+  "hinted",
+  "edf",
+  "fifo+rx",
+  "prio+rx",
+  "prio_edf+rx",
+  "hinted+rx",
+  "edf+rx"
+ ],
+ "ladder": "deadline decides: prio_edf, hinted and edf separate from fifo and prio (which tie: one class); hinted ties prio_edf (equal sizes)"
+}

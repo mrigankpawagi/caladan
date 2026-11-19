@@ -1,6 +1,38 @@
-{"id": "w1-overhead",
- "title": "Overhead: 1 us requests on 2 cores, pushed to saturation",
- "server_kthreads": 2, "conns": 64,
- "kinds": [{"name": "tiny", "service_us": 1, "weight": 1, "hint": "high:1000:1"}],
- "rps": [400000, 800000, 1000000, 1200000, 1300000, 1400000, 1500000, 1600000],
- "note": "Every request is hinted HIGH with the same deadline and service time, so prio, sjf and edf scan the whole runqueue at every pick (worst case for their cost) and all pick the oldest, exactly like fifo. Any difference from fifo is pure scheduling cost."}
+{
+ "id": "w1-overhead",
+ "title": "Cost: 1 us requests on 2 cores, every thread with identical hints (full scan at every pick)",
+ "server_kthreads": 2,
+ "conns": 64,
+ "duration_s": 10,
+ "fresh_per_level": true,
+ "rps": [
+  1100000,
+  1140000,
+  1180000,
+  1220000,
+  1260000,
+  1300000,
+  1340000,
+  1380000,
+  1420000,
+  1460000
+ ],
+ "kinds": [
+  {
+   "name": "tiny",
+   "service_us": 1,
+   "weight": 1,
+   "hint": "high:1000:1"
+  }
+ ],
+ "policies": [
+  "stock",
+  "fifo",
+  "prio",
+  "prio_edf",
+  "hinted",
+  "edf",
+  "hinted+rx"
+ ],
+ "knee_rule": "capacity = highest offered load at which every repeat has zero drops and p99 <= 70 us (10x the 7 us p99 at light load in s1); collapses are recorded"
+}

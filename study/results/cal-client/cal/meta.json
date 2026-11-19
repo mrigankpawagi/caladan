@@ -1,0 +1,79 @@
+{
+ "runs": [
+  {
+   "code_sha": "f9d279716ad7081132d70b8e87804d98893a6f99",
+   "mode": "hints",
+   "variant": "k4c4",
+   "stats": "off",
+   "policies": [
+    "fifo"
+   ],
+   "repeats": 1,
+   "order": [
+    "fifo"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.743\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-18T23:05:35",
+   "finished": "2026-11-18T23:06:00"
+  },
+  {
+   "code_sha": "f9d279716ad7081132d70b8e87804d98893a6f99",
+   "mode": "hints",
+   "variant": "k6c2",
+   "stats": "off",
+   "policies": [
+    "fifo"
+   ],
+   "repeats": 1,
+   "order": [
+    "fifo"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.728\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-18T23:06:04",
+   "finished": "2026-11-18T23:06:29"
+  }
+ ],
+ "workload": {
+  "id": "cal-client",
+  "title": "Calibration: can the client keep up at the highest offered rates",
+  "server_kthreads": 6,
+  "conns": 64,
+  "kinds": [
+   {
+    "name": "short",
+    "service_us": 5,
+    "weight": 0.8,
+    "hint": "high"
+   },
+   {
+    "name": "long",
+    "service_us": 50,
+    "weight": 0.2,
+    "hint": "normal"
+   }
+  ],
+  "rho": [
+   0.95
+  ],
+  "client_kthreads": 2,
+  "variant": "k6c2"
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 318.99,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node, clock pinned at 2.4 GHz (performance governor, no turbo): 31899, 31900, 31899 iterations per 100 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel \"ias noht\" with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads; clock pinned at 2.4 GHz",
+  "handler_us": {
+   "1": 1.22,
+   "5": 5.225,
+   "10": 10.235,
+   "50": 50.26
+  },
+  "handler_us_note": "mean handler start-to-end time per nominal service time, measured in place (results/cal-handler/cal, fifo, 20k req/s, 2 repeats, Segments svc); rho = rate x mean handler time / cores"
+ },
+ "session": "cal",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}

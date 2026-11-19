@@ -212,7 +212,7 @@ def setup(cfg, server, client, spec, policy, mode, stats, cal):
     server.put(runtime_config(cfg["server"]["ip"], cfg, spec["server_kthreads"], policy, stats,
                               spec.get("guaranteed_kthreads"), spec.get("spinning_kthreads")),
                "/tmp/study_server.config")
-    client.put(runtime_config(cfg["client"]["ip"], cfg, cfg["client_kthreads"]),
+    client.put(runtime_config(cfg["client"]["ip"], cfg, spec.get("client_kthreads", cfg["client_kthreads"])),
                "/tmp/study_client.config")
     hints = "--ignore-hints" if mode == "ignore" else (
         "--hintmap %s" % hintmap_arg(spec) if hintmap_arg(spec) else "")

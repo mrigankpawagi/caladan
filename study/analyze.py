@@ -54,15 +54,21 @@ def erlang_c(k, a):
 
 
 def predictions(spec, cal, rho, pooled=True):
-    """Predicted mean wait (us) per kind and policy at utilisation rho, or
-    {} when the workload has no load in rho terms."""
+    """Predicted mean wait (us) per policy and kind at utilisation rho
+    (rho = rate x mean handler time / cores), or {} without rho.
+
+    With hints set per request kind, every policy is a fixed ordering of the
+    kinds (kinds that tie are served FIFO among themselves), so each is a
+    non-preemptive priority queue: Cobham's split of the FIFO residual term.
+    pooled=True treats the cores as one M/G/k queue (Allen-Cunneen);
+    pooled=False treats each core as its own M/G/1 queue with no stealing.
+    Handler times are the in-place measurements in calibration.json."""
     if rho is None or not rho:
         return {}
-    k = spec["server_kthreads"]
+    k = spec.get("rho_kthreads", spec["server_kthreads"])
     kinds = spec["kinds"]
     tot = sum(x["weight"] for x in kinds)
-    o = cal["overhead_us"]
-    s = [x["service_us"] + o for x in kinds]
+    s = [cal["handler_us"][str(x["service_us"])] for x in kinds]
     p = [x["weight"] / tot for x in kinds]
     es = sum(pi * si for pi, si in zip(p, s))
     es2 = sum(pi * si * si for pi, si in zip(p, s))
@@ -71,39 +77,32 @@ def predictions(spec, cal, rho, pooled=True):
     if pooled:
         wq = erlang_c(k, lam * es) / (k / es - lam) * (1 + cs2) / 2
     else:
-        # each core its own M/G/1 queue with a quarter of the arrivals
         wq = (lam / k) * es2 / 2 / (1 - rho)
     w0 = wq * (1 - rho)
-    out = {"fifo": {x["name"]: wq for x in kinds}}
 
-    def classes_by(keyfn):
-        """Cobham waits when kinds are served in increasing keyfn order (None
-        = no hint: served last, FIFO among themselves)."""
-        order = sorted(set(keyfn(x) for x in kinds), key=lambda v: (v is None, v))
+    def order_by(keyfn):
         res, sigma_prev = {}, 0.0
-        for v in order:
+        for v in sorted(set(keyfn(x) for x in kinds)):
             members = [i for i, x in enumerate(kinds) if keyfn(x) == v]
-            rho_v = sum(lam * p[i] * s[i] for i in members) / k  # same per core
-            sigma = sigma_prev + rho_v
-            w = w0 / ((1 - sigma_prev) * (1 - sigma))
+            sigma = sigma_prev + sum(lam * p[i] * s[i] for i in members) / k
             for i in members:
-                res[kinds[i]["name"]] = w
+                res[kinds[i]["name"]] = w0 / ((1 - sigma_prev) * (1 - sigma))
             sigma_prev = sigma
         return res
 
-    def hint(x, idx):
+    def field(x, i):
         f = (x.get("hint") or "").split(":")
-        return f[idx] if len(f) > idx and f[idx] not in ("", "0") else None
+        v = f[i] if len(f) > i else ""
+        return float(v) if v not in ("", "0") else math.inf
 
-    rank = {"high": 0, "normal": 1, "low": 2}
-    out["prio"] = classes_by(lambda x: rank.get((x.get("hint") or "normal").split(":")[0], 1))
-    out["sjf"] = classes_by(lambda x: float(hint(x, 2)) if hint(x, 2) else None)
-    out["edf"] = classes_by(lambda x: float(hint(x, 1)) if hint(x, 1) else None)
-    # hinted: class, then deadline, then service time
-    out["hinted"] = classes_by(lambda x: (rank.get((x.get("hint") or "normal").split(":")[0], 1),
-                                          float(hint(x, 1)) if hint(x, 1) else math.inf,
-                                          float(hint(x, 2)) if hint(x, 2) else math.inf))
-    return out
+    rank = {"high": 1, "normal": 2, "low": 3}
+    cls = lambda x: rank.get((x.get("hint") or "normal").split(":")[0], 2)
+    return {"fifo": {x["name"]: wq for x in kinds},
+            "prio": order_by(cls),
+            "prio_edf": order_by(lambda x: (cls(x), field(x, 1))),
+            "hinted": order_by(lambda x: (cls(x), field(x, 1), field(x, 2))),
+            "edf": order_by(lambda x: field(x, 1)),
+            "stock": {x["name"]: wq for x in kinds}}
 
 
 def load(path):

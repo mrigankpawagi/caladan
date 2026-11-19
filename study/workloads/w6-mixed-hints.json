@@ -1,8 +1,56 @@
-{"id": "w6-mixed-hints",
- "title": "Class and deadline disagree: important requests vs urgent background work",
- "server_kthreads": 4, "conns": 64,
- "kinds": [{"name": "tight", "service_us": 5, "weight": 0.2, "deadline_us": 50, "hint": "high:50:5"},
-           {"name": "loose", "service_us": 5, "weight": 0.6, "deadline_us": 500, "hint": "high:500:5"},
-           {"name": "bulk", "service_us": 50, "weight": 0.2, "deadline_us": 300, "hint": "normal:300:50"}],
- "rho": [0.5, 0.7, 0.8, 0.9],
- "note": "Prediction (written before running): prio and sjf cannot separate tight from loose, so tight misses as in W3; edf runs bulk (due 300 us) ahead of loose (due 500 us), so loose waits behind 50 us bulk runs; hinted runs HIGH first and by deadline within it, so tight meets its deadline like edf and loose matches prio, at the cost of bulk."}
+{
+ "id": "w6-mixed-hints",
+ "title": "Every hint given, class and deadline disagree: NORMAL bulk work due before HIGH loose requests",
+ "server_kthreads": 4,
+ "conns": 64,
+ "rho": [
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.85,
+  0.9
+ ],
+ "kinds": [
+  {
+   "name": "tight",
+   "service_us": 5,
+   "weight": 0.2,
+   "deadline_us": 50,
+   "slo_us": 50,
+   "scored": true,
+   "hint": "high:50:5"
+  },
+  {
+   "name": "loose",
+   "service_us": 5,
+   "weight": 0.6,
+   "deadline_us": 200,
+   "slo_us": 200,
+   "scored": true,
+   "hint": "high:200:5"
+  },
+  {
+   "name": "bulk",
+   "service_us": 50,
+   "weight": 0.2,
+   "deadline_us": 150,
+   "slo_us": 150,
+   "scored": false,
+   "hint": "normal:150:50"
+  }
+ ],
+ "policies": [
+  "fifo",
+  "prio",
+  "prio_edf",
+  "hinted",
+  "edf",
+  "fifo+rx",
+  "prio+rx",
+  "prio_edf+rx",
+  "hinted+rx",
+  "edf+rx"
+ ],
+ "ladder": "prio separates HIGH from bulk but not tight from loose; prio_edf adds that; hinted ties prio_edf (sizes never decide once deadlines exist: the null rung); edf runs bulk (due 150) before loose (due 200)"
+}

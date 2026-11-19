@@ -1,6 +1,41 @@
-{"id": "w2a-hol-service",
- "title": "Head-of-line blocking, hinted by service time only",
- "server_kthreads": 4, "conns": 64,
- "kinds": [{"name": "short", "service_us": 5, "weight": 0.8, "hint": "normal:0:5"},
-           {"name": "long", "service_us": 50, "weight": 0.2, "hint": "normal:0:50"}],
- "rho": [0.5, 0.7, 0.8, 0.9]}
+{
+ "id": "w2a-hol-service",
+ "title": "Size only: 5 us vs 50 us requests, no class, no deadline",
+ "server_kthreads": 4,
+ "conns": 64,
+ "rho": [
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.85,
+  0.9
+ ],
+ "kinds": [
+  {
+   "name": "short",
+   "service_us": 5,
+   "weight": 0.8,
+   "slo_us": 100,
+   "scored": true,
+   "hint": "normal:0:5"
+  },
+  {
+   "name": "long",
+   "service_us": 50,
+   "weight": 0.2,
+   "slo_us": 550,
+   "scored": true,
+   "hint": "normal:0:50"
+  }
+ ],
+ "policies": [
+  "fifo",
+  "prio",
+  "prio_edf",
+  "hinted",
+  "edf",
+  "hinted+rx"
+ ],
+ "ladder": "size decides: only hinted separates; fifo, prio, prio_edf and edf tie (one class, no deadlines)"
+}

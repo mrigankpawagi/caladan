@@ -1,0 +1,17 @@
+workload,variant,policy,stats,repeat,load_rps,rho,group,part,n,lag,in,rq,svc,out,stolen,tscerr_mean,tscerr_max
+cal-handler,base,fifo,0,0,20000,,kind:s1,mean,27052.0,-3.95,1.59,0.47,1.22,2.3,55.2,0.49,1.01
+cal-handler,base,fifo,0,0,20000,,kind:s1,tail99,272.0,-2.9,2.79,0.59,1.97,2.87,75.4,0.49,1.01
+cal-handler,base,fifo,0,0,20000,,kind:s10,mean,26865.0,-3.95,1.58,0.47,10.24,2.31,55.0,0.5,1.01
+cal-handler,base,fifo,0,0,20000,,kind:s10,tail99,270.0,-3.12,2.23,0.54,12.83,2.94,70.7,0.5,1.01
+cal-handler,base,fifo,0,0,20000,,kind:s5,mean,27091.0,-3.96,1.58,0.47,5.23,2.31,54.7,0.5,1.01
+cal-handler,base,fifo,0,0,20000,,kind:s5,tail99,272.0,-3.01,2.13,0.58,6.82,3.74,75.4,0.5,1.01
+cal-handler,base,fifo,0,0,20000,,kind:s50,mean,27023.0,-3.95,1.58,0.47,50.25,2.36,55.5,0.51,1.02
+cal-handler,base,fifo,0,0,20000,,kind:s50,tail99,272.0,-3.5,1.87,0.51,55.75,2.67,65.4,0.51,1.02
+cal-handler,base,fifo,0,1,20000,,kind:s1,mean,27008.0,-3.98,1.6,0.48,1.22,2.27,62.5,0.5,1.01
+cal-handler,base,fifo,0,1,20000,,kind:s1,tail99,272.0,-3.05,2.25,0.55,1.32,2.83,79.4,0.5,1.01
+cal-handler,base,fifo,0,1,20000,,kind:s10,mean,27008.0,-3.97,1.6,0.48,10.23,2.3,62.7,0.5,1.0
+cal-handler,base,fifo,0,1,20000,,kind:s10,tail99,272.0,-2.55,2.24,0.53,12.02,4.16,74.6,0.5,1.0
+cal-handler,base,fifo,0,1,20000,,kind:s5,mean,26960.0,-3.97,1.6,0.48,5.22,2.27,63.3,0.5,1.0
+cal-handler,base,fifo,0,1,20000,,kind:s5,tail99,271.0,-3.0,2.11,0.56,6.09,2.83,76.4,0.5,1.0
+cal-handler,base,fifo,0,1,20000,,kind:s50,mean,26920.0,-3.97,1.61,0.48,50.27,2.33,63.0,0.51,1.01
+cal-handler,base,fifo,0,1,20000,,kind:s50,tail99,271.0,-3.54,2.48,1.16,57.03,2.53,67.5,0.51,1.01

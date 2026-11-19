@@ -1,0 +1,71 @@
+{
+ "id": "w5-cores",
+ "title": "W2b's traffic on 2, 4 and 6 cores, and on 2 guaranteed + 2 burstable cores next to a batch job",
+ "server_kthreads": 4,
+ "conns": 64,
+ "rho": [
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.85,
+  0.9
+ ],
+ "kinds": [
+  {
+   "name": "short",
+   "service_us": 5,
+   "weight": 0.8,
+   "slo_us": 100,
+   "scored": true,
+   "hint": "high"
+  },
+  {
+   "name": "long",
+   "service_us": 50,
+   "weight": 0.2,
+   "slo_us": 550,
+   "scored": false,
+   "hint": "normal"
+  }
+ ],
+ "policies": [
+  "fifo",
+  "prio",
+  "hinted",
+  "hinted+rx"
+ ],
+ "variants": {
+  "cores2": {
+   "server_kthreads": 2
+  },
+  "cores4": {
+   "server_kthreads": 4
+  },
+  "cores6": {
+   "server_kthreads": 6,
+   "client_kthreads": 2
+  },
+  "burst": {
+   "server_kthreads": 4,
+   "guaranteed_kthreads": 2,
+   "spinning_kthreads": 2,
+   "client_kthreads": 2,
+   "rho": [
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8
+   ],
+   "antagonist": {
+    "threads": 6,
+    "n": 1000,
+    "spec": "sqrt",
+    "kthreads": 6
+   }
+  }
+ },
+ "ladder": "Q2: how ordering's gain changes with core count, and whether hint-aware ordering changes how the IOKernel grants burstable cores (the congestion signal is the oldest queued thread's age)"
+}

@@ -1,0 +1,8 @@
+{"id": "cal-client",
+ "title": "Calibration: can the client keep up at the highest offered rates",
+ "server_kthreads": 4, "conns": 64,
+ "kinds": [{"name": "short", "service_us": 5, "weight": 0.8, "hint": "high"},
+           {"name": "long", "service_us": 50, "weight": 0.2, "hint": "normal"}],
+ "rho": [0.95],
+ "variants": {"k4c4": {"server_kthreads": 4},
+              "k6c2": {"server_kthreads": 6, "client_kthreads": 2}}}
