@@ -172,3 +172,28 @@ Mean waits predicted at ρ = 0.9, from `analyze.predictions()` with the handler 
 - `hinted` ≠ `prio_edf` on W6.
 - The key-based policies differing in cost by more than 5% on W1.
 - `+rx` hurting a hint-aware policy's scored kinds.
+
+## Amendments before the first v2 run (after the methods review of this note)
+
+1. **W1 knee resolution.**
+   - Stage 1 is the 40 k grid above, 2 repeats.
+   - Stage 2: for each configuration, a 10 k grid (about 0.8%) strictly inside the stage-1 bracket (last passing level, first failing level), 2 repeats, same session.
+   - The capacity is the highest level that passes in every repeat of both stages.
+   - **Rule:** knee differences of one 10 k step or less are ties.
+   - The W1 predictions are restated in those terms:
+     - `stock` above `fifo` by more than one step;
+     - the four key-based policies within one step of each other;
+     - each key-based policy within 5% of `fifo`.
+2. **"Mean wait", as compared with the predictions,** is defined as the growth of queueing over ρ = 0.5:
+   - measured Δwait(ρ) = [client mean latency(ρ) − client mean latency(0.5)] − [handler time(ρ) − handler time(0.5)], per kind, with the handler time taken from the Segments split;
+   - the prediction it is compared with is pred(ρ) − pred(0.5).
+
+   The per-request split is reported next to it.
+
+**Stated now, to be repeated in the report:**
+- **Packet processing is outside ρ.** The busy fraction (program time / kthread time) is recorded per run. Predictions are also computed at the measured busy fraction, as a secondary check.
+- **send→enqueue is "network + RX queue".** It mixes IOKernel transit and receive-queue wait, because there is no zero-work control. Its growth is attributed to `schedule()`'s order only through the `+rx` contrast.
+- **W6 was redesigned after seeing v1's results** (deadlines 150/200, so that `edf`'s fixed order disagrees with class). It is a pre-registered prediction, not a blind workload.
+- **`enqueue_tsc` resets whenever a thread is readied again.** With a 100 µs quantum and handlers under 60 µs, the handlers here are readied once.
+- **SLO-load is censored at ≥ 0.9.** The top rungs of W2a, W2b and W4 are expected to tie on it by design. The gradient on those workloads is read from the mean waits and the price, not from SLO-load.
+- **The client sends up to 5 µs early** (`MIN_TIMER_SLEEP`). Latency is measured from the actual send.

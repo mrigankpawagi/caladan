@@ -344,6 +344,8 @@ def main():
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--mode", default="hints", choices=["hints", "ignore"])
     ap.add_argument("--variant", help="apply this entry of the workload's variants")
+    ap.add_argument("--rps", help="comma-separated offered loads replacing the workload's "
+                    "(e.g. a W1 stage-2 refinement inside a bracket)")
     ap.add_argument("--stats", default="off", choices=["on", "off"],
                     help="runtime_sched_stats: per-pick counters (they cost a scan per "
                     "pick, so measurement runs leave them off; timing comes from Segments)")
@@ -356,6 +358,9 @@ def main():
     if args.variant:
         spec = dict(spec, **spec["variants"][args.variant], variant=args.variant)
     spec.pop("variants", None)
+    if args.rps:
+        spec["rps"] = [int(x) for x in args.rps.split(",")]
+        spec.pop("rho", None)
     cal = json.load(open(os.path.join(HERE, "calibration.json")))
     cfg = json.load(open(args.nodes))
     policies = args.policy.split(",") if args.policy else spec.get("policies", POLICIES)
