@@ -15,7 +15,7 @@ use std::io::Read;
 /// client and server:
 ///   bits 0..8   request kind, chosen by the client (index into the server's
 ///               hint map; 0 = default kind)
-///   bits 8..16  priority class the server tagged the handler
+///   bits 8..16  priority class the server tagged the handler thread with
 ///               thread, filled in by the server on the reply
 ///               (`HINT_CLASS_IGNORED` if the server ignores hints)
 ///   bits 16..64 reserved (zero)
