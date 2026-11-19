@@ -58,7 +58,9 @@ impl Hints {
 }
 
 /// Sets scheduling hints on the running thread. They take effect the next
-/// time this thread is made runnable.
+/// time this thread is made runnable, not for the work it is doing now. A
+/// relative deadline is converted to an absolute time here, so it counts from
+/// this call, not from that next wakeup.
 pub fn set_self_hints(h: &Hints) -> std::io::Result<()> {
     let raw = h.to_ffi();
     let ret = unsafe { ffi::thread_set_hints(thread_self(), &raw) };

@@ -66,7 +66,7 @@ impl LoadgenProtocol for SyntheticProtocol {
         Ok((
             payload.index as usize,
             payload.randomness,
-            payload.class_applied(),
+            payload.class_tagged(),
         ))
     }
 }
@@ -92,13 +92,13 @@ impl Payload {
         (self.hint >> HINT_KIND_SHIFT) as u8
     }
 
-    /// The priority class the server reported applying (see `HINT_CLASS_IGNORED`).
-    pub fn class_applied(&self) -> u8 {
+    /// The priority class the server reported tagging the handler thread with (the scheduler uses it only under a class-aware policy) (see `HINT_CLASS_IGNORED`).
+    pub fn class_tagged(&self) -> u8 {
         (self.hint >> HINT_CLASS_SHIFT) as u8
     }
 
     /// Records, on the server, which class was applied to the handler thread.
-    pub fn set_class_applied(&mut self, class: u8) {
+    pub fn set_class_tagged(&mut self, class: u8) {
         self.hint &= !(0xffu64 << HINT_CLASS_SHIFT);
         self.hint |= (class as u64) << HINT_CLASS_SHIFT;
     }
@@ -111,7 +111,7 @@ impl Payload {
     }
 
     /// Sets the applied-class field directly in a serialized payload.
-    pub fn set_class_applied_on_wire(buf: &mut [u8], class: u8) {
+    pub fn set_class_tagged_on_wire(buf: &mut [u8], class: u8) {
         if let Some(w) = buf.get_mut(HINT_OFFSET..HINT_OFFSET + 8) {
             let mut h = u64::from_be_bytes((&*w).try_into().unwrap());
             h &= !(0xffu64 << HINT_CLASS_SHIFT);

@@ -183,7 +183,7 @@ bool sched_softirq_first;
 #ifdef CONFIG_THREAD_HINTS
 #include "sched_policy.h"
 
-/* the active policy (default: strict priority) */
+/* the active policy (default: strict priority, so hints take effect) */
 static sched_choose_fn_t sched_choose = choose_prio;
 static const char *sched_choose_name = "prio";
 
@@ -220,9 +220,13 @@ BUILD_ASSERT(STAT_WAIT_CYCLES_SOFTIRQ ==
 	     STAT_WAIT_CYCLES_NORMAL + THREAD_PRIO_SOFTIRQ);
 
 /*
- * Records what a pick looked like, for hint-aware measurement: the class of
- * the chosen thread and how long it waited, the runqueue depth, whether a
- * thread of a higher class was left waiting, and deadline misses.
+ * Records what a pick looked like, for hint-aware measurement (only with
+ * runtime_sched_stats 1, since this bookkeeping is itself overhead): the
+ * class of the chosen thread and how long it waited since it was readied,
+ * the runqueue depth, whether a thread of a higher class was left waiting
+ * (a pick prio would have made differently), and whether a thread with a
+ * deadline was picked after it. The deadline counters count picks, not
+ * requests: a thread that blocks or is preempted is counted again.
  */
 static void sched_count_pick(struct kthread *k, uint32_t n, uint32_t best,
 			     thread_t *th)
@@ -233,7 +237,7 @@ static void sched_count_pick(struct kthread *k, uint32_t n, uint32_t best,
 
 	k->stats[STAT_PICK_NORMAL + th->prio_class]++;
 	k->stats[STAT_WAIT_CYCLES_NORMAL + th->prio_class] +=
-		now - MIN(th->ready_tsc, now);
+		now - MIN(th->enqueue_tsc, now);
 	k->stats[STAT_PICK_SCANNED] += n;
 
 	for (i = 0; i < n; i++) {
@@ -723,7 +727,7 @@ static void thread_ready_prepare(struct kthread *k, thread_t *th)
 
 	/* prepare thread to be runnable */
 	th->thread_ready = true;
-	th->ready_tsc = rdtsc();
+	th->ready_tsc = th->enqueue_tsc = rdtsc();
 	if (cores_have_affinity(th->last_cpu, k->curr_cpu))
 		STAT(LOCAL_WAKES)++;
 	else

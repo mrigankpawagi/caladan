@@ -523,7 +523,8 @@ int cfg_load(const char *path)
 		 cfg_prio_is_lc ? "latency critical (LC)" : "best effort (BE)");
 	log_info("cfg: THRESH_QD: %ld, THRESH_HT: %ld THRESH_QUANTUM: %ld",
 		 cfg_qdelay_us, cfg_ht_punish_us, cfg_quantum_us);
-	log_info("cfg: thread scheduling policy: %s", sched_policy_name());
+	log_info("cfg: thread scheduling policy: %s, per-pick statistics %s",
+		 sched_policy_name(), sched_stats_enabled ? "on" : "off");
 	log_info("cfg: storage %s, directpath %s, transparent hugepages %s",
 #ifdef DIRECT_STORAGE
 		 cfg_storage_enabled ? "enabled" : "disabled",

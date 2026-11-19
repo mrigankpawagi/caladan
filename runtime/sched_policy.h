@@ -14,7 +14,8 @@
  *    first: the i-th one (0 <= i < n) is sched_rq_at(k, i)
  *  - it returns the index i of the thread to run; the caller removes that
  *    thread and keeps the order of the others
- *  - it must not block, allocate memory, take locks, or modify the ring, and
+ *  - it gets a read-only view of the kthread, must not block, allocate
+ *    memory or take locks, and
  *    must make one pass over the ring (O(n), so at most 32 threads)
  *  - it may read any thread field (prio_class, ready_tsc, deadline_tsc,
  *    service_tsc, ...)
@@ -28,16 +29,16 @@
 
 #pragma once
 
-typedef uint32_t (*sched_choose_fn_t)(struct kthread *k, uint32_t n);
+typedef uint32_t (*sched_choose_fn_t)(const struct kthread *k, uint32_t n);
 
 /* the i-th oldest ready thread in @k's ring */
-static inline thread_t *sched_rq_at(struct kthread *k, uint32_t i)
+static inline thread_t *sched_rq_at(const struct kthread *k, uint32_t i)
 {
 	return k->rq[(k->rq_tail + i) % RUNTIME_RQ_SIZE];
 }
 
 /* "fifo": run the oldest ready thread, ignoring hints (stock Caladan) */
-static uint32_t choose_fifo(struct kthread *k, uint32_t n)
+static uint32_t choose_fifo(const struct kthread *k, uint32_t n)
 {
 	return 0;
 }
@@ -54,7 +55,7 @@ static const uint8_t prio_rank[THREAD_PRIO_NR] = {
  * "prio": strict priority by class (helper threads, then HIGH, NORMAL, LOW),
  * oldest first within a class.
  */
-static uint32_t choose_prio(struct kthread *k, uint32_t n)
+static uint32_t choose_prio(const struct kthread *k, uint32_t n)
 {
 	uint32_t i, best = 0;
 	uint8_t rank = prio_rank[sched_rq_at(k, 0)->prio_class];
@@ -101,7 +102,7 @@ static uint32_t choose_prio(struct kthread *k, uint32_t n)
  * service time; threads without one count as longest. Among orders that
  * never preempt, this minimises the mean wait when service times are known.
  */
-static uint32_t choose_sjf(struct kthread *k, uint32_t n)
+static uint32_t choose_sjf(const struct kthread *k, uint32_t n)
 {
 	return SCHED_CHOOSE_MIN_KEY(k, n, service_tsc);
 }
@@ -112,7 +113,7 @@ static uint32_t choose_sjf(struct kthread *k, uint32_t n)
  * waiting, this meets every deadline whenever any order can (Jackson's
  * rule).
  */
-static uint32_t choose_edf(struct kthread *k, uint32_t n)
+static uint32_t choose_edf(const struct kthread *k, uint32_t n)
 {
 	return SCHED_CHOOSE_MIN_KEY(k, n, deadline_tsc);
 }
@@ -144,7 +145,7 @@ static inline bool sched_hinted_before(thread_t *a, thread_t *b)
  * much it delays others); then the oldest. With only one kind of hint it
  * picks exactly what prio, edf or sjf would.
  */
-static uint32_t choose_hinted(struct kthread *k, uint32_t n)
+static uint32_t choose_hinted(const struct kthread *k, uint32_t n)
 {
 	uint32_t i, best = 0;
 	thread_t *b = sched_rq_at(k, 0);

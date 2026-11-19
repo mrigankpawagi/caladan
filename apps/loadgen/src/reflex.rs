@@ -1,4 +1,5 @@
 use crate::Buffer;
+use crate::payload::HINT_CLASS_IGNORED;
 use crate::Connection;
 use crate::Distribution;
 use crate::LoadgenProtocol;
@@ -180,6 +181,6 @@ impl LoadgenProtocol for ReflexProtocol {
 
         // TODO: more error checking?
 
-        Ok((hdr.req_handle - 1, hdr.tsc, 0))
+        Ok((hdr.req_handle - 1, hdr.tsc, HINT_CLASS_IGNORED))
     }
 }

@@ -86,6 +86,14 @@ impl KindMix {
         if kinds.is_empty() || kinds.len() > 255 {
             return Err("a kind mix needs between 1 and 255 kinds".to_string());
         }
+        if let Some(k) = kinds.iter().find(|k| !(k.weight.is_finite() && k.weight >= 0.0)) {
+            return Err(format!("kind '{}' needs a finite weight >= 0", k.name));
+        }
+        for (i, k) in kinds.iter().enumerate() {
+            if kinds[..i].iter().any(|o| o.name == k.name) {
+                return Err(format!("kind name '{}' is used twice", k.name));
+            }
+        }
         let total: f64 = kinds.iter().map(|k| k.weight).sum();
         if !(total > 0.0) {
             return Err("kind weights must sum to a positive number".to_string());

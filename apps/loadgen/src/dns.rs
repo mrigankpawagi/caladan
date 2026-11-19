@@ -1,4 +1,5 @@
 use crate::Buffer;
+use crate::payload::HINT_CLASS_IGNORED;
 use crate::Connection;
 use crate::LoadgenProtocol;
 use crate::Packet;
@@ -113,6 +114,6 @@ impl LoadgenProtocol for DnsProtocol {
 
         let pos = Header::size();
         let end = pos + scratch[pos] as usize + 1;
-        Ok((pull_usize(&scratch[pos + 1..end]), 0, 0))
+        Ok((pull_usize(&scratch[pos + 1..end]), 0, HINT_CLASS_IGNORED))
     }
 }

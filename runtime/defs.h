@@ -315,8 +315,8 @@ enum {
 	STAT_WAIT_CYCLES_SOFTIRQ,
 	STAT_PICK_SCANNED,		/* sum of runqueue depth at each pick */
 	STAT_PICK_INVERSIONS,		/* picks that left a higher class waiting */
-	STAT_PICK_DEADLINE,		/* picked threads that had a deadline */
-	STAT_DEADLINE_MISS_AT_PICK,	/* ... and were already past it */
+	STAT_PICK_DEADLINE,		/* picks of a thread with a deadline */
+	STAT_DEADLINE_MISS_AT_PICK,	/* ... made after that deadline */
 	STAT_HINTED_STOLEN,		/* hinted threads taken by work stealing */
 	STAT_HINTED_OVERFLOW,		/* hinted threads sent to the overflow list */
 	STAT_PICK_CALLS,		/* calls to the policy (runqueue depth >= 2) */
@@ -386,19 +386,12 @@ struct kthread {
 	uint64_t		next_timer_tsc;
 	uint64_t		last_softirq_tsc;
 
-	/*
-	 * 9th cache-line: private per-kthread state for the scheduling policy
-	 * (see the policy region in sched.c). Zero at startup; only the active
-	 * policy reads or writes it, with the kthread lock held.
-	 */
-	uint64_t		policy_state[8];
-
 #ifdef DIRECT_STORAGE
-	/* 10th cache-line, storage nvme queues */
+	/* 9th cache-line, storage nvme queues */
 	struct storage_q	storage_q;
 #endif
 
-	/* 11th cache-line, statistics counters */
+	/* 10th cache-line, statistics counters */
 	uint64_t		stats[STAT_NR];
 } __aligned(CACHE_LINE_SIZE * 2);
 
@@ -408,7 +401,6 @@ BUILD_ASSERT(offsetof(struct kthread, q_ptrs) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, txpktq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, rq) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, timer_lock) % CACHE_LINE_SIZE == 0);
-BUILD_ASSERT(offsetof(struct kthread, policy_state) % CACHE_LINE_SIZE == 0);
 #ifdef DIRECT_STORAGE
 BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
 #endif

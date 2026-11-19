@@ -1,4 +1,5 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use crate::payload::HINT_CLASS_IGNORED;
 use clap::Arg;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -269,6 +270,6 @@ impl LoadgenProtocol for MemcachedProtocol {
                 format!("Not NoError {}", hdr.vbucket_id_or_status),
             ));
         }
-        Ok((0, hdr.cas, 0))
+        Ok((0, hdr.cas, HINT_CLASS_IGNORED))
     }
 }

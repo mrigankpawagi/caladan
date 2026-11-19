@@ -708,7 +708,7 @@ fn process_result_final(
             "".to_owned()
         };
         if grouped {
-            println!("Group, Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, DeadlineMet, Start, StartTsc{}", rt);
+            println!("Group, Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, ClientDeadlineMet, Start, StartTsc{}", rt);
         } else {
             println!("Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, Start, StartTsc{}", rt);
         }
@@ -854,16 +854,22 @@ fn process_result_final(
             first_tsc,
             rt_stat_values
         );
+        // group rows carry no runtime counters; pad so every row has as many
+        // columns as the header
+        let rt_pad = ", -".repeat(rt_stat_values.matches(", ").count());
         for (key, g) in merged.iter().filter(|(k, _)| sched.groups.shows(k)) {
             let pct = |p| latency_percentile(&g.latencies, g.sent, g.responses, p);
+            // a class is only learned from the reply, so class rows count
+            // answered requests only: no drops, and adherance is not theirs
+            let is_class = key.starts_with("class:");
             println!(
-                "{}, {}, {}, {}, {}, {:.2}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}, {}",
+                "{}, {}, {}, {}, {}, {}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {:.1}, {}, {}, {}{}",
                 key,
                 sched.kinds.name(),
                 rps_of(g.sent),
                 rps_of(g.responses),
-                g.drops,
-                schedule_adherance,
+                if is_class { "-".to_string() } else { g.drops.to_string() },
+                if is_class { "-".to_string() } else { format!("{:.2}", schedule_adherance) },
                 pct(0.0),
                 pct(50.0),
                 pct(90.0),
@@ -873,7 +879,8 @@ fn process_result_final(
                 g.latencies.keys().max().map_or(0.0, |m| *m as f32),
                 deadline_cell(Some(g)),
                 start_secs,
-                first_tsc
+                first_tsc,
+                rt_pad
             );
         }
     }
