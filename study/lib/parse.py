@@ -51,3 +51,28 @@ def parse_level(text):
     if not any(r["group"] == "all" for r in rows):
         flags["failed"] = True
     return rows, rtstats, flags
+
+
+def parse_segments(text):
+    """Parses the client's Segments lines: one dict per kind and part
+    ("mean" over all answered requests, "tail99" over the slowest 1%)."""
+    out = []
+    for line in text.splitlines():
+        if not line.startswith("Segments: "):
+            continue
+        head, *parts = line[len("Segments: "):].split(" | ")
+        group, which, *kvs = head.split()
+        blocks = [(which, kvs)] + [(p.split()[0], p.split()[1:]) for p in parts]
+        err = {}
+        for which, kvs in blocks:
+            vals = dict(kv.split("=") for kv in kvs)
+            if which == "tscerr":
+                err = {"tscerr_mean": float(vals["mean"]), "tscerr_max": float(vals["max"])}
+                continue
+            row = {"group": group, "part": which}
+            for k, v in vals.items():
+                row[k] = float(v.rstrip("%"))
+            out.append(row)
+        for r in out[-2:]:
+            r.update(err)
+    return out
