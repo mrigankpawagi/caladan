@@ -37,10 +37,12 @@
  ],
  "variants": {
   "cores2": {
-   "server_kthreads": 2
+   "server_kthreads": 2,
+   "client_kthreads": 2
   },
   "cores4": {
-   "server_kthreads": 4
+   "server_kthreads": 4,
+   "client_kthreads": 2
   },
   "cores6": {
    "server_kthreads": 6,
@@ -64,8 +66,15 @@
     "n": 1000,
     "spec": "sqrt",
     "kthreads": 6
-   }
+   },
+   "qdelay_us": 10
   }
  },
- "ladder": "Q2: how ordering's gain changes with core count, and whether hint-aware ordering changes how the IOKernel grants burstable cores (the congestion signal is the oldest queued thread's age)"
+ "ladder": "Q2: how ordering's gain changes with core count, and whether hint-aware ordering changes how the IOKernel grants burstable cores (the congestion signal is the oldest queued thread's age)",
+ "client_kthreads": 2,
+ "exploratory": {
+  "burst": [
+   "hinted+rx"
+  ]
+ }
 }

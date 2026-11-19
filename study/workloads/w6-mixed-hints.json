@@ -16,28 +16,28 @@
    "name": "tight",
    "service_us": 5,
    "weight": 0.2,
-   "deadline_us": 50,
-   "slo_us": 50,
+   "deadline_us": 100,
+   "slo_us": 100,
    "scored": true,
-   "hint": "high:50:5"
+   "hint": "high:100:5"
   },
   {
    "name": "loose",
    "service_us": 5,
    "weight": 0.6,
-   "deadline_us": 200,
-   "slo_us": 200,
+   "deadline_us": 300,
+   "slo_us": 300,
    "scored": true,
-   "hint": "high:200:5"
+   "hint": "high:300:5"
   },
   {
    "name": "bulk",
    "service_us": 50,
    "weight": 0.2,
-   "deadline_us": 150,
-   "slo_us": 150,
+   "deadline_us": 100,
+   "slo_us": 100,
    "scored": false,
-   "hint": "normal:150:50"
+   "hint": "normal:100:50"
   }
  ],
  "policies": [
@@ -52,5 +52,5 @@
   "hinted+rx",
   "edf+rx"
  ],
- "ladder": "prio separates HIGH from bulk but not tight from loose; prio_edf adds that; hinted ties prio_edf (sizes never decide once deadlines exist: the null rung); edf runs bulk (due 150) before loose (due 200)"
+ "ladder": "prio separates the HIGH kinds from bulk; tight's p99 is set by the bulk job running on its own core, so prio_edf and hinted add nothing (hinted = prio_edf by construction: every thread has a deadline); edf runs bulk (due 100 us) before loose (due 300 us), so loose waits behind 50 us bulk runs"
 }

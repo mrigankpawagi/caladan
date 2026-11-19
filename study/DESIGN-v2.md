@@ -197,3 +197,29 @@ Mean waits predicted at ρ = 0.9, from `analyze.predictions()` with the handler 
 - **`enqueue_tsc` resets whenever a thread is readied again.** With a 100 µs quantum and handlers under 60 µs, the handlers here are readied once.
 - **SLO-load is censored at ≥ 0.9.** The top rungs of W2a, W2b and W4 are expected to tie on it by design. The gradient on those workloads is read from the mean waits and the price, not from SLO-load.
 - **The client sends up to 5 µs early** (`MIN_TIMER_SLEEP`). Latency is measured from the actual send.
+
+## Second amendments before the first v2 run (after the design review of this note)
+
+1. **W6 parameters changed.**
+   - **New values:** tight HIGH due 100 µs (SLO 100); loose HIGH due 300 µs (SLO 300); bulk NORMAL due 100 µs.
+   - **Reason 1:** a 50 µs SLO for tight is below what any non-preemptive order can reach. A 50 µs bulk job may already be running on the request's own core, so the floor is 50 + 5 µs.
+   - **Reason 2:** the 150/200 µs pair left `edf` only a 50 µs window to put bulk ahead of loose. The new 100/300 µs pair keeps v1's 200 µs window.
+   - **Pre-registered W6 outcome on SLO-load:** `prio` = `prio_edf` = `hinted` ≥ 0.9, `edf` ≈ 0.85 (failing on loose), `fifo` ≈ 0.75.
+   - **Mean waits** (pooled / per core) are recomputed with these deadlines by `analyze.predictions()` and printed in the report's tables.
+   - **The urgency rung (`prio_edf` over `prio`) is carried by W3.** In W6, tight's tail is set by the bulk job on its own core, not by loose requests queued ahead of it.
+2. **`hinted` = `prio_edf` on W6 is a construction check, not a prediction.** Every thread there has a deadline, so size never decides, except between deadlines that tie at µs granularity.
+3. **The decision rule, completed.**
+   - SLO-load is computed per repeat, at the first grid point where the worst scored p99/SLO exceeds 1.
+   - A difference counts if all three paired ratios lie beyond ±5% on the same side.
+   - A **tie** needs all three within ±5%; any other mix is reported as **inconclusive**.
+   - **Tie-break:** when both SLO-loads are censored at ≥ 0.9, or one is censored and the ratio cannot clear 5%, the configurations are compared by the worst scored p99/SLO at ρ = 0.9 under the same paired rule.
+4. **The mean-wait check.** The measured Δwait passes if:
+   - it lies within [pooled, per-core] for the priority orders;
+   - it is within ±25% of the pooled value for `fifo`.
+5. **W5 changes.**
+   - **Client:** every variant uses 2 client threads (2 were validated at 400 k req/s).
+   - **qdelay:** `runtime_qdelay_us 10` is set explicitly. It is the runtime's default (`runtime/ioqueues.c`), so the IOKernel already used queueing delay, not the standing-queue test.
+   - **Exploratory:** `hinted+rx` in `burst` is exploratory. `+rx` moves delay from the RX-queue term of the congestion signal to the runqueue term, so its direction is not predicted.
+6. **Steals are counted at both levels.**
+   - Each request now records the kthread whose RX queue it arrived on.
+   - The time split reports **packet stolen** (processed by another kthread than the RX queue's owner) and **thread stolen** (run by another kthread than the one that queued it) separately.

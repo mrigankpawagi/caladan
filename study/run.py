@@ -60,12 +60,14 @@ def code_sha():
 
 
 def runtime_config(ip, cfg, kthreads, policy=None, stats=False, guaranteed=None,
-                   spinning=None, prio="lc"):
+                   spinning=None, prio="lc", qdelay_us=None):
     lines = ["host_addr %s" % ip, "host_netmask %s" % cfg["netmask"],
              "host_gateway %s" % cfg["gateway"], "runtime_kthreads %d" % kthreads,
              "runtime_guaranteed_kthreads %d" % (kthreads if guaranteed is None else guaranteed),
              "runtime_spinning_kthreads %d" % (kthreads if spinning is None else spinning),
              "runtime_priority %s" % prio]
+    if qdelay_us is not None:
+        lines.append("runtime_qdelay_us %d" % qdelay_us)
     if policy and policy != STOCK:
         # "<policy>[+rx][+q<us>]": the policy, plus packets before the
         # runqueue and/or a different quantum. ("+steal", hint-aware
@@ -210,7 +212,8 @@ def setup(cfg, server, client, spec, policy, mode, stats, cal):
         repo, mode, stats = cfg["repo_stock"], "ignore", False
     parallel(lambda n: start_iokernel(n, cfg), hosts(server, client))
     server.put(runtime_config(cfg["server"]["ip"], cfg, spec["server_kthreads"], policy, stats,
-                              spec.get("guaranteed_kthreads"), spec.get("spinning_kthreads")),
+                              spec.get("guaranteed_kthreads"), spec.get("spinning_kthreads"),
+                              qdelay_us=spec.get("qdelay_us")),
                "/tmp/study_server.config")
     client.put(runtime_config(cfg["client"]["ip"], cfg, spec.get("client_kthreads", cfg["client_kthreads"])),
                "/tmp/study_client.config")

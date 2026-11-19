@@ -96,16 +96,37 @@ def slo_load(points, grid):
 
 
 def paired(a, b):
-    """Decision rule: 'better'/'worse' if every paired ratio a/b is beyond
-    +-THRESH on the same side, else 'tie'. a, b: {repeat: value}."""
-    ratios = [a[r] / b[r] for r in a if r in b and b[r] and a[r] is not None]
+    """Decision rule: 'higher'/'lower' if every paired ratio a/b is beyond
+    +-THRESH on the same side; 'tie' only if every ratio is within +-THRESH;
+    otherwise 'inconclusive'. a, b: {repeat: value}."""
+    ratios = [a[r] / b[r] for r in a if r in b and b[r] and a[r] is not None
+              and not math.isinf(a[r]) and not math.isinf(b[r])]
     if not ratios:
         return "n/a", []
     if all(x > 1 + THRESH for x in ratios):
         return "higher", ratios
     if all(x < 1 - THRESH for x in ratios):
         return "lower", ratios
-    return "tie", ratios
+    if all(abs(x - 1) <= THRESH for x in ratios):
+        return "tie", ratios
+    return "inconclusive", ratios
+
+
+def compare(c1, c2, sload, top_ratio):
+    """c1 against c2 on SLO-load by the paired rule; when both are censored
+    at the top of the grid (or the SLO-load comparison cannot clear the
+    threshold because one is censored there), the tie-break compares the
+    scored kinds' worst p99/SLO at the top load (lower is better), under the
+    same rule. Returns (verdict, basis, ratios); verdict is 'better',
+    'worse', 'tie' or 'inconclusive'."""
+    a, b = sload.get(c1, {}), sload.get(c2, {})
+    cens = lambda per: all(cz == ">=" for _, cz in per.values()) if per else False
+    if not (cens(a) and cens(b)):
+        v, rr = paired({k: x for k, (x, _) in a.items()}, {k: x for k, (x, _) in b.items()})
+        if v in ("higher", "lower") or not (cens(a) or cens(b)):
+            return {"higher": "better", "lower": "worse"}.get(v, v), "SLO-load", rr
+    v, rr = paired(top_ratio.get(c1, {}), top_ratio.get(c2, {}))
+    return {"higher": "worse", "lower": "better"}.get(v, v), "p99/SLO at top load", rr
 
 
 def analyze_workload(wid, session, variant=None):
@@ -161,11 +182,22 @@ def analyze_workload(wid, session, variant=None):
            % (", ".join(scored), ", ".join("%s %d us" % (n, kinds[n]["slo_us"]) for n in scored),
               ", ".join(price) or "none", len(reps)), ""]
 
+    top = grid[-1]
+    top_ratio = {}
+    for c in configs:
+        per = {}
+        for rep in reps:
+            vals = [p99[(c, n, top)].get(rep) for n in scored]
+            if all(v is not None for v in vals):
+                per[rep] = max(v / kinds[n]["slo_us"] for n, v in zip(scored, vals))
+        top_ratio[c] = per
     out += ["## SLO-load", "",
-            "Highest rho at which every scored kind's p99 <= its SLO (median of repeats, "
-            "range in brackets; >= means it never crossed within the grid). Compared with "
-            "fifo by the paired rule.", "",
-            "| config | SLO-load | repeats | vs fifo |", "|---|---|---|---|"]
+            "Highest rho at which every scored kind's p99 <= its SLO, per repeat (>= means it "
+            "never crossed within the grid). Compared by the paired rule; when the SLO-load "
+            "cannot decide because of the grid top, by the worst scored p99/SLO at rho %.2f."
+            % top, "",
+            "| config | SLO-load (median) | per repeat | worst p99/SLO at top | vs fifo | "
+            "vs the rung below |", "|---|---|---|---|---|---|"]
     for c in configs:
         per = sload[c]
         if not per:
@@ -173,14 +205,21 @@ def analyze_workload(wid, session, variant=None):
         vals = [v for v, _ in per.values()]
         cens = set(cz for _, cz in per.values())
         m = statistics.median(vals)
-        verdict = ""
-        if c != "fifo" and "fifo" in sload:
-            verdict, rr = paired({k: v for k, (v, _) in per.items()},
-                                 {k: v for k, (v, _) in sload["fifo"].items()})
-            verdict = "%s (%s)" % (verdict, ", ".join("%.2f" % x for x in rr))
-        out.append("| %s | %s%.2f | %s | %s |" % (
+        def verdict_vs(other):
+            if c == other or other not in sload:
+                return ""
+            v, basis, rr = compare(c, other, sload, top_ratio)
+            return "%s on %s (%s)" % (v, basis, ", ".join("%.2f" % x for x in rr))
+        base, _, extra = c.partition("+")
+        below = (base + "") if extra else (LADDER[LADDER.index(base) - 1]
+                                          if base in LADDER and LADDER.index(base) > 1 else "")
+        tr = top_ratio.get(c, {})
+        out.append("| %s | %s%.2f | %s | %s | %s | %s |" % (
             c, ">=" if cens == {">="} else ("<" if cens == {"<"} else ""), m,
-            ", ".join("%s%.2f" % (cz, v) for v, cz in (per[k] for k in sorted(per))), verdict))
+            ", ".join("%s%.2f" % (cz, v) for v, cz in (per[k] for k in sorted(per))),
+            "%.2f" % statistics.median(tr.values()) if tr else "-",
+            verdict_vs("fifo"), (verdict_vs(below) if below and base != "edf" else
+                                 verdict_vs("prio_edf") if base == "edf" else "")))
     out.append("")
 
     for rho in [x for x in grid if x >= 0.8]:
@@ -224,11 +263,13 @@ def analyze_workload(wid, session, variant=None):
     if segs:
         top = grid[-1]
         out += ["## Where the time goes at rho = %.2f (us; mean over repeats)" % top, "",
-                "lag = client send minus schedule; in = send to server enqueue (client, "
-                "IOKernel, RX queue, classification); rq = runqueue; svc = handler; out = reply "
-                "path; stolen = handler ran on another kthread than the one that queued it.", ""]
-        out += ["| config | kind | part | lag | in | rq | svc | out | stolen % |",
-                "|---|---|---|---|---|---|---|---|---|"]
+                "lag = client send minus schedule; in = send to server enqueue (delivery and "
+                "RX-queue wait, plus classification); rq = runqueue; svc = handler; out = reply "
+                "path; thread stolen = the handler ran on another kthread than the one that "
+                "queued it; packet stolen = the packet was processed by another kthread than the "
+                "owner of its RX queue.", ""]
+        out += ["| config | kind | part | lag | in | rq | svc | out | thread stolen % | "
+                "packet stolen % |", "|---|---|---|---|---|---|---|---|---|---|"]
         acc = defaultdict(list)
         for s in segs:
             if s["rho"] and abs(float(s["rho"]) - top) < 1e-9:
@@ -240,8 +281,9 @@ def analyze_workload(wid, session, variant=None):
                     if not xs:
                         continue
                     f = lambda k: statistics.mean(float(x[k]) for x in xs)
-                    out.append("| %s | %s | %s | %.1f | %.1f | %.1f | %.1f | %.1f | %.0f |" % (
-                        c, n, part, f("lag"), f("in"), f("rq"), f("svc"), f("out"), f("stolen")))
+                    out.append("| %s | %s | %s | %.1f | %.1f | %.1f | %.1f | %.1f | %.0f | %s |" % (
+                        c, n, part, f("lag"), f("in"), f("rq"), f("svc"), f("out"), f("stolen"),
+                        "%.0f" % f("pktstolen") if "pktstolen" in xs[0] else "-"))
         out.append("")
     if ctr and any(c.get("antagonist_rate") for c in ctr):
         out += ["## Batch job's work rate (units/s, median of repeats)", "",
