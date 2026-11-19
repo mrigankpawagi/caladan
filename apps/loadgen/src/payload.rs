@@ -22,7 +22,8 @@ use std::io::Read;
 ///   on replies from the UDP spawner, the server's timing of the request:
 ///   bits 16..24 kthread that queued the handler thread
 ///   bits 24..32 kthread that ran it
-///   bits 32..62 handler start minus enqueue, in cycles (saturating)
+///   bits 32..56 handler start minus enqueue, in cycles (saturating)
+///   bits 56..62 kthread whose RX queue the request arrived on
 ///   bit  63     set if the timing fields are filled in
 ///   and the reply's work_iterations is the handler start rdtsc (its
 ///   randomness is the handler end rdtsc)
@@ -40,13 +41,15 @@ pub const PAYLOAD_SIZE: usize = 32;
 pub struct Stamps {
     pub enqueue_tsc: u64,
     pub start_tsc: u64,
+    pub rx_kthread: u8,
     pub enqueue_kthread: u8,
     pub run_kthread: u8,
 }
 
 const STAMP_FLAG: u64 = 1 << 63;
 const STAMP_DELTA_SHIFT: u64 = 32;
-const STAMP_DELTA_MAX: u64 = (1 << 30) - 1;
+const STAMP_DELTA_MAX: u64 = (1 << 24) - 1;
+const STAMP_RX_SHIFT: u64 = 56;
 
 /// Value of the tagged-class field when the server ignores hints.
 pub const HINT_CLASS_IGNORED: u8 = 0xff;
@@ -126,6 +129,7 @@ impl Payload {
         self.work_iterations = s.start_tsc;
         self.hint &= 0xffff;
         self.hint |= STAMP_FLAG
+            | (((s.rx_kthread & 0x3f) as u64) << STAMP_RX_SHIFT)
             | (delta << STAMP_DELTA_SHIFT)
             | ((s.run_kthread as u64) << 24)
             | ((s.enqueue_kthread as u64) << 16);
@@ -140,6 +144,7 @@ impl Payload {
         Some(Stamps {
             enqueue_tsc: self.work_iterations.saturating_sub(delta),
             start_tsc: self.work_iterations,
+            rx_kthread: ((self.hint >> STAMP_RX_SHIFT) & 0x3f) as u8,
             enqueue_kthread: (self.hint >> 16) as u8,
             run_kthread: (self.hint >> 24) as u8,
         })

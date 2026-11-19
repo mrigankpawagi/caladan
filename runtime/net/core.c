@@ -376,6 +376,10 @@ static void iokernel_softirq(void *arg)
 {
 	struct kthread *k = arg;
 
+	/* threads spawned for this queue's packets record its owner */
+	thread_self()->rx_kthread = k - ks;
+	thread_self()->rx_kthread_set = true;
+
 	while (true) {
 		iokernel_softirq_poll(k);
 		preempt_disable();

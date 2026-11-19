@@ -47,6 +47,7 @@ struct thread {
 	bool	has_fsbase:1;
 	bool	thread_ready:1;
 	bool	hinted:1;	/* true if prio_class != NORMAL or a deadline is set */
+	bool	rx_kthread_set:1; /* rx_kthread was set when it was spawned */
 	bool	thread_running;
 	atomic8_t	interrupt_state;
 	uint8_t		prio_class;	/* THREAD_PRIO_* (incl. SOFTIRQ) */
@@ -57,6 +58,7 @@ struct thread {
 	uint64_t	enqueue_tsc;	/* when last readied (wait accounting) */
 	uint64_t	sched_key;	/* hints packed for the policy (sched_policy.h) */
 	uint16_t	enqueue_kthread; /* kthread that last readied it */
+	uint16_t	rx_kthread;	/* whose RX queue its request came from */
 	uint64_t	total_cycles;
 	uint64_t	deadline_tsc;	/* absolute rdtsc() value; 0 = none */
 	uint64_t	service_tsc;	/* expected run time in cycles; 0 = unknown */
@@ -86,6 +88,7 @@ extern void thread_free(thread_t *th);
 extern int thread_set_hints(thread_t *th, const struct thread_hints *h);
 extern void thread_get_hints(const thread_t *th, struct thread_hints *out);
 extern void thread_self_sched_info(uint64_t *enqueue_tsc,
+				   unsigned int *rx_kthread,
 				   unsigned int *enqueue_kthread,
 				   unsigned int *run_kthread);
 

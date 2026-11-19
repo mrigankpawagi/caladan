@@ -747,6 +747,8 @@ static void thread_ready_prepare(struct kthread *k, thread_t *th)
 	th->thread_ready = true;
 	th->ready_tsc = th->enqueue_tsc = rdtsc();
 	th->enqueue_kthread = k - ks;
+	if (!th->rx_kthread_set)
+		th->rx_kthread = th->enqueue_kthread;
 	if (cores_have_affinity(th->last_cpu, k->curr_cpu))
 		STAT(LOCAL_WAKES)++;
 	else
@@ -1028,6 +1030,7 @@ static __always_inline thread_t *__thread_create(void)
 #ifdef CONFIG_THREAD_HINTS
 	th->sched_key = sched_key_make(th->prio_class, 0, 0);
 #endif
+	th->rx_kthread_set = false;
 	preempt_enable();
 
 	th->stack = s;
@@ -1086,18 +1089,21 @@ int thread_set_hints(thread_t *th, const struct thread_hints *h)
 /**
  * thread_self_sched_info - when and where the running thread was last readied
  * @enqueue_tsc: set to the rdtsc() value when it was last made runnable
+ * @rx_kthread: set to the kthread whose RX queue its request arrived on (for
+ *              threads spawned per packet; otherwise its enqueue kthread)
  * @enqueue_kthread: set to the kthread that made it runnable
  * @run_kthread: set to the kthread running it now
  *
  * For measurement: e.g. a request handler can report how long it waited in
- * the runqueue and whether it was stolen.
+ * the runqueue, and whether its packet or its thread was stolen.
  */
-void thread_self_sched_info(uint64_t *enqueue_tsc, unsigned int *enqueue_kthread,
-			    unsigned int *run_kthread)
+void thread_self_sched_info(uint64_t *enqueue_tsc, unsigned int *rx_kthread,
+			    unsigned int *enqueue_kthread, unsigned int *run_kthread)
 {
 	thread_t *th = thread_self();
 
 	*enqueue_tsc = th->enqueue_tsc;
+	*rx_kthread = th->rx_kthread;
 	*enqueue_kthread = th->enqueue_kthread;
 	preempt_disable();
 	*run_kthread = myk() - ks;

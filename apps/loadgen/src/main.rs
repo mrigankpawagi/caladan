@@ -338,8 +338,9 @@ struct GroupResult {
     deadline_met: usize,
     /// Per answered request with server timing (kind groups only), in us:
     /// [client lag, send->enqueue, enqueue->start, start->end, end->receive,
-    ///  stolen (0/1), tsc latency minus the client's latency]
-    segs: Vec<[f32; 7]>,
+    ///  thread stolen (0/1), tsc latency minus the client's latency,
+    ///  packet stolen (0/1)]
+    segs: Vec<[f32; 8]>,
 }
 
 impl GroupResult {
@@ -357,18 +358,19 @@ impl GroupResult {
 }
 
 /// "n= lag= in= rq= svc= out= stolen=" over a set of segment samples.
-fn segs_summary(segs: &[&[f32; 7]]) -> String {
+fn segs_summary(segs: &[&[f32; 8]]) -> String {
     let n = segs.len().max(1) as f64;
     let mean = |i: usize| segs.iter().map(|s| s[i] as f64).sum::<f64>() / n;
     format!(
-        "n={} lag={:.2} in={:.2} rq={:.2} svc={:.2} out={:.2} stolen={:.1}%",
+        "n={} lag={:.2} in={:.2} rq={:.2} svc={:.2} out={:.2} stolen={:.1}% pktstolen={:.1}%",
         segs.len(),
         mean(0),
         mean(1),
         mean(2),
         mean(3),
         mean(4),
-        100.0 * mean(5)
+        100.0 * mean(5),
+        100.0 * mean(7)
     )
 }
 
@@ -935,12 +937,12 @@ fn process_result_final(
             if g.segs.is_empty() {
                 continue;
             }
-            let total = |s: &[f32; 7]| s[0] + s[1] + s[2] + s[3] + s[4];
+            let total = |s: &[f32; 8]| s[0] + s[1] + s[2] + s[3] + s[4];
             let mut totals: Vec<f32> = g.segs.iter().map(total).collect();
             totals.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let p99 = totals[((totals.len() - 1) as f64 * 0.99) as usize];
-            let all: Vec<&[f32; 7]> = g.segs.iter().collect();
-            let tail: Vec<&[f32; 7]> = g.segs.iter().filter(|s| total(s) >= p99).collect();
+            let all: Vec<&[f32; 8]> = g.segs.iter().collect();
+            let tail: Vec<&[f32; 8]> = g.segs.iter().filter(|s| total(s) >= p99).collect();
             let errs: Vec<f32> = g.segs.iter().map(|s| s[6].abs()).collect();
             println!(
                 "Segments: {} mean {} | tail99 {} | tscerr mean={:.2} max={:.2}",
@@ -1062,6 +1064,7 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<Sch
                         d(p.recv_tsc, end) as f32,
                         (s.enqueue_kthread != s.run_kthread) as u8 as f32,
                         (d(p.recv_tsc, p.send_tsc) - lat as f64) as f32,
+                        (s.rx_kthread != s.enqueue_kthread) as u8 as f32,
                     ])
                 }
                 _ => None,

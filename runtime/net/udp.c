@@ -846,6 +846,10 @@ static void udp_par_recv(struct trans_entry *e, struct mbuf *m)
 	 * Invalid hints are rejected without changing the thread, so it runs
 	 * unhinted.
 	 */
+	/* for measurement: whose RX queue this request came from */
+	th->rx_kthread = thread_self()->rx_kthread;
+	th->rx_kthread_set = true;
+
 	if (s->classify) {
 		struct thread_hints h = {0};
 
