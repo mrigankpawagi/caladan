@@ -141,6 +141,14 @@ static ssize_t stat_write_buf(char *buf, size_t len)
 	if (ret)
 		return ret;
 
+	/* report which policy produced these numbers, and if picks are counted */
+	ret = append_stat(&pos, end, "sched_policy", sched_policy_index());
+	if (ret)
+		return ret;
+	ret = append_stat(&pos, end, "sched_stats", sched_stats_enabled);
+	if (ret)
+		return ret;
+
 	ret = append_stat(&pos, end, "tsc", rdtsc());
 	if (ret)
 		return ret;

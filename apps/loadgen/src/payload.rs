@@ -15,8 +15,8 @@ use std::io::Read;
 /// client and server:
 ///   bits 0..8   request kind, chosen by the client (index into the server's
 ///               hint map; 0 = default kind)
-///   bits 8..16  priority class the server actually applied to the handler
-///               thread, filled in by the server on the reply
+///   bits 8..16  priority class the server tagged the handler thread with,
+///               filled in by the server on the reply
 ///               (`HINT_CLASS_IGNORED` if the server ignores hints)
 ///   bits 16..64 reserved (zero)
 pub struct Payload {
@@ -28,7 +28,7 @@ pub struct Payload {
 
 pub const PAYLOAD_SIZE: usize = 32;
 
-/// Value of the applied-class field when the server did not apply any hint.
+/// Value of the tagged-class field when the server ignores hints.
 pub const HINT_CLASS_IGNORED: u8 = 0xff;
 
 const HINT_KIND_SHIFT: u64 = 0;
@@ -92,12 +92,14 @@ impl Payload {
         (self.hint >> HINT_KIND_SHIFT) as u8
     }
 
-    /// The priority class the server reported tagging the handler thread with (the scheduler uses it only under a class-aware policy) (see `HINT_CLASS_IGNORED`).
+    /// The priority class the server reported tagging the handler thread with
+    /// (see `HINT_CLASS_IGNORED`); the scheduler uses it only under a
+    /// class-aware policy.
     pub fn class_tagged(&self) -> u8 {
         (self.hint >> HINT_CLASS_SHIFT) as u8
     }
 
-    /// Records, on the server, which class was applied to the handler thread.
+    /// Records, on the server, which class the handler thread was tagged with.
     pub fn set_class_tagged(&mut self, class: u8) {
         self.hint &= !(0xffu64 << HINT_CLASS_SHIFT);
         self.hint |= (class as u64) << HINT_CLASS_SHIFT;
@@ -110,7 +112,7 @@ impl Payload {
         Some((u64::from_be_bytes(w) >> HINT_KIND_SHIFT) as u8)
     }
 
-    /// Sets the applied-class field directly in a serialized payload.
+    /// Sets the tagged-class field directly in a serialized payload.
     pub fn set_class_tagged_on_wire(buf: &mut [u8], class: u8) {
         if let Some(w) = buf.get_mut(HINT_OFFSET..HINT_OFFSET + 8) {
             let mut h = u64::from_be_bytes((&*w).try_into().unwrap());

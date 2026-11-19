@@ -214,7 +214,7 @@ impl<'a> Buffer<'a> {
 trait LoadgenProtocol: Send + Sync {
     fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>);
     fn uses_ordered_requests(&self) -> bool;
-    /// Reads one response; returns (request index, server tsc, applied class).
+    /// Reads one response; returns (request index, server tsc, tagged class).
     fn read_response(&self, sock: &Connection, scratch: &mut Buffer)
         -> io::Result<(usize, u64, u8)>;
 }
@@ -671,7 +671,8 @@ fn get_rt_stat_values(map1: &StatMap, map0: &StatMap) -> Vec<String> {
 }
 
 /// One "key=delta" entry per runtime counter: how much each counter grew
-/// during the load step. cycles_per_us is reported as-is.
+/// during the load step. cycles_per_us, sched_policy and sched_stats are
+/// reported as-is.
 fn get_rt_stat_deltas(map1: &StatMap, map0: &StatMap) -> String {
     let mut keys: Vec<&String> = map1.keys().collect();
     keys.sort();
@@ -679,7 +680,7 @@ fn get_rt_stat_deltas(map1: &StatMap, map0: &StatMap) -> String {
         .map(|k| {
             let v1 = map1[*k];
             let v = match (k.as_str(), map0.get(*k)) {
-                ("cycles_per_us", _) | (_, None) => v1,
+                ("cycles_per_us", _) | ("sched_policy", _) | ("sched_stats", _) | (_, None) => v1,
                 (_, Some(v0)) => v1.saturating_sub(*v0),
             };
             format!("{}={}", k, v)
@@ -2250,7 +2251,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .num_args(1)
                 .help(
                     "Server: map request kinds to scheduling hints, \
-                     kind=class[:deadline_us[:service_us]],... (e.g. 0=high:60:10,1=normal)",
+                     kind=class[:deadline_us[:service_us]],... (e.g. 0=high:60:10,1=normal); \
+                     deadlines need the UDP spawner (the TCP server rejects them)",
                 ),
         )
         .arg(
@@ -2296,7 +2298,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .value_parser(["auto", "all", "class", "kind", "both"])
                 .default_value("auto")
                 .help(
-                    "Extra result rows: per server-applied class, per request kind, \
+                    "Extra result rows: per server-tagged class (on TCP, the class each \
+                     connection's thread was woken with, so not per request kind), per request kind, \
                      both, or none (all). auto = both when --kinds has several kinds.",
                 ),
         )

@@ -243,7 +243,17 @@ static int parse_runtime_sched_softirq_first(const char *name, const char *val)
 
 static int parse_runtime_sched_stats(const char *name, const char *val)
 {
-	sched_stats_enabled = !!atoi(val);
+	if (strcmp(val, "0") && strcmp(val, "1")) {
+		log_err("runtime_sched_stats must be 0 or 1");
+		return -EINVAL;
+	}
+#ifndef CONFIG_THREAD_HINTS
+	if (!strcmp(val, "1")) {
+		log_err("runtime_sched_stats needs a build with CONFIG_THREAD_HINTS=y");
+		return -EINVAL;
+	}
+#endif
+	sched_stats_enabled = !strcmp(val, "1");
 	return 0;
 }
 
