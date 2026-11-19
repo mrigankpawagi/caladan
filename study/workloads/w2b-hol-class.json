@@ -1,0 +1,45 @@
+{
+ "id": "w2b-hol-class",
+ "title": "Class only: short requests HIGH, long NORMAL",
+ "server_kthreads": 4,
+ "conns": 64,
+ "rho": [
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.85,
+  0.9
+ ],
+ "kinds": [
+  {
+   "name": "short",
+   "service_us": 5,
+   "weight": 0.8,
+   "slo_us": 100,
+   "scored": true,
+   "hint": "high"
+  },
+  {
+   "name": "long",
+   "service_us": 50,
+   "weight": 0.2,
+   "slo_us": 550,
+   "scored": false,
+   "hint": "normal"
+  }
+ ],
+ "policies": [
+  "fifo",
+  "prio",
+  "prio_edf",
+  "hinted",
+  "edf",
+  "fifo+rx",
+  "prio+rx",
+  "prio_edf+rx",
+  "hinted+rx",
+  "edf+rx"
+ ],
+ "ladder": "class decides: prio and above separate from fifo; prio_edf and hinted tie with prio by construction (no deadlines, no sizes); edf ties with fifo (no deadlines)"
+}

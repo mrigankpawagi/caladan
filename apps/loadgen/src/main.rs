@@ -87,6 +87,11 @@ pub struct Packet {
     completion_time_ns: Arc<AtomicU64>,
     completion_server_tsc: Option<u64>,
     completion_time: Option<Duration>,
+    /// Client rdtsc when the request was sent and its reply received, and the
+    /// server's timing from the reply (for the Segments breakdown).
+    send_tsc: u64,
+    recv_tsc: u64,
+    stamps: Option<payload::Stamps>,
 }
 
 mod fakework;
@@ -214,10 +219,14 @@ impl<'a> Buffer<'a> {
 trait LoadgenProtocol: Send + Sync {
     fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>);
     fn uses_ordered_requests(&self) -> bool;
-    /// Reads one response; returns (request index, server tsc, tagged class).
+    /// Reads one response.
     fn read_response(&self, sock: &Connection, scratch: &mut Buffer)
-        -> io::Result<(usize, u64, u8)>;
+        -> io::Result<Response>;
 }
+
+/// One response: (request index, server tsc at the end of the handler,
+/// tagged class, the server's timing if the reply carries it).
+pub type Response = (usize, u64, u8, Option<payload::Stamps>);
 
 impl LoadgenProtocol for Protocol {
     fn gen_req(&self, i: usize, p: &Packet, buf: &mut Vec<u8>) {
@@ -241,7 +250,7 @@ impl LoadgenProtocol for Protocol {
     }
 
     fn read_response(&self, sock: &Connection, scratch: &mut Buffer)
-        -> io::Result<(usize, u64, u8)> {
+        -> io::Result<Response> {
         match self {
             Protocol::Synthetic(proto) => proto.read_response(sock, scratch),
             Protocol::Memcached(proto) => proto.read_response(sock, scratch),
@@ -327,6 +336,11 @@ struct GroupResult {
     latencies: BTreeMap<u64, usize>,
     deadline_total: usize,
     deadline_met: usize,
+    /// Per answered request with server timing (kind groups only), in us:
+    /// [client lag, send->enqueue, enqueue->start, start->end, end->receive,
+    ///  thread stolen (0/1), tsc latency minus the client's latency,
+    ///  packet stolen (0/1)]
+    segs: Vec<[f32; 8]>,
 }
 
 impl GroupResult {
@@ -339,7 +353,34 @@ impl GroupResult {
         for (k, v) in &other.latencies {
             *self.latencies.entry(*k).or_insert(0) += v;
         }
+        self.segs.extend_from_slice(&other.segs);
     }
+}
+
+/// "n= lag= in= rq= svc= out= stolen=" over a set of segment samples.
+fn segs_summary(segs: &[&[f32; 8]]) -> String {
+    let n = segs.len().max(1) as f64;
+    let mean = |i: usize| segs.iter().map(|s| s[i] as f64).sum::<f64>() / n;
+    format!(
+        "n={} lag={:.2} in={:.2} rq={:.2} svc={:.2} out={:.2} stolen={:.1}% pktstolen={:.1}%",
+        segs.len(),
+        mean(0),
+        mean(1),
+        mean(2),
+        mean(3),
+        mean(4),
+        100.0 * mean(5),
+        100.0 * mean(7)
+    )
+}
+
+/// Mean latency (us) of the answered requests in `buckets`.
+fn latency_mean(buckets: &BTreeMap<u64, usize>) -> f64 {
+    let n: usize = buckets.values().sum();
+    if n == 0 {
+        return 0.0;
+    }
+    buckets.iter().map(|(k, v)| *k as f64 * *v as f64).sum::<f64>() / n as f64
 }
 
 /// Latency percentile `p` over `buckets`, where `sent` requests were issued
@@ -877,6 +918,43 @@ fn process_result_final(
         }
     }
 
+    if sched.groups.grouped() {
+        let mut merged: BTreeMap<String, GroupResult> = BTreeMap::new();
+        for res in &results {
+            for (k, g) in &res.groups {
+                merged.entry(k.clone()).or_default().merge(g);
+            }
+        }
+        let mut line = format!("Means: all={:.2}", latency_mean(&buckets));
+        for (key, g) in merged.iter().filter(|(k, _)| sched.groups.shows(k)) {
+            line += &format!(" {}={:.2}", key, latency_mean(&g.latencies));
+        }
+        println!("{}", line);
+        // where each kind's time went, on average and in its slowest 1%
+        // (latency from the scheduled send); tscerr compares the TSC total
+        // with the client's own (us-truncated) latency
+        for (key, g) in merged.iter().filter(|(k, _)| k.starts_with("kind:")) {
+            if g.segs.is_empty() {
+                continue;
+            }
+            let total = |s: &[f32; 8]| s[0] + s[1] + s[2] + s[3] + s[4];
+            let mut totals: Vec<f32> = g.segs.iter().map(total).collect();
+            totals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let p99 = totals[((totals.len() - 1) as f64 * 0.99) as usize];
+            let all: Vec<&[f32; 8]> = g.segs.iter().collect();
+            let tail: Vec<&[f32; 8]> = g.segs.iter().filter(|s| total(s) >= p99).collect();
+            let errs: Vec<f32> = g.segs.iter().map(|s| s[6].abs()).collect();
+            println!(
+                "Segments: {} mean {} | tail99 {} | tscerr mean={:.2} max={:.2}",
+                key,
+                segs_summary(&all),
+                segs_summary(&tail),
+                errs.iter().sum::<f32>() / errs.len() as f32,
+                errs.iter().cloned().fold(0.0f32, f32::max)
+            );
+        }
+    }
+
     if let Some(deltas) = rt_stat_deltas {
         println!("RtStats: {}", deltas);
     }
@@ -968,9 +1046,36 @@ fn process_result(sched: &RequestSchedule, packets: &mut [Packet]) -> Option<Sch
                     keys.push(format!("class:{}", class_name(c)));
                 }
             }
+            // the request's time split by where it was spent (one node, one
+            // TSC): client lag behind the schedule, send to enqueue on the
+            // server (client, IOKernel, RX queue, classification), runqueue,
+            // handler, and the reply path back to the client
+            let seg = match (answered, p.stamps, p.completion_server_tsc) {
+                (Some(lat), Some(s), Some(end)) if p.send_tsc > 0 && p.recv_tsc > 0 => {
+                    let cyc = unsafe { shenango::ffi::cycles_per_us } as f64;
+                    let d = |a: u64, b: u64| (a as f64 - b as f64) / cyc;
+                    let lag = p.actual_start.unwrap().as_secs_f64() * 1e6
+                        - p.target_start.as_secs_f64() * 1e6;
+                    Some([
+                        lag as f32,
+                        d(s.enqueue_tsc, p.send_tsc) as f32,
+                        d(s.start_tsc, s.enqueue_tsc) as f32,
+                        d(end, s.start_tsc) as f32,
+                        d(p.recv_tsc, end) as f32,
+                        (s.enqueue_kthread != s.run_kthread) as u8 as f32,
+                        (d(p.recv_tsc, p.send_tsc) - lat as f64) as f32,
+                        (s.rx_kthread != s.enqueue_kthread) as u8 as f32,
+                    ])
+                }
+                _ => None,
+            };
             for key in keys {
                 let is_class = key.starts_with("class:");
+                let is_kind = key.starts_with("kind:");
                 let g = groups.entry(key).or_default();
+                if let (Some(sg), true) = (seg, is_kind) {
+                    g.segs.push(sg);
+                }
                 match answered {
                     Some(lat) => {
                         g.sent += 1;
@@ -1193,11 +1298,13 @@ fn run_client_worker(
         wg2.follower_notify();
         for i in 0..receive_times.len() {
             match rproto.read_response(&socket2, &mut buf) {
-                Ok((mut idx, tsc, class)) => {
+                Ok((mut idx, tsc, class, stamps)) => {
+                    let now = Instant::now();
+                    let recv_tsc = shenango::rdtsc();
                     if use_ordering {
                         idx = i;
                     }
-                    receive_times[idx] = Some((Instant::now(), tsc, class));
+                    receive_times[idx] = Some((now, tsc, class, recv_tsc, stamps));
                 }
                 Err(e) => {
                     match e.raw_os_error() {
@@ -1256,6 +1363,7 @@ fn run_client_worker(
         }
 
         packet.actual_start = Some(start.elapsed());
+        packet.send_tsc = shenango::rdtsc();
 
         if let Err(e) = (&*socket).nonpartial_write(&payload[..], true) {
             match e.raw_os_error() {
@@ -1298,10 +1406,12 @@ fn run_client_worker(
                 }),
         )
         .for_each(|(c, p)| {
-            if let Some((inst, tsc, class)) = c {
+            if let Some((inst, tsc, class, recv_tsc, stamps)) = c {
                 (*p).completion_time = Some(inst - start);
                 (*p).completion_server_tsc = Some(tsc);
                 (*p).class_seen = Some(class);
+                (*p).recv_tsc = recv_tsc;
+                (*p).stamps = stamps;
             }
         });
 

@@ -1,0 +1,47 @@
+{
+ "runs": [
+  {
+   "code_sha": "2fe8036a00982028ffe4b457324c7899cfa7e5a4",
+   "mode": "hints",
+   "build": "hints",
+   "stats": "on",
+   "policies": [
+    "fifo"
+   ],
+   "repeats": 1,
+   "started": "2026-11-17T18:42:26",
+   "finished": "2026-11-17T18:43:23"
+  }
+ ],
+ "workload": {
+  "id": "probe-10us",
+  "server_kthreads": 4,
+  "conns": 64,
+  "kinds": [
+   {
+    "name": "ten",
+    "service_us": 10,
+    "weight": 1
+   }
+  ],
+  "rps": [
+   370000,
+   380000,
+   390000,
+   400000,
+   410000
+  ]
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 326.9,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node under the runtime: 32674, 32717, 32672 iterations per 100 us",
+  "overhead_us": 0.0,
+  "overhead_us_note": "set from W1: per-request cost beyond the handler's work"
+ },
+ "session": "20261117-184224",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}

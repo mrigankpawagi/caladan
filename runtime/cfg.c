@@ -235,6 +235,12 @@ static int parse_runtime_sched_policy(const char *name, const char *val)
 	return 0;
 }
 
+static int parse_runtime_sched_softirq_first(const char *name, const char *val)
+{
+	sched_softirq_first = !!atoi(val);
+	return 0;
+}
+
 static int parse_runtime_sched_stats(const char *name, const char *val)
 {
 	if (strcmp(val, "0") && strcmp(val, "1")) {
@@ -408,6 +414,7 @@ static const struct cfg_handler cfg_handlers[] = {
 	{ "runtime_quantum_us", parse_runtime_quantum_us, false },
 	{ "runtime_sched_policy", parse_runtime_sched_policy, false },
 	{ "runtime_sched_stats", parse_runtime_sched_stats, false },
+	{ "runtime_sched_softirq_first", parse_runtime_sched_softirq_first, false },
 	{ "static_arp", parse_static_arp_entry, false },
 	{ "log_level", parse_log_level, false },
 	{ "disable_watchdog", parse_watchdog_flag, false },

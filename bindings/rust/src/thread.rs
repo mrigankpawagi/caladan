@@ -57,6 +57,16 @@ impl Hints {
     }
 }
 
+/// When and where the running thread was last made runnable, and where it
+/// runs now: (enqueue rdtsc, kthread whose RX queue its request came from,
+/// enqueueing kthread, running kthread). For measurement, e.g. a handler
+/// reporting its runqueue wait and whether its packet or thread was stolen.
+pub fn self_sched_info() -> (u64, u32, u32, u32) {
+    let (mut tsc, mut xk, mut ek, mut rk) = (0u64, 0u32, 0u32, 0u32);
+    unsafe { ffi::thread_self_sched_info(&mut tsc, &mut xk, &mut ek, &mut rk) };
+    (tsc, xk, ek, rk)
+}
+
 /// Sets scheduling hints on the running thread. They take effect the next
 /// time this thread is made runnable, not for the work it is doing now. A
 /// relative deadline is converted to an absolute time here, so it counts from

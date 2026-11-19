@@ -51,6 +51,8 @@ static const char *stat_names[] = {
 	"deadline_miss_at_pick",
 	"hinted_stolen",
 	"hinted_overflow",
+	"pick_calls",
+	"pick_cycles",
 
 	/* network stack counters */
 	"rx_bytes",

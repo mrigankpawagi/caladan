@@ -1,0 +1,65 @@
+{
+ "runs": [
+  {
+   "code_sha": "b0dc7296bad8822bbd10ebdd4385cb5871e8f975",
+   "mode": "hints",
+   "build": "hints",
+   "stats": "on",
+   "policies": [
+    "fifo",
+    "prio",
+    "fifo+rx",
+    "prio+rx"
+   ],
+   "repeats": 3,
+   "started": "2026-11-17T20:34:33",
+   "finished": "2026-11-17T20:44:18"
+  }
+ ],
+ "workload": {
+  "id": "w5-rx",
+  "title": "W2b with arrived packets processed before the runqueue",
+  "server_kthreads": 4,
+  "conns": 64,
+  "kinds": [
+   {
+    "name": "short",
+    "service_us": 5,
+    "weight": 0.8,
+    "hint": "high"
+   },
+   {
+    "name": "long",
+    "service_us": 50,
+    "weight": 0.2,
+    "hint": "normal"
+   }
+  ],
+  "rho": [
+   0.5,
+   0.7,
+   0.8,
+   0.9
+  ],
+  "policies": [
+   "fifo",
+   "prio",
+   "fifo+rx",
+   "prio+rx"
+  ],
+  "note": "Prediction: with packets processed before the runqueue, the part of the short requests' wait before their thread exists (9 us at rho 0.8, 15 us at 0.9) shrinks to a few us, so prio's short wait and p99 drop further; fifo gains little in ordering (it still runs the oldest), and long requests pay a little."
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 326.9,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node under the runtime: 32674, 32717, 32672 iterations per 100 us",
+  "overhead_us": 0.2,
+  "overhead_us_note": "per-request cost beyond the handler's work: 10 us requests on 4 kthreads saturate at 393k req/s (results/probe-10us), 4 / 393k = 10.2 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel 'ias noht' with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads"
+ },
+ "session": "s1",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}

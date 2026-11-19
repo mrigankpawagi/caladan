@@ -1,0 +1,12 @@
+Group, Distribution, Target, Actual, Dropped, Schedule Adherance, Min, Median, 90th, 99th, 99.9th, 99.99th, Max, ClientDeadlineMet, Start, StartTsc, CPU Used (%)
+all, mix, 166948, 148534, 66804, 99.86, 7.0, 31725.0, inf, inf, inf, inf, 105048.0, -, 1795072724, 63663331899870296, 234.95%
+class:high, mix, 118791, 118791, -, -, 7.0, 30563.0, 83100.0, 92988.0, 95433.0, 98173.0, 98434.0, -, 1795072724, 63663331899870296, -
+class:normal, mix, 29743, 29743, -, -, 52.0, 32925.0, 85533.0, 95231.0, 97744.0, 99768.0, 105048.0, -, 1795072724, 63663331899870296, -
+kind:long, mix, 33452, 29743, 13454, 99.86, 52.0, 33836.0, inf, inf, inf, inf, 105048.0, -, 1795072724, 63663331899870296, -
+kind:short, mix, 133496, 118791, 53350, 99.86, 7.0, 31480.0, inf, inf, inf, inf, 98434.0, -, 1795072724, 63663331899870296, -
+Means: all=26889.30 class:high=26615.92 class:normal=27981.13 kind:long=27981.13 kind:short=26615.92
+Segments: kind:long mean n=107909 lag=-4.40 in=24584.51 rq=3347.90 svc=51.66 out=2.09 stolen=10.5% pktstolen=35.3% | tail99 n=1081 lag=-4.40 in=89332.74 rq=7007.87 svc=71.65 out=2.02 stolen=0.0% pktstolen=100.0% | tscerr mean=5.03 max=17.49
+Segments: kind:short mean n=430967 lag=-4.40 in=23941.24 rq=2672.36 svc=5.08 out=2.05 stolen=3.7% pktstolen=35.2% | tail99 n=4311 lag=-4.41 in=87559.68 rq=6580.19 svc=5.07 out=1.96 stolen=0.0% pktstolen=100.0% | tscerr mean=4.81 max=16.91
+RtStats: core_migrations=0 cycles_per_us=2394 deadline_miss_at_pick=0 drops=0 flow_steering_cycles=0 hinted_overflow=240451 hinted_stolen=20974 local_runs=841232 local_wakes=876244 mag_alloc=446 mag_free=0 parks=25030 pick_calls=0 pick_cycles=0 pick_deadline=0 pick_high=0 pick_inversions=0 pick_low=0 pick_normal=0 pick_scanned=0 pick_softirq=0 pool_alloc=61891 pool_free=61685 preemptions=836 program_cycles=21380036832 remote_runs=225755 remote_wakes=191159 reschedules=1066989 rq_overflow=301596 rx_bytes=44714017 rx_hw_drop=0 rx_packets=604244 rx_tcp_in_order=1 rx_tcp_out_of_order=0 rx_tcp_text_cycles=0 sched_cycles=1320499932 sched_policy=3 sched_stats=0 softirqs_local=316186 softirqs_stolen=145747 threads_stolen=36382 tsc=9661813624 tx_bytes=44684504 tx_packets=603833 txq_overflow=0 wait_cycles_high=0 wait_cycles_low=0 wait_cycles_normal=0 wait_cycles_softirq=0
+WARNING: Schedule adherance is low - the client may be saturating.
+CLIENT_EXIT=0

@@ -1,0 +1,132 @@
+{
+ "runs": [
+  {
+   "code_sha": "699fc2828cfb3a9aab80757d3e5c7d082792b8ca",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "fifo",
+    "prio",
+    "prio_edf",
+    "hinted",
+    "edf",
+    "fifo+rx",
+    "prio+rx",
+    "prio_edf+rx",
+    "hinted+rx",
+    "edf+rx"
+   ],
+   "repeats": 3,
+   "order": [
+    "edf+rx",
+    "hinted+rx",
+    "prio",
+    "hinted",
+    "fifo+rx",
+    "fifo",
+    "prio+rx",
+    "prio_edf+rx",
+    "prio_edf",
+    "edf",
+    "fifo",
+    "hinted+rx",
+    "prio+rx",
+    "prio_edf+rx",
+    "prio_edf",
+    "edf",
+    "fifo+rx",
+    "edf+rx",
+    "prio",
+    "hinted",
+    "fifo+rx",
+    "edf+rx",
+    "prio+rx",
+    "fifo",
+    "hinted+rx",
+    "prio",
+    "edf",
+    "hinted",
+    "prio_edf+rx",
+    "prio_edf"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.767\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-19T00:25:15",
+   "finished": "2026-11-19T00:57:40"
+  }
+ ],
+ "workload": {
+  "id": "w6-mixed-hints",
+  "title": "Every hint given, class and deadline disagree: NORMAL bulk work due before HIGH loose requests",
+  "server_kthreads": 4,
+  "conns": 64,
+  "rho": [
+   0.5,
+   0.6,
+   0.7,
+   0.8,
+   0.85,
+   0.9
+  ],
+  "kinds": [
+   {
+    "name": "tight",
+    "service_us": 5,
+    "weight": 0.2,
+    "deadline_us": 100,
+    "slo_us": 100,
+    "scored": true,
+    "hint": "high:100:5"
+   },
+   {
+    "name": "loose",
+    "service_us": 5,
+    "weight": 0.6,
+    "deadline_us": 300,
+    "slo_us": 300,
+    "scored": true,
+    "hint": "high:300:5"
+   },
+   {
+    "name": "bulk",
+    "service_us": 50,
+    "weight": 0.2,
+    "deadline_us": 100,
+    "slo_us": 100,
+    "scored": false,
+    "hint": "normal:100:50"
+   }
+  ],
+  "policies": [
+   "fifo",
+   "prio",
+   "prio_edf",
+   "hinted",
+   "edf",
+   "fifo+rx",
+   "prio+rx",
+   "prio_edf+rx",
+   "hinted+rx",
+   "edf+rx"
+  ],
+  "ladder": "prio separates the HIGH kinds from bulk; tight's p99 is set by the bulk job running on its own core, so prio_edf and hinted add nothing (hinted = prio_edf by construction: every thread has a deadline); edf runs bulk (due 100 us) before loose (due 300 us), so loose waits behind 50 us bulk runs"
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 318.99,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node, clock pinned at 2.4 GHz (performance governor, no turbo): 31899, 31900, 31899 iterations per 100 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel \"ias noht\" with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads; clock pinned at 2.4 GHz",
+  "handler_us": {
+   "1": 1.22,
+   "5": 5.225,
+   "10": 10.235,
+   "50": 50.26
+  },
+  "handler_us_note": "mean handler start-to-end time per nominal service time, measured in place (results/cal-handler/cal, fifo, 20k req/s, 2 repeats, Segments svc); rho = rate x mean handler time / cores"
+ },
+ "session": "v2",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}

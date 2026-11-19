@@ -1,0 +1,62 @@
+{
+ "runs": [
+  {
+   "code_sha": "b87a2b1c940544239002baeb113c053c46ffe96c",
+   "mode": "hints",
+   "build": "hints",
+   "stats": "on",
+   "policies": [
+    "fifo",
+    "prio",
+    "sjf",
+    "edf",
+    "hinted",
+    "hinted+rx"
+   ],
+   "repeats": 3,
+   "started": "2026-11-17T21:14:18",
+   "finished": "2026-11-17T21:28:58"
+  }
+ ],
+ "workload": {
+  "id": "w3-deadlines",
+  "title": "Equal work, two deadlines, same class",
+  "server_kthreads": 4,
+  "conns": 64,
+  "kinds": [
+   {
+    "name": "tight",
+    "service_us": 10,
+    "weight": 0.2,
+    "deadline_us": 50,
+    "hint": "high:50:10"
+   },
+   {
+    "name": "loose",
+    "service_us": 10,
+    "weight": 0.8,
+    "deadline_us": 500,
+    "hint": "high:500:10"
+   }
+  ],
+  "rho": [
+   0.5,
+   0.7,
+   0.8,
+   0.9
+  ]
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 326.9,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node under the runtime: 32674, 32717, 32672 iterations per 100 us",
+  "overhead_us": 0.2,
+  "overhead_us_note": "per-request cost beyond the handler's work: 10 us requests on 4 kthreads saturate at 393k req/s (results/probe-10us), 4 / 393k = 10.2 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel 'ias noht' with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads"
+ },
+ "session": "s2",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}

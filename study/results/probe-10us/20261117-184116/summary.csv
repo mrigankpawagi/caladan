@@ -1,0 +1,16 @@
+workload,policy,mode,build,stats,repeat,load_rps,rho,group,dist,sent_rps,resp_rps,dropped,adherence,p0,p50,p90,p99,p999,p9999,max,deadline_met,client_saturated,failed
+probe-10us,fifo,hints,hints,on,0,250000,,all,constant,247913.0,247913.0,0.0,99.79,11.0,13.0,18.0,28.0,39.0,268.0,329.0,,0,0
+probe-10us,fifo,hints,hints,on,0,250000,,class:normal,constant,247913.0,247913.0,0.0,99.79,11.0,13.0,18.0,28.0,39.0,268.0,329.0,,0,0
+probe-10us,fifo,hints,hints,on,0,250000,,kind:ten,constant,247913.0,247913.0,0.0,99.79,11.0,13.0,18.0,28.0,39.0,268.0,329.0,,0,0
+probe-10us,fifo,hints,hints,on,0,300000,,all,constant,297565.0,297565.0,0.0,99.8,11.0,14.0,23.0,39.0,57.0,270.0,313.0,,0,0
+probe-10us,fifo,hints,hints,on,0,300000,,class:normal,constant,297565.0,297565.0,0.0,99.8,11.0,14.0,23.0,39.0,57.0,270.0,313.0,,0,0
+probe-10us,fifo,hints,hints,on,0,300000,,kind:ten,constant,297565.0,297565.0,0.0,99.8,11.0,14.0,23.0,39.0,57.0,270.0,313.0,,0,0
+probe-10us,fifo,hints,hints,on,0,320000,,all,constant,317105.0,317105.0,0.0,99.79,11.0,14.0,27.0,47.0,70.0,270.0,309.0,,0,0
+probe-10us,fifo,hints,hints,on,0,320000,,class:normal,constant,317105.0,317105.0,0.0,99.79,11.0,14.0,27.0,47.0,70.0,270.0,309.0,,0,0
+probe-10us,fifo,hints,hints,on,0,320000,,kind:ten,constant,317105.0,317105.0,0.0,99.79,11.0,14.0,27.0,47.0,70.0,270.0,309.0,,0,0
+probe-10us,fifo,hints,hints,on,0,340000,,all,constant,337104.0,337104.0,0.0,99.81,11.0,16.0,33.0,61.0,95.0,274.0,323.0,,0,0
+probe-10us,fifo,hints,hints,on,0,340000,,class:normal,constant,337104.0,337104.0,0.0,99.81,11.0,16.0,33.0,61.0,95.0,274.0,323.0,,0,0
+probe-10us,fifo,hints,hints,on,0,340000,,kind:ten,constant,337104.0,337104.0,0.0,99.81,11.0,16.0,33.0,61.0,95.0,274.0,323.0,,0,0
+probe-10us,fifo,hints,hints,on,0,360000,,all,constant,357298.0,357298.0,0.0,99.79,11.0,19.0,44.0,87.0,149.0,347.0,442.0,,0,0
+probe-10us,fifo,hints,hints,on,0,360000,,class:normal,constant,357298.0,357298.0,0.0,99.79,11.0,19.0,44.0,87.0,149.0,347.0,442.0,,0,0
+probe-10us,fifo,hints,hints,on,0,360000,,kind:ten,constant,357298.0,357298.0,0.0,99.79,11.0,19.0,44.0,87.0,149.0,347.0,442.0,,0,0

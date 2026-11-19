@@ -1,0 +1,64 @@
+{
+ "runs": [
+  {
+   "code_sha": "f9d279716ad7081132d70b8e87804d98893a6f99",
+   "mode": "hints",
+   "variant": null,
+   "stats": "off",
+   "policies": [
+    "fifo"
+   ],
+   "repeats": 2,
+   "order": [
+    "fifo",
+    "fifo"
+   ],
+   "clock": "performance\n1\n      1 cpu MHz\t\t: 2394.731\n     19 cpu MHz\t\t: 2400.000",
+   "started": "2026-11-18T23:03:51",
+   "finished": "2026-11-18T23:04:43"
+  }
+ ],
+ "workload": {
+  "id": "cal-handler",
+  "title": "Calibration: in-place handler time of each service time, at light load",
+  "server_kthreads": 4,
+  "conns": 64,
+  "kinds": [
+   {
+    "name": "s1",
+    "service_us": 1,
+    "weight": 1
+   },
+   {
+    "name": "s5",
+    "service_us": 5,
+    "weight": 1
+   },
+   {
+    "name": "s10",
+    "service_us": 10,
+    "weight": 1
+   },
+   {
+    "name": "s50",
+    "service_us": 50,
+    "weight": 1
+   }
+  ],
+  "rps": [
+   20000
+  ],
+  "duration_s": 6
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 318.99,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node, clock pinned at 2.4 GHz (performance governor, no turbo): 31899, 31900, 31899 iterations per 100 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel \"ias noht\" with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads; clock pinned at 2.4 GHz"
+ },
+ "session": "cal",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}

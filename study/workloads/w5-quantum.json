@@ -1,0 +1,8 @@
+{"id": "w5-quantum",
+ "title": "W2b with a shorter preemption quantum",
+ "server_kthreads": 4, "conns": 64,
+ "kinds": [{"name": "short", "service_us": 5, "weight": 0.8, "hint": "high"},
+           {"name": "long", "service_us": 50, "weight": 0.2, "hint": "normal"}],
+ "rho": [0.5, 0.7, 0.8, 0.9],
+ "policies": ["fifo", "prio", "fifo+q25", "prio+q25", "fifo+q10", "prio+q10"],
+ "note": "W5 found most of a short request's remaining wait outside the runqueue: its packet waits on a core busy with a 50 us handler that is never preempted (quantum 100 us). The IOKernel preempts a thread that ran past runtime_quantum_us while its core has pending work (checked every 10 us). Prediction: with q10, prio's short wait at rho 0.9 drops well below 18 us; long requests pay for the preemptions."}

@@ -177,86 +177,11 @@ static void drain_overflow(struct kthread *l)
 
 /* count every pick in the hint-aware statistics (runtime_sched_stats) */
 bool sched_stats_enabled;
+/* process arrived packets before the runqueue (runtime_sched_softirq_first) */
+bool sched_softirq_first;
 
 #ifdef CONFIG_THREAD_HINTS
-/*
- * Intra-process scheduling policies.
- *
- * A policy decides which ready thread in this kthread's runqueue runs next.
- * All policies are compiled in, listed in sched_policies[], and one is
- * selected at startup with the runtime config option
- * "runtime_sched_policy <name>" (default: prio).
- *
- * A policy is a choose function. Contract:
- *  - it is called with k->lock held and preemption disabled, only when the
- *    ring holds 2 or more ready threads
- *  - the ring holds n ready threads, 2 <= n <= RUNTIME_RQ_SIZE, oldest first:
- *    the i-th one (0 <= i < n) is sched_rq_at(k, i)
- *  - it returns the index i of the thread to run; sched_pop_next() removes
- *    that thread and keeps the order of the others
- *  - it gets a read-only view of the kthread, must not block, allocate
- *    memory or take locks, and must run in O(n) time
- *  - it may read any thread field (prio_class, ready_tsc, deadline_tsc,
- *    service_tsc, ...) and call rdtsc()
- *  - runtime helper threads (prio_class THREAD_PRIO_SOFTIRQ) carry packet,
- *    timer, and storage processing; a policy should run them first
- */
-typedef uint32_t (*sched_choose_fn_t)(const struct kthread *k, uint32_t n);
-
-/* the i-th oldest ready thread in @k's ring */
-static inline thread_t *sched_rq_at(const struct kthread *k, uint32_t i)
-{
-	return k->rq[(k->rq_tail + i) % RUNTIME_RQ_SIZE];
-}
-
-/*
- * "fifo": run the oldest ready thread, ignoring hints. Picks what stock
- * Caladan picks; its only extra cost is this call when 2 or more threads
- * are queued.
- */
-static uint32_t choose_fifo(const struct kthread *k, uint32_t n)
-{
-	return 0;
-}
-
-/* run order by priority class: higher rank runs first */
-static const uint8_t prio_rank[THREAD_PRIO_NR] = {
-	[THREAD_PRIO_LOW] = 0,
-	[THREAD_PRIO_NORMAL] = 1,
-	[THREAD_PRIO_HIGH] = 2,
-	[THREAD_PRIO_SOFTIRQ] = 3,
-};
-
-/*
- * "prio": strict priority by class (helper threads, then HIGH, NORMAL,
- * LOW), oldest first within a class. Without hints it keeps fifo's order,
- * except that runtime helper threads always run first; it reads the class
- * of each queued thread. The stock-equivalent baseline is fifo (or a build
- * with CONFIG_THREAD_HINTS=n).
- */
-static uint32_t choose_prio(const struct kthread *k, uint32_t n)
-{
-	uint32_t i, best = 0;
-	uint8_t rank = prio_rank[sched_rq_at(k, 0)->prio_class];
-
-	for (i = 1; i < n && rank < prio_rank[THREAD_PRIO_SOFTIRQ]; i++) {
-		uint8_t r = prio_rank[sched_rq_at(k, i)->prio_class];
-
-		if (r > rank) {
-			rank = r;
-			best = i;
-		}
-	}
-	return best;
-}
-
-static const struct {
-	const char		*name;
-	sched_choose_fn_t	choose;
-} sched_policies[] = {
-	{ "fifo",	choose_fifo },
-	{ "prio",	choose_prio },
-};
+#include "sched_policy.h"
 
 /* the active policy (default: strict priority, so hints take effect) */
 static sched_choose_fn_t sched_choose = choose_prio;
@@ -315,7 +240,7 @@ static void sched_count_pick(struct kthread *k, uint32_t n, uint32_t best,
 			     thread_t *th)
 {
 	uint64_t now = rdtsc();
-	uint8_t rank = prio_rank[th->prio_class];
+	uint8_t cls = sched_key_class[th->prio_class];
 	uint32_t i;
 
 	k->stats[STAT_PICK_NORMAL + th->prio_class]++;
@@ -325,7 +250,7 @@ static void sched_count_pick(struct kthread *k, uint32_t n, uint32_t best,
 
 	for (i = 0; i < n; i++) {
 		if (i != best &&
-		    prio_rank[sched_rq_at(k, i)->prio_class] > rank) {
+		    sched_key_class[sched_rq_at(k, i)->prio_class] < cls) {
 			k->stats[STAT_PICK_INVERSIONS]++;
 			break;
 		}
@@ -356,7 +281,17 @@ static thread_t *sched_pop_next(struct kthread *k)
 	assert_spin_lock_held(&k->lock);
 	assert(n > 0 && n <= RUNTIME_RQ_SIZE);
 
-	best = n > 1 ? sched_choose(k, n) : 0;
+	if (n == 1) {
+		best = 0;
+	} else if (likely(!sched_stats_enabled)) {
+		best = sched_choose(k, n);
+	} else {
+		uint64_t t0 = rdtsc();
+
+		best = sched_choose(k, n);
+		k->stats[STAT_PICK_CALLS]++;
+		k->stats[STAT_PICK_CYCLES] += rdtsc() - t0;
+	}
 	BUG_ON(best >= n);
 	th = k->rq[(tail + best) % RUNTIME_RQ_SIZE];
 	if (unlikely(sched_stats_enabled))
@@ -429,8 +364,11 @@ static uint32_t drain_threads(struct kthread *k, struct list_head *l, uint32_t n
 			if (!th)
 				break;
 		}
-		if (update_tail && thread_is_hinted(th))
-			STAT(HINTED_STOLEN)++;
+		if (update_tail) {
+			STAT(THREADS_STOLEN)++;
+			if (thread_is_hinted(th))
+				STAT(HINTED_STOLEN)++;
+		}
 		list_add_tail(l, &th->link);
 	}
 
@@ -594,6 +532,21 @@ static __noinline void schedule(void)
 	if (unlikely(!list_empty(&l->rq_overflow)))
 		drain_overflow(l);
 
+	/*
+	 * With runtime_sched_softirq_first, turn arrived packets into threads
+	 * before picking, so the policy sees new requests and their hints.
+	 * Otherwise packets wait until the runqueue is empty, the 50 us
+	 * watchdog fires, a thread yields, or an idle core steals the work. Only
+	 * while the ring has room: threads beyond it go to the overflow list,
+	 * which no policy sees.
+	 */
+	if (sched_softirq_first &&
+	    l->rq_head - l->rq_tail < RUNTIME_RQ_SIZE &&
+	    softirq_run_locked(l)) {
+		STAT(SOFTIRQS_LOCAL)++;
+		goto done;
+	}
+
 	/* first try the local runqueue */
 	if (l->rq_head != l->rq_tail)
 		goto done;
@@ -704,6 +657,7 @@ static __always_inline void enter_schedule(thread_t *curth)
 	/* slow path: switch from the uthread stack to the runtime stack */
 	if (k->rq_head == k->rq_tail ||
 	    preempt_cede_needed(k) ||
+	    (sched_softirq_first && softirq_pending(k, now_tsc)) ||
 	    (!disable_watchdog &&
 	     unlikely(now_tsc - k->last_softirq_tsc >
 		      cycles_per_us * RUNTIME_WATCHDOG_US))) {
@@ -792,6 +746,9 @@ static void thread_ready_prepare(struct kthread *k, thread_t *th)
 	/* prepare thread to be runnable */
 	th->thread_ready = true;
 	th->ready_tsc = th->enqueue_tsc = rdtsc();
+	th->enqueue_kthread = k - ks;
+	if (!th->rx_kthread_set)
+		th->rx_kthread = th->enqueue_kthread;
 	if (cores_have_affinity(th->last_cpu, k->curr_cpu))
 		STAT(LOCAL_WAKES)++;
 	else
@@ -1070,6 +1027,10 @@ static __always_inline thread_t *__thread_create(void)
 	th->prio_class = THREAD_PRIO_NORMAL;
 	if (thread_self() && thread_self()->prio_class < THREAD_PRIO_NR_USER)
 		th->prio_class = thread_self()->prio_class;
+#ifdef CONFIG_THREAD_HINTS
+	th->sched_key = sched_key_make(th->prio_class, 0, 0);
+#endif
+	th->rx_kthread_set = false;
 	preempt_enable();
 
 	th->stack = s;
@@ -1118,7 +1079,35 @@ int thread_set_hints(thread_t *th, const struct thread_hints *h)
 	th->service_tsc = h->service_us * cycles_per_us;
 	th->hinted = (th->prio_class != THREAD_PRIO_NORMAL ||
 		      th->deadline_tsc != 0);
+#ifdef CONFIG_THREAD_HINTS
+	th->sched_key = sched_key_make(h->prio_class, h->deadline_us,
+				       h->service_us);
+#endif
 	return 0;
+}
+
+/**
+ * thread_self_sched_info - when and where the running thread was last readied
+ * @enqueue_tsc: set to the rdtsc() value when it was last made runnable
+ * @rx_kthread: set to the kthread whose RX queue its request arrived on (for
+ *              threads spawned per packet; otherwise its enqueue kthread)
+ * @enqueue_kthread: set to the kthread that made it runnable
+ * @run_kthread: set to the kthread running it now
+ *
+ * For measurement: e.g. a request handler can report how long it waited in
+ * the runqueue, and whether its packet or its thread was stolen.
+ */
+void thread_self_sched_info(uint64_t *enqueue_tsc, unsigned int *rx_kthread,
+			    unsigned int *enqueue_kthread, unsigned int *run_kthread)
+{
+	thread_t *th = thread_self();
+
+	*enqueue_tsc = th->enqueue_tsc;
+	*rx_kthread = th->rx_kthread;
+	*enqueue_kthread = th->enqueue_kthread;
+	preempt_disable();
+	*run_kthread = myk() - ks;
+	preempt_enable();
 }
 
 /**
@@ -1148,6 +1137,7 @@ void thread_mark_softirq(thread_t *th)
 	th->deadline_tsc = 0;
 	th->service_tsc = 0;
 	th->hinted = false;
+	th->sched_key = 0;	/* helper threads sort first */
 }
 
 /**

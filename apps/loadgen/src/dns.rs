@@ -101,7 +101,7 @@ impl LoadgenProtocol for DnsProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<crate::Response> {
         let scratch = buf.get_empty_buf();
         let len = sock.read(&mut scratch[..])?;
         if len == 0 {
@@ -114,6 +114,6 @@ impl LoadgenProtocol for DnsProtocol {
 
         let pos = Header::size();
         let end = pos + scratch[pos] as usize + 1;
-        Ok((pull_usize(&scratch[pos + 1..end]), 0, HINT_CLASS_IGNORED))
+        Ok((pull_usize(&scratch[pos + 1..end]), 0, HINT_CLASS_IGNORED, None))
     }
 }

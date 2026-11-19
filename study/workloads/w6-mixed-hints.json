@@ -1,0 +1,56 @@
+{
+ "id": "w6-mixed-hints",
+ "title": "Every hint given, class and deadline disagree: NORMAL bulk work due before HIGH loose requests",
+ "server_kthreads": 4,
+ "conns": 64,
+ "rho": [
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.85,
+  0.9
+ ],
+ "kinds": [
+  {
+   "name": "tight",
+   "service_us": 5,
+   "weight": 0.2,
+   "deadline_us": 100,
+   "slo_us": 100,
+   "scored": true,
+   "hint": "high:100:5"
+  },
+  {
+   "name": "loose",
+   "service_us": 5,
+   "weight": 0.6,
+   "deadline_us": 300,
+   "slo_us": 300,
+   "scored": true,
+   "hint": "high:300:5"
+  },
+  {
+   "name": "bulk",
+   "service_us": 50,
+   "weight": 0.2,
+   "deadline_us": 100,
+   "slo_us": 100,
+   "scored": false,
+   "hint": "normal:100:50"
+  }
+ ],
+ "policies": [
+  "fifo",
+  "prio",
+  "prio_edf",
+  "hinted",
+  "edf",
+  "fifo+rx",
+  "prio+rx",
+  "prio_edf+rx",
+  "hinted+rx",
+  "edf+rx"
+ ],
+ "ladder": "prio separates the HIGH kinds from bulk; tight's p99 is set by the bulk job running on its own core, so prio_edf and hinted add nothing (hinted = prio_edf by construction: every thread has a deadline); edf runs bulk (due 100 us) before loose (due 300 us), so loose waits behind 50 us bulk runs"
+}

@@ -1,0 +1,49 @@
+{
+ "id": "w4-wrong-hints",
+ "title": "Wrong sizes: W2a with 10% of long requests claiming to be short",
+ "server_kthreads": 4,
+ "conns": 64,
+ "rho": [
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.85,
+  0.9
+ ],
+ "kinds": [
+  {
+   "name": "short",
+   "service_us": 5,
+   "weight": 0.8,
+   "slo_us": 100,
+   "scored": true,
+   "hint": "normal:0:5"
+  },
+  {
+   "name": "long",
+   "service_us": 50,
+   "weight": 0.18,
+   "slo_us": 550,
+   "scored": true,
+   "hint": "normal:0:50"
+  },
+  {
+   "name": "liar",
+   "service_us": 50,
+   "weight": 0.02,
+   "slo_us": 550,
+   "scored": true,
+   "hint": "normal:0:5"
+  }
+ ],
+ "policies": [
+  "fifo",
+  "prio",
+  "prio_edf",
+  "hinted",
+  "edf",
+  "hinted+rx"
+ ],
+ "ladder": "as W2a; how much hinted keeps when 10% of long requests lie"
+}

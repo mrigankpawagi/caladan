@@ -1,0 +1,16 @@
+workload,policy,mode,build,stats,repeat,load_rps,rho,group,dist,sent_rps,resp_rps,dropped,adherence,p0,p50,p90,p99,p999,p9999,max,deadline_met,client_saturated,failed
+probe-10us,fifo,hints,hints,on,0,370000,,all,constant,367409.0,367409.0,0.0,99.8,11.0,22.0,56.0,111.0,187.0,309.0,459.0,,0,0
+probe-10us,fifo,hints,hints,on,0,370000,,class:normal,constant,367409.0,367409.0,0.0,99.8,11.0,22.0,56.0,111.0,187.0,309.0,459.0,,0,0
+probe-10us,fifo,hints,hints,on,0,370000,,kind:ten,constant,367409.0,367409.0,0.0,99.8,11.0,22.0,56.0,111.0,187.0,309.0,459.0,,0,0
+probe-10us,fifo,hints,hints,on,0,380000,,all,constant,376946.0,376946.0,0.0,99.8,11.0,27.0,73.0,152.0,253.0,638.0,896.0,,0,0
+probe-10us,fifo,hints,hints,on,0,380000,,class:normal,constant,376946.0,376946.0,0.0,99.8,11.0,27.0,73.0,152.0,253.0,638.0,896.0,,0,0
+probe-10us,fifo,hints,hints,on,0,380000,,kind:ten,constant,376946.0,376946.0,0.0,99.8,11.0,27.0,73.0,152.0,253.0,638.0,896.0,,0,0
+probe-10us,fifo,hints,hints,on,0,390000,,all,constant,387338.0,387338.0,0.0,99.8,11.0,41.0,126.0,292.0,486.0,683.0,1092.0,,0,0
+probe-10us,fifo,hints,hints,on,0,390000,,class:normal,constant,387338.0,387338.0,0.0,99.8,11.0,41.0,126.0,292.0,486.0,683.0,1092.0,,0,0
+probe-10us,fifo,hints,hints,on,0,390000,,kind:ten,constant,387338.0,387338.0,0.0,99.8,11.0,41.0,126.0,292.0,486.0,683.0,1092.0,,0,0
+probe-10us,fifo,hints,hints,on,0,400000,,all,constant,397070.0,393142.0,14199.0,99.78,14.0,19830.0,21745.0,44156.0,inf,inf,79778.0,,0,0
+probe-10us,fifo,hints,hints,on,0,400000,,class:normal,constant,393142.0,393142.0,0.0,99.78,14.0,19563.0,21618.0,40809.0,43844.0,44166.0,79778.0,,0,0
+probe-10us,fifo,hints,hints,on,0,400000,,kind:ten,constant,397070.0,393142.0,14199.0,99.78,14.0,19830.0,21745.0,44156.0,inf,inf,79778.0,,0,0
+probe-10us,fifo,hints,hints,on,0,410000,,all,constant,406914.0,389660.0,62483.0,99.79,7410.0,21066.0,23142.0,inf,inf,inf,60602.0,,0,0
+probe-10us,fifo,hints,hints,on,0,410000,,class:normal,constant,389660.0,389660.0,0.0,99.79,7410.0,21042.0,21718.0,54315.0,60254.0,60539.0,60602.0,,0,0
+probe-10us,fifo,hints,hints,on,0,410000,,kind:ten,constant,406914.0,389660.0,62483.0,99.79,7410.0,21066.0,23142.0,inf,inf,inf,60602.0,,0,0

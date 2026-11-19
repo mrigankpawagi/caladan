@@ -1,0 +1,69 @@
+{
+ "runs": [
+  {
+   "code_sha": "ebd59f23547e32277ace49c0bca40f228d897e37",
+   "mode": "hints",
+   "build": "hints",
+   "stats": "on",
+   "policies": [
+    "fifo",
+    "prio",
+    "fifo+q25",
+    "prio+q25",
+    "fifo+q10",
+    "prio+q10"
+   ],
+   "repeats": 3,
+   "started": "2026-11-17T20:17:54",
+   "finished": "2026-11-17T20:32:29"
+  }
+ ],
+ "workload": {
+  "id": "w5-quantum",
+  "title": "W2b with a shorter preemption quantum",
+  "server_kthreads": 4,
+  "conns": 64,
+  "kinds": [
+   {
+    "name": "short",
+    "service_us": 5,
+    "weight": 0.8,
+    "hint": "high"
+   },
+   {
+    "name": "long",
+    "service_us": 50,
+    "weight": 0.2,
+    "hint": "normal"
+   }
+  ],
+  "rho": [
+   0.5,
+   0.7,
+   0.8,
+   0.9
+  ],
+  "policies": [
+   "fifo",
+   "prio",
+   "fifo+q25",
+   "prio+q25",
+   "fifo+q10",
+   "prio+q10"
+  ],
+  "note": "W5 found most of a short request's remaining wait outside the runqueue: its packet waits on a core busy with a 50 us handler that is never preempted (quantum 100 us). The IOKernel preempts a thread that ran past runtime_quantum_us while its core has pending work (checked every 10 us). Prediction: with q10, prio's short wait at rho 0.9 drops well below 18 us; long requests pay for the preemptions."
+ },
+ "calibration": {
+  "fakework": "sqrt",
+  "iters_per_us": 326.9,
+  "iters_per_us_note": "loadgen --calibrate 100 --fakework sqrt on the server node under the runtime: 32674, 32717, 32672 iterations per 100 us",
+  "overhead_us": 0.2,
+  "overhead_us_note": "per-request cost beyond the handler's work: 10 us requests on 4 kthreads saturate at 393k req/s (results/probe-10us), 4 / 393k = 10.2 us",
+  "testbed_note": "server and client on one node (hp070), IOKernel 'ias noht' with loopback: control core 0, dataplane core 1, server and client kthreads on cores 2-9 with no shared hyperthreads"
+ },
+ "session": "s1",
+ "nodes": {
+  "server": "mpawagi@hp070.utah.cloudlab.us",
+  "client": "mpawagi@hp070.utah.cloudlab.us"
+ }
+}

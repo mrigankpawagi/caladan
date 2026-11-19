@@ -323,6 +323,8 @@ enum {
 	STAT_DEADLINE_MISS_AT_PICK,	/* ... made after that deadline */
 	STAT_HINTED_STOLEN,		/* hinted threads taken by work stealing */
 	STAT_HINTED_OVERFLOW,		/* hinted threads sent to the overflow list */
+	STAT_PICK_CALLS,		/* calls to the policy (runqueue depth >= 2) */
+	STAT_PICK_CYCLES,		/* cycles spent in those calls */
 
 	/* network stack counters */
 	STAT_RX_BYTES,
@@ -767,6 +769,7 @@ extern int sched_policy_select(const char *name);
 extern const char *sched_policy_name(void);
 extern int sched_policy_index(void);
 extern bool sched_stats_enabled;
+extern bool sched_softirq_first;
 
 /**
  * thread_is_hinted - true if @th carries scheduling hints. Compiles to false

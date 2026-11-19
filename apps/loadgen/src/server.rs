@@ -15,6 +15,7 @@ use crate::payload::HINT_CLASS_IGNORED;
 use crate::Connection;
 use crate::FakeWorker;
 use crate::Payload;
+use crate::payload::Stamps;
 use crate::KBUFSIZE;
 use crate::PAYLOAD_SIZE;
 
@@ -181,6 +182,8 @@ pub fn run_spawner_server(addr: SocketAddrV4, workerspec: &str, hints: ServerHin
         SPAWNER_WORKER = Some(FakeWorker::create(workerspec).unwrap());
     }
     extern "C" fn echo(d: *mut shenango::ffi::udp_spawn_data) {
+        let start_tsc = shenango::rdtsc();
+        let (enqueue_tsc, rx_k, enqueue_k, run_k) = thread::self_sched_info();
         unsafe {
             let buf = slice::from_raw_parts((*d).buf as *mut u8, (*d).len as usize);
             // never panic on wire input (a panic here would abort the server)
@@ -199,8 +202,15 @@ pub fn run_spawner_server(addr: SocketAddrV4, workerspec: &str, hints: ServerHin
                 thread::self_class()
             };
             worker.work(payload.work_iterations, payload.randomness);
-            payload.set_class_tagged(class);
             payload.randomness = shenango::rdtsc();
+            payload.set_stamps(Stamps {
+                enqueue_tsc,
+                start_tsc,
+                rx_kthread: rx_k as u8,
+                enqueue_kthread: enqueue_k as u8,
+                run_kthread: run_k as u8,
+            });
+            payload.set_class_tagged(class);
             let mut array = ArrayVec::<_, PAYLOAD_SIZE>::new();
             payload.serialize_into(&mut array).unwrap();
             let _ = UdpSpawner::reply(d, array.as_slice());
