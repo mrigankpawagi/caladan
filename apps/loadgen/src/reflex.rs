@@ -166,7 +166,7 @@ impl LoadgenProtocol for ReflexProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<crate::Response> {
         let scratch = buf.get_empty_buf();
         sock.read_exact(&mut scratch[..REFLEX_HDR_SZ])?;
         let hdr = PacketHeader::read(&mut &scratch[..])?;
@@ -181,6 +181,6 @@ impl LoadgenProtocol for ReflexProtocol {
 
         // TODO: more error checking?
 
-        Ok((hdr.req_handle - 1, hdr.tsc, HINT_CLASS_IGNORED))
+        Ok((hdr.req_handle - 1, hdr.tsc, HINT_CLASS_IGNORED, None))
     }
 }

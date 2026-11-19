@@ -240,7 +240,7 @@ impl LoadgenProtocol for MemcachedProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<crate::Response> {
         let scratch = buf.get_empty_buf();
         let hdr = match self.tport {
             Transport::Udp => {
@@ -270,6 +270,6 @@ impl LoadgenProtocol for MemcachedProtocol {
                 format!("Not NoError {}", hdr.vbucket_id_or_status),
             ));
         }
-        Ok((0, hdr.cas, HINT_CLASS_IGNORED))
+        Ok((0, hdr.cas, HINT_CLASS_IGNORED, None))
     }
 }

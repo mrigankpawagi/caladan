@@ -2,6 +2,7 @@ use crate::Buffer;
 use crate::Connection;
 use crate::LoadgenProtocol;
 use crate::Packet;
+use crate::Response;
 use crate::Transport;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -18,7 +19,13 @@ use std::io::Read;
 ///   bits 8..16  priority class the server tagged the handler thread with,
 ///               filled in by the server on the reply
 ///               (`HINT_CLASS_IGNORED` if the server ignores hints)
-///   bits 16..64 reserved (zero)
+///   on replies from the UDP spawner, the server's timing of the request:
+///   bits 16..24 kthread that queued the handler thread
+///   bits 24..32 kthread that ran it
+///   bits 32..62 handler start minus enqueue, in cycles (saturating)
+///   bit  63     set if the timing fields are filled in
+///   and the reply's work_iterations is the handler start rdtsc (its
+///   randomness is the handler end rdtsc)
 pub struct Payload {
     pub work_iterations: u64,
     pub index: u64,
@@ -27,6 +34,19 @@ pub struct Payload {
 }
 
 pub const PAYLOAD_SIZE: usize = 32;
+
+/// The server's timing of one request (same TSC as the client: one node).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct Stamps {
+    pub enqueue_tsc: u64,
+    pub start_tsc: u64,
+    pub enqueue_kthread: u8,
+    pub run_kthread: u8,
+}
+
+const STAMP_FLAG: u64 = 1 << 63;
+const STAMP_DELTA_SHIFT: u64 = 32;
+const STAMP_DELTA_MAX: u64 = (1 << 30) - 1;
 
 /// Value of the tagged-class field when the server ignores hints.
 pub const HINT_CLASS_IGNORED: u8 = 0xff;
@@ -59,7 +79,7 @@ impl LoadgenProtocol for SyntheticProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<Response> {
         let scratch = buf.get_empty_buf();
         sock.read_exact(&mut scratch[..PAYLOAD_SIZE])?;
         let payload = Payload::deserialize(&mut &scratch[..])?;
@@ -67,6 +87,7 @@ impl LoadgenProtocol for SyntheticProtocol {
             payload.index as usize,
             payload.randomness,
             payload.class_tagged(),
+            payload.stamps(),
         ))
     }
 }
@@ -97,6 +118,31 @@ impl Payload {
     /// class-aware policy.
     pub fn class_tagged(&self) -> u8 {
         (self.hint >> HINT_CLASS_SHIFT) as u8
+    }
+
+    /// Records, on the server, when and where the request was handled.
+    pub fn set_stamps(&mut self, s: Stamps) {
+        let delta = s.start_tsc.saturating_sub(s.enqueue_tsc).min(STAMP_DELTA_MAX);
+        self.work_iterations = s.start_tsc;
+        self.hint &= 0xffff;
+        self.hint |= STAMP_FLAG
+            | (delta << STAMP_DELTA_SHIFT)
+            | ((s.run_kthread as u64) << 24)
+            | ((s.enqueue_kthread as u64) << 16);
+    }
+
+    /// The server's timing, if the reply carries it.
+    pub fn stamps(&self) -> Option<Stamps> {
+        if self.hint & STAMP_FLAG == 0 {
+            return None;
+        }
+        let delta = (self.hint >> STAMP_DELTA_SHIFT) & STAMP_DELTA_MAX;
+        Some(Stamps {
+            enqueue_tsc: self.work_iterations.saturating_sub(delta),
+            start_tsc: self.work_iterations,
+            enqueue_kthread: (self.hint >> 16) as u8,
+            run_kthread: (self.hint >> 24) as u8,
+        })
     }
 
     /// Records, on the server, which class the handler thread was tagged with.

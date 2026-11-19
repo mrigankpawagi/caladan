@@ -190,7 +190,7 @@ impl LoadgenProtocol for HttpProtocol {
         &self,
         mut sock: &Connection,
         buf: &mut Buffer,
-    ) -> io::Result<(usize, u64, u8)> {
+    ) -> io::Result<crate::Response> {
         let mut pstate = ParseState::new();
 
         if buf.data_size() == 0 {
@@ -238,7 +238,7 @@ impl LoadgenProtocol for HttpProtocol {
                 }
             }
 
-            return Ok((0, 0, HINT_CLASS_IGNORED));
+            return Ok((0, 0, HINT_CLASS_IGNORED, None));
         }
     }
 }
