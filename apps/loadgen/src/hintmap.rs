@@ -64,6 +64,11 @@ impl HintMap {
         self.table.get(kind as usize).copied().unwrap_or_default()
     }
 
+    /// True if any kind is mapped to a deadline.
+    pub fn has_deadlines(&self) -> bool {
+        self.table.iter().any(|h| h.deadline_us > 0)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.table.iter().all(|h| *h == Hints::default())
     }

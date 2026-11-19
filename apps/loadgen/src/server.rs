@@ -8,7 +8,7 @@ use std::net::SocketAddrV4;
 use std::os::raw::c_void;
 use std::slice;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::hintmap::HintMap;
 use crate::payload::HINT_CLASS_IGNORED;
@@ -62,9 +62,12 @@ pub fn run_linux_udp_server(config: AppConfig) {
                 let mut buf = vec![0; KBUFSIZE];
                 loop {
                     let (len, remote_addr) = socket.recv_from(&mut buf[..]).unwrap();
-                    let payload = Payload::deserialize(&mut &buf[..len]).unwrap();
+                    let payload = match Payload::deserialize(&mut &buf[..len]) {
+                        Ok(p) => p,
+                        Err(_) => continue, // short or malformed datagram
+                    };
                     worker.work(payload.work_iterations, payload.randomness);
-                    Payload::set_class_applied_on_wire(&mut buf[..len], HINT_CLASS_IGNORED);
+                    Payload::set_class_tagged_on_wire(&mut buf[..len], HINT_CLASS_IGNORED);
                     socket.send_to(&buf[..len], remote_addr).unwrap();
                 }
             })
@@ -85,15 +88,19 @@ fn socket_worker(socket: &mut Connection, worker: Arc<FakeWorker>, hints: Server
         socket.read_exact(&mut v[..PAYLOAD_SIZE])?;
         let mut payload = Payload::deserialize(&mut &v[..PAYLOAD_SIZE])?;
         v.clear();
+        // The thread was woken for this request under the hints set while
+        // handling the previous one, so report those, then tag the thread for
+        // its next wakeup with this request's kind.
         let class = match &hints {
             ServerHints::Ignore => HINT_CLASS_IGNORED,
             ServerHints::Apply(map) => {
+                let class = thread::self_class();
                 let _ = thread::set_self_hints(&map.get(payload.kind()));
-                thread::self_class()
+                class
             }
         };
         worker.work(payload.work_iterations, payload.randomness);
-        payload.set_class_applied(class);
+        payload.set_class_tagged(class);
         payload.randomness = shenango::rdtsc();
         payload.serialize_into(&mut v)?;
         Ok(socket.write_all(&v[..])?)
@@ -117,6 +124,15 @@ pub fn run_tcp_server(config: AppConfig) {
     let addr = config.addrs[0];
     let worker = config.fakeworker();
     let hints = ServerHints::from_config(&config);
+    if let ServerHints::Apply(map) = &hints {
+        // on TCP a hint set while handling one request applies to the next
+        // wakeup, so a relative deadline would be measured from the wrong
+        // request; only classes and service times are meaningful
+        if map.has_deadlines() {
+            eprintln!("--hintmap deadlines are not supported with the TCP server; use UDP");
+            std::process::exit(1);
+        }
+    }
     let tcpq = backend.create_tcp_listener(addr).unwrap();
     println!("Bound to address {}", addr);
     println!("{}", hints.describe());
@@ -134,17 +150,24 @@ pub fn run_tcp_server(config: AppConfig) {
     }
 }
 
-/// Hint map used by the UDP spawner's classifier, set once at startup.
-static SPAWNER_HINTS: OnceLock<HintMap> = OnceLock::new();
 /// Whether the UDP spawner ignores hints (replies report HINT_CLASS_IGNORED).
 static SPAWNER_IGNORE_HINTS: AtomicBool = AtomicBool::new(false);
 
 /// Runs in the runtime's packet-processing thread before the handler thread
 /// is queued: reads the request kind from the datagram and fills in the hints
-/// the server's map assigns to it. Must stay short and must not block.
-extern "C" fn classify(buf: *const c_void, len: usize, out: *mut shenango::ffi::thread_hints) {
-    let data = unsafe { slice::from_raw_parts(buf as *const u8, len) };
-    if let (Some(kind), Some(map)) = (Payload::kind_from_wire(data), SPAWNER_HINTS.get()) {
+/// the server's map (`arg`) assigns to it. Must stay short and must not block.
+extern "C" fn classify(
+    arg: *mut c_void,
+    d: *const shenango::ffi::udp_spawn_data,
+    out: *mut shenango::ffi::thread_hints,
+) {
+    let (map, data) = unsafe {
+        (
+            &*(arg as *const HintMap),
+            slice::from_raw_parts((*d).buf as *const u8, (*d).len as usize),
+        )
+    };
+    if let Some(kind) = Payload::kind_from_wire(data) {
         let h = map.get(kind);
         if h != thread::Hints::default() {
             unsafe { h.write_to(out) };
@@ -160,7 +183,14 @@ pub fn run_spawner_server(addr: SocketAddrV4, workerspec: &str, hints: ServerHin
     extern "C" fn echo(d: *mut shenango::ffi::udp_spawn_data) {
         unsafe {
             let buf = slice::from_raw_parts((*d).buf as *mut u8, (*d).len as usize);
-            let mut payload = Payload::deserialize(&mut &buf[..]).unwrap();
+            // never panic on wire input (a panic here would abort the server)
+            let mut payload = match Payload::deserialize(&mut &buf[..]) {
+                Ok(p) => p,
+                Err(_) => {
+                    UdpSpawner::release_data(d);
+                    return;
+                }
+            };
             #[allow(static_mut_refs)]
             let worker = SPAWNER_WORKER.as_ref().unwrap();
             let class = if SPAWNER_IGNORE_HINTS.load(Ordering::Relaxed) {
@@ -169,7 +199,7 @@ pub fn run_spawner_server(addr: SocketAddrV4, workerspec: &str, hints: ServerHin
                 thread::self_class()
             };
             worker.work(payload.work_iterations, payload.randomness);
-            payload.set_class_applied(class);
+            payload.set_class_tagged(class);
             payload.randomness = shenango::rdtsc();
             let mut array = ArrayVec::<_, PAYLOAD_SIZE>::new();
             payload.serialize_into(&mut array).unwrap();
@@ -187,8 +217,9 @@ pub fn run_spawner_server(addr: SocketAddrV4, workerspec: &str, hints: ServerHin
             }
             ServerHints::Apply(map) if map.is_empty() => UdpSpawner::new(addr, echo).unwrap(),
             ServerHints::Apply(map) => {
-                SPAWNER_HINTS.set((*map).clone()).unwrap();
-                UdpSpawner::new_classified(addr, echo, classify).unwrap()
+                // the map lives as long as the server (it never exits)
+                let arg = Box::into_raw(Box::new((*map).clone())) as *mut c_void;
+                UdpSpawner::new_classified(addr, echo, classify, arg).unwrap()
             }
         }
     };
