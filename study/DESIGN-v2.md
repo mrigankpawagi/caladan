@@ -223,3 +223,21 @@ Mean waits predicted at ρ = 0.9, from `analyze.predictions()` with the handler 
 6. **Steals are counted at both levels.**
    - Each request now records the kthread whose RX queue it arrived on.
    - The time split reports **packet stolen** (processed by another kthread than the RX queue's owner) and **thread stolen** (run by another kthread than the one that queued it) separately.
+
+## Third amendment (2026-11-19), after the first v2 burst runs; burst only
+
+**What happened in the first burst runs.**
+- In the first v2 runs of W5 `burst`, one server instance swept all six load levels.
+- Many levels collapsed: the burstable cores were never granted, the server stayed at 2.0 cores and its threads never parked. The collapses were not monotone in load.
+- The batch job's work rate was lost to a CSV-header bug in the harness (fixed in `run.py`).
+
+**The diagnostic.**
+- `results/w5-cores/diag`: fifo, ρ = 0.7, a fresh server for each of 6 runs, IOKernel `stats` on.
+- **No collapse in 6 of 6.** The server used 3.1 cores, about 55 k batch-job preemptions per run, and the batch job did about 1.70 M work units/s.
+- So the collapses came from state carried over between levels within one server instance, not from the load level.
+
+**Change.**
+- `burst` now runs a **fresh server per level**, like W1.
+- The **prediction is unchanged:** at ρ ≥ 0.6, the batch job's work rate is at least 5% lower under `prio`/`hinted` than under `fifo`, and the short-request gain is preserved.
+- `hinted+rx` stays exploratory.
+- The first burst runs stay in the record (session `v2`), reported as invalid for the batch-rate question.

@@ -308,7 +308,7 @@ def analyze_workload(wid, session, variant=None):
     open(os.path.join(d, "tables%s.md" % ("-" + variant if variant else "")), "w").write(
         "\n".join(out) + "\n")
     plot_workload(name, spec, kinds, scored, configs, grid, p99, sload, segs)
-    return {"sload": sload, "configs": configs, "scored": scored}
+    return {"sload": sload, "configs": configs, "scored": scored, "top_ratio": top_ratio}
 
 
 def setup_axes(ax):
@@ -468,7 +468,9 @@ def delta_wait_table(wid, session, variant=None):
                 m = statistics.median(ds)
                 lo = p1[base][n] - p0[base][n]
                 hi = c1[base][n] - c0[base][n]
-                if base == "fifo" or base == "stock":
+                fifo_like = base in ("fifo", "stock") or any(
+                    "fifo" in g and base in g for g in CONSTRUCTION_TIES.get(wid, []))
+                if fifo_like:
                     ok = abs(m - lo) <= 0.25 * lo
                 else:
                     ok = min(lo, hi) <= m <= max(lo, hi)
@@ -506,12 +508,13 @@ def scorecard(session):
             pass
     configs = order(set(c for r in res.values() for c in r["configs"]))
     lines = ["# Ladder scorecard, session %s" % session, "",
-             "SLO-load (median of repeats; >= means it never crossed within the grid). Workloads "
-             "ordered by the information they need. Cells marked = must tie with the others "
-             "marked = in the same column by construction.", "",
+             "SLO-load (median of repeats; >= means it never crossed within the grid, followed "
+             "by the pre-registered tie-break in brackets: the worst scored p99/SLO at rho 0.9, "
+             "lower is better). Workloads ordered by the information they need. Cells marked = "
+             "must tie with the others marked = in the same column by construction.", "",
              "| config | " + " | ".join(lab for wid, lab in WORKLOAD_ORDER if wid in res) + " |",
              "|---|" + "---|" * len(res)]
-    fig, ax = plt.subplots(figsize=(1.6 * len(res) + 2.2, 0.42 * len(configs) + 1.4))
+    fig, ax = plt.subplots(figsize=(1.8 * len(res) + 2.2, 0.55 * len(configs) + 1.6))
     fig.patch.set_facecolor("#fcfcfb")
     ax.set_facecolor("#fcfcfb")
     cols = [wid for wid, _ in WORKLOAD_ORDER if wid in res]
@@ -529,11 +532,14 @@ def scorecard(session):
             ge = all(cz == ">=" for _, cz in per.values())
             tie = any(c.split("+")[0] in g and "+" not in c
                       for g in CONSTRUCTION_TIES.get(wid, []))
+            tr = res[wid]["top_ratio"].get(c, {})
             txt = "%s%.2f%s" % (">=" if ge else "", m, " =" if tie else "")
+            if ge and tr:  # the pre-registered tie-break inside censored cells
+                txt += "\n(%.2f)" % statistics.median(tr.values())
             cells.append(txt)
-            shade = min(max((m - 0.7) / 0.2, 0), 1)
+            shade = min(max((m - 0.7) / 0.2, 0.0), 1.0)  # floats: an int indexes the colormap
             ax.add_patch(plt.Rectangle((j, i), 0.96, 0.9, color=cmap(shade)))
-            ax.text(j + 0.48, i + 0.45, txt, ha="center", va="center", fontsize=8.5,
+            ax.text(j + 0.48, i + 0.45, txt, ha="center", va="center", fontsize=8,
                     color="#ffffff" if shade > 0.55 else "#0b0b0b")
         lines.append("| %s | %s |" % (c, " | ".join(cells)))
     ax.set_xlim(0, len(cols))
@@ -546,7 +552,8 @@ def scorecard(session):
         sp.set_visible(False)
     ax.tick_params(length=0)
     ax.set_title("SLO-load: highest load meeting every scored SLO (higher is better; "
-                 "= marks a tie by construction)", fontsize=9.5, loc="left", pad=28,
+                 "= marks a tie by construction;\nin brackets for >=0.90: worst scored "
+                 "p99/SLO at rho 0.9, lower is better)", fontsize=9.5, loc="left", pad=28,
                  color="#0b0b0b")
     fig.tight_layout()
     for ext, kw in (("svg", {}), ("png", {"dpi": 150})):
@@ -606,6 +613,35 @@ def timesplit(wid, session, kind, variant=None):
     plt.close(fig)
 
 
+def aa_noise(session):
+    """Configurations identical by construction, used as A/A tests: the spread
+    of their medians per metric (max/min - 1), per workload and load."""
+    out = ["| workload | identical configs | rho | scored p99 spread | price p99 spread |",
+           "|---|---|---|---|---|"]
+    for wid, _ in WORKLOAD_ORDER:
+        try:
+            d, meta, spec, rows, segs, ctr = load_session(wid, session)
+        except FileNotFoundError:
+            continue
+        kinds = {k["name"]: k for k in spec["kinds"]}
+        for group in CONSTRUCTION_TIES.get(wid, []):
+            for rho in ("0.8", "0.9"):
+                def spread(names):
+                    vals = []
+                    for c in group:
+                        xs = [fnum(r["p99"]) for r in rows if r["policy"] == c and r["rho"] == rho
+                              and r["group"] in ["kind:" + n for n in names]]
+                        xs = [x for x in xs if x is not None and not math.isinf(x)]
+                        if xs:
+                            vals.append(statistics.median(xs))
+                    return "%.1f%%" % ((max(vals) / min(vals) - 1) * 100) if len(vals) > 1 else "-"
+                sc = [n for n, k in kinds.items() if k.get("scored")]
+                pr = [n for n, k in kinds.items() if not k.get("scored")]
+                out.append("| %s | %s | %s | %s | %s |" % (
+                    wid, ", ".join(group), rho, spread(sc), spread(pr) if pr else "-"))
+    return out
+
+
 def knee_brackets(wid, session, bound=70.0):
     """Stage-2 levels: a 10k grid strictly inside each configuration's
     stage-1 bracket (last level passing in every repeat, first failing)."""
@@ -653,6 +689,7 @@ def main():
         return
     if a.scorecard:
         scorecard(a.args[0])
+        print("\n".join(aa_noise(a.args[0])))
         return
     if a.split:
         timesplit(a.args[0], a.args[1], a.split, a.variant)

@@ -67,7 +67,8 @@
     "spec": "sqrt",
     "kthreads": 6
    },
-   "qdelay_us": 10
+   "qdelay_us": 10,
+   "fresh_per_level": true
   }
  },
  "ladder": "Q2: how ordering's gain changes with core count, and whether hint-aware ordering changes how the IOKernel grants burstable cores (the congestion signal is the oldest queued thread's age)",

@@ -155,10 +155,13 @@ def hosts(server, client):
     return [server] if server.ssh == client.ssh else [server, client]
 
 
+IOK_EXTRA = ""  # extra IOKernel arguments (--iok-extra), e.g. "stats" for a diagnostic
+
+
 def start_iokernel(node, cfg):
     node.run(KILL, timeout=60, check=False)
-    node.bg("cd %s && exec sudo ./iokerneld %s nicpci %s" % (
-        cfg["repo"], cfg["iokernel_args"], cfg["nic_pci"]), "/tmp/study_iok.log")
+    node.bg("cd %s && exec sudo ./iokerneld %s %s nicpci %s" % (
+        cfg["repo"], cfg["iokernel_args"], IOK_EXTRA, cfg["nic_pci"]), "/tmp/study_iok.log")
     node.wait_for("/tmp/study_iok.log", "running dataplane", 60,
                   fail_pattern="PANIC|panic|Error|failed")
 
@@ -303,6 +306,9 @@ def experiment(args, cfg, server, client, spec, policy, repeat, out_dir, cal):
         out = run_level(cfg, client, spec, rps, cal)
         with open(os.path.join(raw_dir, "rps%d.out" % rps), "w") as f:
             f.write(keep_lines(out))
+        if IOK_EXTRA:  # diagnostics: keep the IOKernel's own log for this level
+            with open(os.path.join(raw_dir, "rps%d.iok" % rps), "w") as f:
+                f.write(server.run("cat /tmp/study_iok.log", check=False))
         rows, rt, flags = parse.parse_level(out)
         for r in rows:
             summary.append(dict(base, **{f: r.get(f) for f in parse.ROW_FIELDS + ["mean"]},
@@ -360,6 +366,7 @@ def main():
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--mode", default="hints", choices=["hints", "ignore"])
     ap.add_argument("--variant", help="apply this entry of the workload's variants")
+    ap.add_argument("--iok-extra", default="", help="extra IOKernel arguments, e.g. 'stats'")
     ap.add_argument("--rps", help="comma-separated offered loads replacing the workload's "
                     "(e.g. a W1 stage-2 refinement inside a bracket)")
     ap.add_argument("--stats", default="off", choices=["on", "off"],
@@ -370,6 +377,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
+    global IOK_EXTRA
+    IOK_EXTRA = args.iok_extra
     spec = json.load(open(args.workload))
     if args.variant:
         spec = dict(spec, **spec["variants"][args.variant], variant=args.variant)
